@@ -1,0 +1,177 @@
+{
+    "version": 8,
+    "configurePresets": [
+        {
+            "name": "windows-clang-debug-x64",
+            "displayName": "Windows Clang Debug x64",
+            "description": "Sets Ninja generator, build and install directory",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/toolchain-windows-clang.cmake",
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/${presetName}/install"
+            }
+        },
+        {
+            "name": "windows-clang-release-x64",
+            "displayName": "Windows Clang Release x64",
+            "description": "Sets Ninja generator, build and install directory",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/toolchain-windows-clang.cmake",
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/${presetName}/install"
+            }
+        },
+        {
+            "name": "windows-clang-release-cross-x64",
+            "displayName": "Windows Clang Release Cross x64",
+            "description": "Sets Ninja generator, build and install directory",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/toolchain-windows-clang-cross.cmake",
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/${presetName}/install"
+            }
+        },
+        {
+            "name": "linux-clang-debug-x64",
+            "displayName": "Linux Clang Debug x64",
+            "description": "Sets Ninja generator, build and install directory",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/toolchain-linux-clang.cmake",
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/${presetName}/install"
+            }
+        },
+        {
+            "name": "linux-clang-release-x64",
+            "displayName": "Linux Clang Release x64",
+            "description": "Sets Ninja generator, build and install directory",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/toolchain-linux-clang.cmake",
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/${presetName}/install"
+            }
+        },
+        {
+            "name": "macos-clang-debug",
+            "displayName": "macOS Clang Debug",
+            "description": "Sets Ninja generator, build and install directory",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Debug",
+                "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/toolchain-macos-clang.cmake",
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/${presetName}/install"
+            }
+        },
+        {
+            "name": "macos-clang-release",
+            "displayName": "macOS Clang Release",
+            "description": "Sets Ninja generator, build and install directory",
+            "generator": "Ninja",
+            "binaryDir": "${sourceDir}/build/${presetName}",
+            "cacheVariables": {
+                "CMAKE_BUILD_TYPE": "Release",
+                "CMAKE_TOOLCHAIN_FILE": "${sourceDir}/cmake/toolchain-macos-clang.cmake",
+                "CMAKE_INSTALL_PREFIX": "${sourceDir}/build/${presetName}/install"
+            }
+        }
+    ],
+    "buildPresets": [
+        {
+            "name": "windows-clang-debug-x64",
+            "configurePreset": "windows-clang-debug-x64",
+            "description": "Debug build for Windows using Clang",
+            "inheritConfigureEnvironment": true
+        },
+        {
+            "name": "windows-clang-release-x64",
+            "configurePreset": "windows-clang-release-x64",
+            "description": "Debug build for Windows using Clang",
+            "inheritConfigureEnvironment": true
+        },
+        {
+            "name": "windows-clang-release-cross-x64",
+            "configurePreset": "windows-clang-release-cross-x64",
+            "description": "Debug build for Windows using Clang",
+            "inheritConfigureEnvironment": true
+        },
+        {
+            "name": "linux-clang-debug-x64",
+            "configurePreset": "linux-clang-debug-x64",
+            "description": "Debug build for Linux using Clang",
+            "inheritConfigureEnvironment": true
+        },
+        {
+            "name": "linux-clang-release-x64",
+            "configurePreset": "linux-clang-release-x64",
+            "description": "Release build for Linux using Clang",
+            "inheritConfigureEnvironment": true
+        },
+        {
+            "name": "macos-clang-debug",
+            "configurePreset": "macos-clang-debug",
+            "description": "Debug build for macOS using Clang",
+            "inheritConfigureEnvironment": true
+        },
+        {
+            "name": "macos-clang-release",
+            "configurePreset": "macos-clang-release",
+            "description": "Release build for macOS using Clang",
+            "inheritConfigureEnvironment": true
+        }
+    ],
+    "packagePresets": [
+        {
+            "name": "package-windows-clang-debug-x64",
+            "description": "",
+            "displayName": "",
+            "configurePreset": "windows-clang-debug-x64"
+        },
+        {
+            "name": "package-windows-clang-release-x64",
+            "description": "",
+            "displayName": "",
+            "configurePreset": "windows-clang-release-x64"
+        },
+        {
+            "name": "package-windows-clang-release-cross-x64",
+            "description": "",
+            "displayName": "",
+            "configurePreset": "windows-clang-release-cross-x64"
+        },
+        {
+            "name": "package-linux-clang-debug-x64",
+            "description": "",
+            "displayName": "",
+            "configurePreset": "linux-clang-debug-x64"
+        },
+        {
+            "name": "package-linux-clang-release-x64",
+            "description": "",
+            "displayName": "",
+            "configurePreset": "linux-clang-release-x64"
+        },
+        {
+            "name": "package-macos-clang-debug",
+            "description": "",
+            "displayName": "",
+            "configurePreset": "macos-clang-debug"
+        },
+        {
+            "name": "package-macos-clang-release",
+            "description": "",
+            "displayName": "",
+            "configurePreset": "macos-clang-release"
+        }
+    ]
+}
