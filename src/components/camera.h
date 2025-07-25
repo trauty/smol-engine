@@ -14,7 +14,7 @@ namespace smol::components
 {
     class transform_ct;
 
-    class camera_ct : public smol::core::component_t
+    class SMOL_API camera_ct : public smol::core::component_t
     {
     public:
         static camera_ct* main_camera;

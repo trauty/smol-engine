@@ -95,27 +95,4 @@ namespace smol::math
         float* raw() { return &data[0][0]; }
         const float* raw() const { return &data[0][0]; }
     };
-
-    inline vec3_t quaternion_to_euler(quat_t q) {
-        vec3_t euler;
-
-    // Roll (x-axis rotation)
-    float sinr_cosp = 2.0f * (q.w * q.x + q.y * q.z);
-    float cosr_cosp = 1.0f - 2.0f * (q.x * q.x + q.y * q.y);
-    euler.x = atan2f(sinr_cosp, cosr_cosp);
-
-    // Pitch (y-axis rotation)
-    float sinp = 2.0f * (q.w * q.y - q.z * q.x);
-    if (fabsf(sinp) >= 1)
-        euler.y = copysignf(GLM_PI / 2.0f, sinp); // Use 90 degrees if out of range
-    else
-        euler.y = asinf(sinp);
-
-    // Yaw (z-axis rotation)
-    float siny_cosp = 2.0f * (q.w * q.z + q.x * q.y);
-    float cosy_cosp = 1.0f - 2.0f * (q.y * q.y + q.z * q.z);
-    euler.z = atan2f(siny_cosp, cosy_cosp);
-
-    return euler;
-}
 }
