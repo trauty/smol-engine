@@ -9,97 +9,64 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-set(CPM_SOURCE_CACHE "${CMAKE_SOURCE_DIR}/.cpmcache" CACHE STRING "CPM cache")
+set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -march=native -ffunction-sections -fdata-sections")
+set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -O3 -march=native -ffunction-sections -fdata-sections")
 
-include(cmake/CPM.cmake)
+set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} -Wl,--gc-sections -s")
+set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} -Wl,--gc-sections -s")
+set(CMAKE_MODULE_LINKER_FLAGS_RELEASE "${CMAKE_MODULE_LINKER_FLAGS_RELEASE} -Wl,--gc-sections -s")
 
 find_package(Threads REQUIRED)
 
-CPMAddPackage(
-    URI "gh:libsdl-org/SDL#release-3.2.16"
-    OPTIONS "SDL_AUDIO_DEFAULT OFF" 
-    "SDL_GPU_DEFAULT OFF"
-    "SDL_RENDER_DEFAULT OFF"
-    "SDL_CAMERA_DEFAULT OFF"
-    "SDL_JOYSTICK_DEFAULT OFF"
-    "SDL_HAPTIC_DEFAULT OFF"
-    "SDL_POWER_DEFAULT OFF"
-    "SDL_SENSOR_DEFAULT OFF"
-    "SDL_DIALOG_DEFAULT OFF"
-    "SDL_TEST_LIBRARY OFF"
-    "SDL_OPENGLES OFF"
-    "SDL_OPENGL ON"
-    "SDL_VULKAN OFF"
-    "SDL_DIRECTX OFF"
-)
-
-add_definitions(-DCGLM_FORCE_LEFT_HANDED)
-
-CPMAddPackage(URI "gh:recp/cglm#v0.9.6" OPTIONS "CGLM_STATIC ON")
-
-CPMAddPackage(URI "gh:fmtlib/fmt#11.2.0" OPTIONS "CMAKE_POSITION_INDEPENDENT_CODE ON")
-
-CPMAddPackage(URI "gh:syoyo/tinygltf#v2.9.6" OPTIONS "CMAKE_POSITION_INDEPENDENT_CODE ON" "INTERPROCEDURAL_OPTIMIZATION OFF")
-
-CPMAddPackage(
-  	NAME JoltPhysics
-  	GITHUB_REPOSITORY jrouwe/JoltPhysics
-  	GIT_TAG v5.3.0
-	OPTIONS 
-	"CMAKE_POSITION_INDEPENDENT_CODE ON"
-	"JPH_ENABLE_ASSERTS OFF"
-    "JPH_ENABLE_DEBUG_RENDERER OFF"
-    "JPH_PROFILE_ENABLED OFF"
-    "JPH_ENABLE_TRACY_PROFILING OFF"
-
-	SOURCE_SUBDIR "Build"
-)
-
-CPMAddPackage(
-  NAME miniaudio
-  GITHUB_REPOSITORY mackron/miniaudio
-  GIT_TAG 0.11.22
-  DOWNLOAD_ONLY TRUE
-)
-
-add_library(miniaudio INTERFACE)
-target_include_directories(miniaudio INTERFACE ${miniaudio_SOURCE_DIR})
-
 set(SMOL_ENGINE_NAME "smol-engine")
 
+set(JPH_ENABLE_VIEWER OFF CACHE BOOL "" FORCE)
+add_subdirectory(external/joltphysics/Build)
+
 set(SMOL_ENGINE_SOURCES
+    
+    # Glad
 	lib/glad/gl.c
-	src/engine/engine.cpp
-	src/engine/window.cpp
-	src/engine/log.cpp
-	src/engine/util.cpp
-	src/engine/time_util.cpp
-	src/engine/main_thread.cpp
-	src/engine/events.cpp
-	src/engine/physics.cpp
 
-    src/engine/core/component.cpp
-    src/engine/core/gameobject.cpp
-    src/engine/core/level.cpp
+    # stb
+    lib/stb/stb_image.cpp
+    lib/stb/stb_image_write.cpp
 
-    src/engine/components/test_component.cpp
-    src/engine/components/transform.cpp
-    src/engine/components/mesh_renderer.cpp
-    src/engine/components/camera.cpp
-    src/engine/components/renderer_component.cpp
-    src/engine/components/collider.cpp
-	src/engine/components/box_collider.cpp
-	src/engine/components/capsule_collider.cpp
-	src/engine/components/rigidbody.cpp
+    # tinygltf
+    lib/tinygltf/tiny_gltf.cpp
 
-    src/engine/asset/asset_manager.cpp
-    src/engine/asset/texture.cpp
-    src/engine/asset/shader.cpp
-    src/engine/asset/mesh.cpp
+    # Engine
+	src/engine.cpp
+	src/window.cpp
+	src/log.cpp
+	src/util.cpp
+	src/time_util.cpp
+	src/main_thread.cpp
+	src/events.cpp
+	src/physics.cpp
 
-    src/engine/rendering/renderer.cpp
-    src/engine/rendering/material.cpp
-    src/engine/rendering/spatial_material.cpp
+    src/core/component.cpp
+    src/core/gameobject.cpp
+    src/core/level.cpp
+
+    src/components/test_component.cpp
+    src/components/transform.cpp
+    src/components/mesh_renderer.cpp
+    src/components/camera.cpp
+    src/components/renderer_component.cpp
+    src/components/collider.cpp
+	src/components/box_collider.cpp
+	src/components/capsule_collider.cpp
+	src/components/rigidbody.cpp
+
+    src/asset/asset_manager.cpp
+    src/asset/texture.cpp
+    src/asset/shader.cpp
+    src/asset/mesh.cpp
+
+    src/rendering/renderer.cpp
+    src/rendering/material.cpp
+    src/rendering/spatial_material.cpp
 
 )
 
@@ -118,32 +85,29 @@ target_compile_features(${SMOL_ENGINE_NAME} PUBLIC cxx_std_20)
 target_compile_definitions(${SMOL_ENGINE_NAME} PRIVATE SMOL_EXPORT)
 
 if(WIN32)
-    target_link_libraries(${SMOL_ENGINE_NAME} PUBLIC
-	    SDL3::SDL3
-	    Threads::Threads
-	    cglm
-	    fmt
-	    tinygltf
-	    Jolt
-        miniaudio
-	    kernel32
-    )
-else()
-    target_link_libraries(${SMOL_ENGINE_NAME} PUBLIC
-	    SDL3::SDL3
-	    Threads::Threads
-	    cglm
-	    fmt
-	    tinygltf
-	    Jolt
-        miniaudio
-    )
+    set(SDL3_BASE_PATH "${CMAKE_SOURCE_DIR}/lib/SDL3/windows")
+    set(SDL3_LIB_PATH "${SDL3_BASE_PATH}/libSDL3.dll.a")
+    set(SDL3_DYNLIB_PATH "${SDL3_BASE_PATH}/SDL3.dll")
+
+    set(FMT_BASE_PATH "${CMAKE_SOURCE_DIR}/lib/fmt/windows")
+    set(FMT_LIB_PATH "${FMT_BASE_PATH}/libfmt.a")
+
+    set(SMOL_ADDITIONAL_SYS_LIBS "kernel32")
 endif()
 
+target_link_libraries(
+    ${SMOL_ENGINE_NAME} PUBLIC
+	${SDL3_LIB_PATH}
+	Threads::Threads
+	${FMT_LIB_PATH}
+	Jolt
+	${SMOL_ADDITIONAL_SYS_LIBS}
+)
+
 target_include_directories(${SMOL_ENGINE_NAME} PUBLIC 
-    ${CMAKE_SOURCE_DIR}/src/engine 
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_SOURCE_DIR}/external/joltphysics
 )
 
 # Install
@@ -154,7 +118,7 @@ install(
     ARCHIVE DESTINATION lib
 )
 
-install(FILES "$<TARGET_FILE:SDL3::SDL3>" DESTINATION .)
+install(FILES "${SDL3_DYNLIB_PATH}" DESTINATION .)
 install(FILES "$<TARGET_FILE:${SMOL_ENGINE_NAME}>" DESTINATION .)
 
 if(LINUX)
@@ -164,10 +128,6 @@ if(LINUX)
         WORKING_DIRECTORY ${CMAKE_INSTALL_PREFIX}/lib
     )"
 )
-endif()
-
-if(LINUX)
-    install(DIRECTORY ${CMAKE_SOURCE_DIR}/lib/linux/ DESTINATION .)
 endif()
 
 #install(DIRECTORY ${CMAKE_SOURCE_DIR}/assets DESTINATION .)
