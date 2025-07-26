@@ -12,6 +12,21 @@ set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} -Wl,--gc-s
 set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} -Wl,--gc-sections -s")
 set(CMAKE_MODULE_LINKER_FLAGS_RELEASE "${CMAKE_MODULE_LINKER_FLAGS_RELEASE} -Wl,--gc-sections -s")
 
+if(LINUX)
+    set(CMAKE_POSITION_INDEPENDENT_CODE ON)
+endif()
+
+include(CheckIPOSupported)
+
+check_ipo_supported(RESULT ipo_supported OUTPUT ipo_error)
+if(ipo_supported)
+    message("IPO/LTO is supported.")
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
+    set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_DISTRIBUTION ON)
+else()
+    message("IPO/LTO is not supported: ${ipo_error}")
+endif()
+
 find_package(Threads REQUIRED)
 
 set(SMOL_ENGINE_NAME "smol-engine")
@@ -83,17 +98,22 @@ target_compile_definitions(${SMOL_ENGINE_NAME} PRIVATE SMOL_EXPORT)
 if(WIN32)
     set(SDL3_BASE_PATH "${CMAKE_SOURCE_DIR}/lib/SDL3/windows")
     set(SDL3_LIB_PATH "${SDL3_BASE_PATH}/libSDL3.dll.a")
-    set(SDL3_DYNLIB_PATH "${SDL3_BASE_PATH}/SDL3.dll")
 
     set(FMT_BASE_PATH "${CMAKE_SOURCE_DIR}/lib/fmt/windows")
     set(FMT_LIB_PATH "${FMT_BASE_PATH}/libfmt.a")
 
     set(SMOL_ADDITIONAL_SYS_LIBS "kernel32")
+elseif(LINUX)
+    set(SDL3_BASE_PATH "${CMAKE_SOURCE_DIR}/lib/SDL3/linux")
+    set(SDL3_LIB_PATH "${SDL3_BASE_PATH}/libSDL3.so")
+
+    set(FMT_BASE_PATH "${CMAKE_SOURCE_DIR}/lib/fmt/linux")
+    set(FMT_LIB_PATH "${FMT_BASE_PATH}/libfmt.a")
 endif()
 
 target_link_libraries(
     ${SMOL_ENGINE_NAME} PUBLIC
-	${SDL3_LIB_PATH}
+    ${SDL3_LIB_PATH}
 	Threads::Threads
 	${FMT_LIB_PATH}
 	Jolt
@@ -114,17 +134,14 @@ install(
     ARCHIVE DESTINATION lib
 )
 
-install(FILES "${SDL3_DYNLIB_PATH}" DESTINATION .)
-install(FILES "$<TARGET_FILE:${SMOL_ENGINE_NAME}>" DESTINATION .)
-
-if(LINUX)
-    install(CODE "
-    execute_process(
-        COMMAND ${CMAKE_COMMAND} -E create_symlink libSDL3.so.0.2.16 libSDL3.so.0
-        WORKING_DIRECTORY ${CMAKE_INSTALL_PREFIX}/lib
-    )"
-)
+if(WIN32)
+    install(FILES "${SDL3_BASE_PATH}/SDL3.dll" DESTINATION .)
+elseif(LINUX)
+    install(FILES "${SDL3_BASE_PATH}/libSDL3.so.0" DESTINATION .)
+    install(FILES "${SDL3_BASE_PATH}/libSDL3.so.0.2.18" DESTINATION .)
 endif()
+
+install(FILES "$<TARGET_FILE:${SMOL_ENGINE_NAME}>" DESTINATION .)
 
 #install(DIRECTORY ${CMAKE_SOURCE_DIR}/assets DESTINATION .)
 
