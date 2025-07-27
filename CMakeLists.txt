@@ -5,6 +5,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   set(LINUX true)
 endif()
 
+set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+#set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
+
 set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -march=native -ffunction-sections -fdata-sections")
 set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -O3 -march=native -ffunction-sections -fdata-sections")
 
@@ -17,7 +21,6 @@ if(LINUX)
 endif()
 
 include(CheckIPOSupported)
-
 check_ipo_supported(RESULT ipo_supported OUTPUT ipo_error)
 if(ipo_supported)
     message("IPO/LTO is supported.")
@@ -27,12 +30,52 @@ else()
     message("IPO/LTO is not supported: ${ipo_error}")
 endif()
 
+set(CPM_SOURCE_CACHE "${CMAKE_SOURCE_DIR}/.cpmcache" CACHE STRING "CPM cache")
+include(cmake/CPM.cmake)
+
 find_package(Threads REQUIRED)
 
-set(SMOL_ENGINE_NAME "smol-engine")
+CPMAddPackage(
+    URI "gh:libsdl-org/SDL#release-3.2.16"
+    OPTIONS "SDL_AUDIO_DEFAULT OFF" 
+    "SDL_GPU_DEFAULT OFF"
+    "SDL_RENDER_DEFAULT OFF"
+    "SDL_CAMERA_DEFAULT OFF"
+    "SDL_JOYSTICK_DEFAULT OFF"
+    "SDL_HAPTIC_DEFAULT OFF"
+    "SDL_POWER_DEFAULT OFF"
+    "SDL_SENSOR_DEFAULT OFF"
+    "SDL_DIALOG_DEFAULT OFF"
+    "SDL_TEST_LIBRARY OFF"
+    "SDL_OPENGLES OFF"
+    "SDL_OPENGL ON"
+    "SDL_VULKAN OFF"
+    "SDL_DIRECTX OFF"
+)
 
-set(JPH_ENABLE_VIEWER OFF CACHE BOOL "" FORCE)
-add_subdirectory(external/joltphysics/Build)
+add_definitions(-DCGLM_FORCE_LEFT_HANDED)
+
+CPMAddPackage(URI "gh:recp/cglm#v0.9.6" OPTIONS "CGLM_STATIC ON")
+
+CPMAddPackage(URI "gh:fmtlib/fmt#11.2.0" OPTIONS "CMAKE_POSITION_INDEPENDENT_CODE ON")
+
+CPMAddPackage(
+  	NAME JoltPhysics
+  	GITHUB_REPOSITORY jrouwe/JoltPhysics
+  	GIT_TAG v5.3.0
+	OPTIONS 
+	"CMAKE_POSITION_INDEPENDENT_CODE ON"
+	"JPH_ENABLE_ASSERTS OFF"
+    "JPH_ENABLE_DEBUG_RENDERER OFF"
+    "JPH_PROFILE_ENABLED OFF"
+    "JPH_ENABLE_TRACY_PROFILING OFF"
+
+	SOURCE_SUBDIR "Build"
+)
+
+SET_INTERPROCEDURAL_OPTIMIZATION()
+
+set(SMOL_ENGINE_NAME "smol-engine")
 
 set(SMOL_ENGINE_SOURCES
     
@@ -95,27 +138,12 @@ endif()
 target_compile_features(${SMOL_ENGINE_NAME} PUBLIC cxx_std_20)
 target_compile_definitions(${SMOL_ENGINE_NAME} PRIVATE SMOL_EXPORT)
 
-if(WIN32)
-    set(SDL3_BASE_PATH "${CMAKE_SOURCE_DIR}/lib/SDL3/windows")
-    set(SDL3_LIB_PATH "${SDL3_BASE_PATH}/libSDL3.dll.a")
-
-    set(FMT_BASE_PATH "${CMAKE_SOURCE_DIR}/lib/fmt/windows")
-    set(FMT_LIB_PATH "${FMT_BASE_PATH}/libfmt.a")
-
-    set(SMOL_ADDITIONAL_SYS_LIBS "kernel32")
-elseif(LINUX)
-    set(SDL3_BASE_PATH "${CMAKE_SOURCE_DIR}/lib/SDL3/linux")
-    set(SDL3_LIB_PATH "${SDL3_BASE_PATH}/libSDL3.so")
-
-    set(FMT_BASE_PATH "${CMAKE_SOURCE_DIR}/lib/fmt/linux")
-    set(FMT_LIB_PATH "${FMT_BASE_PATH}/libfmt.a")
-endif()
-
 target_link_libraries(
     ${SMOL_ENGINE_NAME} PUBLIC
-    ${SDL3_LIB_PATH}
 	Threads::Threads
-	${FMT_LIB_PATH}
+    SDL3::SDL3
+	fmt
+    cglm
 	Jolt
 	${SMOL_ADDITIONAL_SYS_LIBS}
 )
@@ -123,7 +151,6 @@ target_link_libraries(
 target_include_directories(${SMOL_ENGINE_NAME} PUBLIC 
     ${CMAKE_SOURCE_DIR}/include
     ${CMAKE_SOURCE_DIR}/src
-    ${CMAKE_SOURCE_DIR}/external/joltphysics
 )
 
 # Install
