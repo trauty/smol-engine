@@ -161,13 +161,7 @@ install(
     ARCHIVE DESTINATION lib
 )
 
-if(WIN32)
-    install(FILES "${SDL3_BASE_PATH}/SDL3.dll" DESTINATION .)
-elseif(LINUX)
-    install(FILES "${SDL3_BASE_PATH}/libSDL3.so.0" DESTINATION .)
-    install(FILES "${SDL3_BASE_PATH}/libSDL3.so.0.2.18" DESTINATION .)
-endif()
-
+install(FILES "$<TARGET_FILE:SDL3::SDL3>" DESTINATION .)
 install(FILES "$<TARGET_FILE:${SMOL_ENGINE_NAME}>" DESTINATION .)
 
 #install(DIRECTORY ${CMAKE_SOURCE_DIR}/assets DESTINATION .)
