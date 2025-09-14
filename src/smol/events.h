@@ -1,12 +1,15 @@
 #pragma once
 
-#include "defines.h"
+#include <stddef.h>
 #include <atomic>
 #include <vector>
 #include <functional>
 #include <typeindex>
 #include <unordered_map>
+#include <type_traits>
+#include <utility>
 
+#include "defines.h"
 #include "log.h"
 
 namespace smol::events

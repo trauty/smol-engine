@@ -1,5 +1,6 @@
 #include "events.h"
 #include <atomic>
+
 namespace smol::events
 {
     namespace detail

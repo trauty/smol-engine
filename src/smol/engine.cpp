@@ -1,10 +1,11 @@
 #include "engine.h"
 
-#include "defines.h"
-
-#include <SDL3/SDL.h>
 #include <glad/gl.h>
+#include <SDL3/SDL_events.h>
+#include <SDL3/SDL_init.h>
+#include <SDL3/SDL_video.h>
 
+#include "defines.h"
 #include "log.h"
 #include "window.h"
 #include "time_util.h"
@@ -13,6 +14,7 @@
 #include "core/level.h"
 #include "rendering/renderer.h"
 #include "asset/asset_manager.h"
+#include "smol/asset/asset.h"
 
 using namespace smol::asset;
 using namespace smol::asset_manager;

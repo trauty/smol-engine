@@ -1,7 +1,10 @@
 #include "window.h"
 
-#include <SDL3/SDL.h>
 #include <glad/gl.h>
+#include <SDL3/SDL_video.h>
+
+#include "smol/defines.h"
+#include "smol/events.h"
 
 namespace smol::window
 {

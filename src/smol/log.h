@@ -1,8 +1,10 @@
 #pragma once
-#include "defines.h"
-
-#include <string>
 #include <fmt/format.h>
+#include <stddef.h>
+#include <string>
+#include <string_view>
+
+#include "defines.h"
 
 #ifdef ERROR
 #undef ERROR

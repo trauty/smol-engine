@@ -3,6 +3,8 @@
 #include <string>
 #include <type_traits>
 #include <functional>
+#include <concepts>
+#include <cstddef>
 
 namespace smol::util
 {

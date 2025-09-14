@@ -1,5 +1,6 @@
 #include "log.h"
 
+#include <fmt/format.h>
 #include <mutex>
 #include <condition_variable>
 #include <queue>
@@ -8,10 +9,13 @@
 #include <fstream>
 #include <string>
 #include <iostream>
-#include <regex>
 #include <chrono>
+#include <iomanip>
+#include <sstream>
 
 #include <fmt/chrono.h>
+
+#include "smol/defines.h"
 
 #ifdef SMOL_PLATFORM_WIN
 #include <windows.h>

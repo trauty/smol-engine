@@ -1,6 +1,8 @@
 #include "time_util.h"
 
-#include <SDL3/SDL.h>
+#include <SDL3/SDL_timer.h>
+
+#include "smol/defines.h"
 
 namespace smol::time
 {
