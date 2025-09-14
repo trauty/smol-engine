@@ -13,3 +13,4 @@ CMakeUserPresets.json
 build/
 .cpmcache/
 **/.DS_Store
+include/smol-engine/

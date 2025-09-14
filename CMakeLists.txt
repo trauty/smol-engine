@@ -9,12 +9,7 @@ set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 #set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
-set(CMAKE_CXX_FLAGS_RELEASE "${CMAKE_CXX_FLAGS_RELEASE} -O3 -march=native -ffunction-sections -fdata-sections")
-set(CMAKE_C_FLAGS_RELEASE "${CMAKE_C_FLAGS_RELEASE} -O3 -march=native -ffunction-sections -fdata-sections")
-
-set(CMAKE_EXE_LINKER_FLAGS_RELEASE "${CMAKE_EXE_LINKER_FLAGS_RELEASE} -Wl,--gc-sections -s")
-set(CMAKE_SHARED_LINKER_FLAGS_RELEASE "${CMAKE_SHARED_LINKER_FLAGS_RELEASE} -Wl,--gc-sections -s")
-set(CMAKE_MODULE_LINKER_FLAGS_RELEASE "${CMAKE_MODULE_LINKER_FLAGS_RELEASE} -Wl,--gc-sections -s")
+set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
 if(LINUX)
     set(CMAKE_POSITION_INDEPENDENT_CODE ON)
@@ -23,14 +18,14 @@ endif()
 include(CheckIPOSupported)
 check_ipo_supported(RESULT ipo_supported OUTPUT ipo_error)
 if(ipo_supported)
-    message("IPO/LTO is supported.")
+    message("IPO/LTO is supported. ${ipo_error}")
     set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_RELEASE ON)
     set(CMAKE_INTERPROCEDURAL_OPTIMIZATION_DISTRIBUTION ON)
 else()
     message("IPO/LTO is not supported: ${ipo_error}")
 endif()
 
-set(CPM_SOURCE_CACHE "${CMAKE_SOURCE_DIR}/.cpmcache" CACHE STRING "CPM cache")
+set(CPM_SOURCE_CACHE "${CMAKE_CURRENT_SOURCE_DIR}/.cpmcache" CACHE STRING "CPM cache")
 include(cmake/CPM.cmake)
 
 find_package(Threads REQUIRED)
@@ -51,6 +46,8 @@ CPMAddPackage(
     "SDL_OPENGL ON"
     "SDL_VULKAN OFF"
     "SDL_DIRECTX OFF"
+    "SDL_SHARED OFF"
+    "SDL_STATIC on"
 )
 
 add_definitions(-DCGLM_FORCE_LEFT_HANDED)
@@ -73,9 +70,8 @@ CPMAddPackage(
 	SOURCE_SUBDIR "Build"
 )
 
-SET_INTERPROCEDURAL_OPTIMIZATION()
-
 set(SMOL_ENGINE_NAME "smol-engine")
+set(SMOL_ENGINE_SRC_DIR "src/smol")
 
 set(SMOL_ENGINE_SOURCES
     
@@ -89,42 +85,41 @@ set(SMOL_ENGINE_SOURCES
     # tinygltf
     lib/tinygltf/tiny_gltf.cpp
 
-    # Engine
-	src/engine.cpp
-	src/window.cpp
-	src/log.cpp
-	src/util.cpp
-	src/time_util.cpp
-	src/main_thread.cpp
-	src/events.cpp
-	src/physics.cpp
+    # engine
+	${SMOL_ENGINE_SRC_DIR}/engine.cpp
+	${SMOL_ENGINE_SRC_DIR}/window.cpp
+	${SMOL_ENGINE_SRC_DIR}/log.cpp
+	${SMOL_ENGINE_SRC_DIR}/util.cpp
+	${SMOL_ENGINE_SRC_DIR}/time_util.cpp
+	${SMOL_ENGINE_SRC_DIR}/main_thread.cpp
+	${SMOL_ENGINE_SRC_DIR}/events.cpp
+	${SMOL_ENGINE_SRC_DIR}/physics.cpp
 
-    src/core/component.cpp
-    src/core/gameobject.cpp
-    src/core/level.cpp
+    ${SMOL_ENGINE_SRC_DIR}/core/component.cpp
+    ${SMOL_ENGINE_SRC_DIR}/core/gameobject.cpp
+    ${SMOL_ENGINE_SRC_DIR}/core/level.cpp
 
-    src/components/test_component.cpp
-    src/components/transform.cpp
-    src/components/mesh_renderer.cpp
-    src/components/camera.cpp
-    src/components/renderer_component.cpp
-    src/components/collider.cpp
-	src/components/box_collider.cpp
-	src/components/capsule_collider.cpp
-	src/components/rigidbody.cpp
+    ${SMOL_ENGINE_SRC_DIR}/components/transform.cpp
+    ${SMOL_ENGINE_SRC_DIR}/components/mesh_renderer.cpp
+    ${SMOL_ENGINE_SRC_DIR}/components/camera.cpp
+    ${SMOL_ENGINE_SRC_DIR}/components/renderer_component.cpp
+    ${SMOL_ENGINE_SRC_DIR}/components/collider.cpp
+	${SMOL_ENGINE_SRC_DIR}/components/box_collider.cpp
+	${SMOL_ENGINE_SRC_DIR}/components/capsule_collider.cpp
+	${SMOL_ENGINE_SRC_DIR}/components/rigidbody.cpp
 
-    src/asset/asset_manager.cpp
-    src/asset/texture.cpp
-    src/asset/shader.cpp
-    src/asset/mesh.cpp
+    ${SMOL_ENGINE_SRC_DIR}/asset/asset_manager.cpp
+    ${SMOL_ENGINE_SRC_DIR}/asset/texture.cpp
+    ${SMOL_ENGINE_SRC_DIR}/asset/shader.cpp
+    ${SMOL_ENGINE_SRC_DIR}/asset/mesh.cpp
 
-    src/rendering/renderer.cpp
-    src/rendering/material.cpp
-    src/rendering/spatial_material.cpp
+    ${SMOL_ENGINE_SRC_DIR}/rendering/renderer.cpp
+    ${SMOL_ENGINE_SRC_DIR}/rendering/material.cpp
+    ${SMOL_ENGINE_SRC_DIR}/rendering/spatial_material.cpp
 
 )
 
-# Engine Library
+# engine lib
 add_library(${SMOL_ENGINE_NAME} SHARED ${SMOL_ENGINE_SOURCES})
 set_target_properties(${SMOL_ENGINE_NAME} PROPERTIES PREFIX "")
 if(LINUX)
@@ -137,6 +132,7 @@ endif()
 
 target_compile_features(${SMOL_ENGINE_NAME} PUBLIC cxx_std_20)
 target_compile_definitions(${SMOL_ENGINE_NAME} PRIVATE SMOL_EXPORT)
+target_compile_options(${SMOL_ENGINE_NAME} PRIVATE -Wall -Wextra -Wpedantic -Wno-gnu-anonymous-struct -Wno-nested-anon-types -Wno-missing-field-initializers)
 
 target_link_libraries(
     ${SMOL_ENGINE_NAME} PUBLIC
@@ -149,13 +145,13 @@ target_link_libraries(
 )
 
 target_include_directories(${SMOL_ENGINE_NAME} PUBLIC 
-    ${CMAKE_SOURCE_DIR}/include
-    ${CMAKE_SOURCE_DIR}/src
+    ${CMAKE_CURRENT_SOURCE_DIR}/include
+    ${CMAKE_CURRENT_SOURCE_DIR}/src
 )
 
 # Install
 install(
-    TARGETS ${SMOL_GAME_NAME}
+    TARGETS ${SMOL_ENGINE_NAME}
     RUNTIME DESTINATION .
     LIBRARY DESTINATION .
     ARCHIVE DESTINATION lib
@@ -164,17 +160,18 @@ install(
 install(FILES "$<TARGET_FILE:SDL3::SDL3>" DESTINATION .)
 install(FILES "$<TARGET_FILE:${SMOL_ENGINE_NAME}>" DESTINATION .)
 
-#install(DIRECTORY ${CMAKE_SOURCE_DIR}/assets DESTINATION .)
+#install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/assets DESTINATION .)
 
 # Copy assets folder
-#add_custom_target(copy_assets
-    #COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different 
-            #${CMAKE_SOURCE_DIR}/assets
-            #${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/assets
-    #COMMENT "Copying assets to build output directory"
-#)
 
-#add_dependencies(${SMOL_GAME_NAME} copy_assets)
+add_custom_target(copy_assets
+    COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different 
+            ${CMAKE_SOURCE_DIR}/assets
+            ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/assets
+    COMMENT "Copying assets to build output directory"
+)
+
+add_dependencies(${SMOL_ENGINE_NAME} copy_assets)
 
 # CPack
 #set(CPACK_PROJECT_NAME ${SMOL_GAME_NAME})

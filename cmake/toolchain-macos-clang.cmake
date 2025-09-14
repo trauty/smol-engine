@@ -1,3 +1,5 @@
+# Deprecated
+
 set(CMAKE_SYSTEM_NAME Darwin)
 
 set(CMAKE_C_COMPILER clang)

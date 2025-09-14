@@ -1,10 +1,12 @@
+# this needs to be revamped
+
 set(CMAKE_SYSTEM_NAME Windows)
 
 set(CMAKE_C_COMPILER clang)
 set(CMAKE_CXX_COMPILER clang++)
 
-set(CMAKE_C_FLAGS_INIT "-flto")
-set(CMAKE_CXX_FLAGS_INIT "-stdlib=libc++ -flto")
+set(CMAKE_C_FLAGS_INIT "-flto -Wall")
+set(CMAKE_CXX_FLAGS_INIT "-stdlib=libc++ -flto -Wall")
 
 set(CMAKE_EXE_LINKER_FLAGS_INIT "-fuse-ld=lld -flto -static-libc++ -lc++ -lc++abi -lunwind")
 set(CMAKE_SHARED_LINKER_FLAGS_INIT "-fuse-ld=lld -flto -static-libc++ -lc++ -lc++abi -lunwind")
