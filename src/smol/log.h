@@ -12,7 +12,7 @@
 
 namespace smol::log 
 {
-    enum class SMOL_API level_e : u8_t
+    enum class level_e : u8_t
     {
         LOG_TRACE,
         LOG_DEBUG,
