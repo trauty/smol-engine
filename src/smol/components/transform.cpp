@@ -39,7 +39,7 @@ namespace smol::components
     {
         mat4_t& wm = get_world_matrix();
         vec3_t p;
-        glm_mat4_mulv3(wm.data, GLM_VEC3_ZERO, 1.0f, p.data);
+        glm_mat4_mulv3(wm.data, vec3_t {0.0f, 0.0f, 0.0f}.data, 1.0f, p.data);
         return p;
     }
 
@@ -207,7 +207,7 @@ namespace smol::components
 
         if (const std::shared_ptr<smol::core::gameobject_t> parent = get_gameobject())
         {
-            for (const std::shared_ptr<smol::core::gameobject_t> child : parent->get_children())
+            for (const std::shared_ptr<smol::core::gameobject_t>& child : parent->get_children())
             {
                 child->get_transform()->mark_world_dirty();
             }

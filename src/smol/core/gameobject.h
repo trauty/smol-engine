@@ -23,12 +23,12 @@ namespace smol::core
         explicit gameobject_t(std::string_view name) : id(generate_id()), name(name), active(true) {}
         ~gameobject_t() = default;
 
-        const i32_t get_id() const { return id; }
+        i32_t get_id() const { return id; }
 
         const std::string& get_name() const { return name; }
         void set_name(std::string_view new_name);
 
-        const bool is_active() const { return active; }
+        bool is_active() const { return active; }
         void set_active(bool state);
 
         const std::shared_ptr<level_t> get_level() const { return owner_level.lock(); }

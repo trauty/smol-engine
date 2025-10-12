@@ -81,8 +81,7 @@ namespace smol::physics
         JPH::RegisterTypes();
 
         temp_allocator = new JPH::TempAllocatorImpl(10 * 1024 * 1024);
-        // 4 threads sollten ausreichen
-        job_system = new JPH::JobSystemThreadPool(JPH::cMaxPhysicsJobs, JPH::cMaxPhysicsBarriers, 4);
+        job_system = new JPH::JobSystemThreadPool(JPH::cMaxPhysicsJobs, JPH::cMaxPhysicsBarriers, std::thread::hardware_concurrency() / 2);
 
         set_layer("Default", broad_phase_layers_e::DYNAMIC);
         set_layer("Static", broad_phase_layers_e::STATIC);

@@ -67,7 +67,7 @@ namespace smol::asset
             uvs = reinterpret_cast<const f32*>(&pos_buffer.data[uv_view.byteOffset + uv_accessor.byteOffset]);
         }
 
-        // das ist nicht übelst effizient => 3 einzelne vbos mit daten wäre besser (vielleicht später)
+        // not very efficient => 3 single vbos would be better
         std::vector<vertex_t> vertex_data(vertex_count);
         for (size_t i = 0; i < vertex_count; ++i)
         {
