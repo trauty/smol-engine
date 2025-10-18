@@ -1,5 +1,7 @@
 #include "asset_manager.h"
 
+#include <thread>
+
 #include "texture.h"
 #include "shader.h"
 #include "mesh.h"

@@ -54,7 +54,7 @@ add_definitions(-DCGLM_FORCE_LEFT_HANDED)
 
 CPMAddPackage(URI "gh:recp/cglm#v0.9.6" OPTIONS "CGLM_STATIC ON")
 
-CPMAddPackage(URI "gh:fmtlib/fmt#11.2.0" OPTIONS "CMAKE_POSITION_INDEPENDENT_CODE ON")
+CPMAddPackage(URI "gh:fmtlib/fmt#12.0.0" OPTIONS "CMAKE_POSITION_INDEPENDENT_CODE ON")
 
 CPMAddPackage(
   	NAME JoltPhysics
