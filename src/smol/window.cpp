@@ -1,5 +1,6 @@
 #include "window.h"
 
+#include <SDL3/SDL_init.h>
 #include <glad/gl.h>
 #include <SDL3/SDL_video.h>
 
@@ -38,5 +39,10 @@ namespace smol::window
     void set_window_position(i32 pos_x, i32 pos_y)
     {
         SDL_SetWindowPosition(window, pos_x, pos_y);
+    }
+
+    void shutdown()
+    {
+        SDL_Quit();
     }
 }

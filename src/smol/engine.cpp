@@ -1,6 +1,7 @@
 #include "engine.h"
 
 #include <glad/gl.h>
+#include <SDL3/SDL_hints.h>
 #include <SDL3/SDL_events.h>
 #include <SDL3/SDL_init.h>
 #include <SDL3/SDL_video.h>
@@ -35,6 +36,7 @@ namespace smol::engine
         
         SMOL_LOG_INFO("ENGINE", "Starting engine.");
         
+        SDL_SetHintWithPriority(SDL_HINT_SHUTDOWN_DBUS_ON_QUIT, "1", SDL_HintPriority::SDL_HINT_OVERRIDE);
         SDL_Init(SDL_INIT_VIDEO);
         
         SDL_GL_SetAttribute(SDL_GL_CONTEXT_MAJOR_VERSION, 3);
@@ -134,6 +136,7 @@ namespace smol::engine
         smol::renderer::shutdown();
         smol::physics::shutdown();
         smol::asset_manager::shutdown();
+        smol::window::shutdown();
         smol::log::shutdown();
         return 0;
     }

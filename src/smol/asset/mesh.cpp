@@ -53,7 +53,7 @@ namespace smol::asset
         {
             const tinygltf::Accessor& norm_accessor = model.accessors[attribs.at("NORMAL")];
             const tinygltf::BufferView& norm_view = model.bufferViews[norm_accessor.bufferView];
-            const tinygltf::Buffer& norm_buffer = model.buffers[norm_view.buffer];
+            //const tinygltf::Buffer& norm_buffer = model.buffers[norm_view.buffer];
             normals = reinterpret_cast<const f32*>(&pos_buffer.data[norm_view.byteOffset + norm_accessor.byteOffset]);
         }
 
@@ -63,13 +63,13 @@ namespace smol::asset
         {
             const tinygltf::Accessor& uv_accessor = model.accessors[attribs.at("TEXCOORD_0")];
             const tinygltf::BufferView& uv_view = model.bufferViews[uv_accessor.bufferView];
-            const tinygltf::Buffer& uv_buffer = model.buffers[uv_view.buffer];
+            //const tinygltf::Buffer& uv_buffer = model.buffers[uv_view.buffer];
             uvs = reinterpret_cast<const f32*>(&pos_buffer.data[uv_view.byteOffset + uv_accessor.byteOffset]);
         }
 
         // not very efficient => 3 single vbos would be better
         std::vector<vertex_t> vertex_data(vertex_count);
-        for (size_t i = 0; i < vertex_count; ++i)
+        for (i32 i = 0; i < vertex_count; ++i)
         {
             vertex_t& v = vertex_data[i];
             std::memcpy(v.position, &positions[i * 3], 3 * sizeof(f32));

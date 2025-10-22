@@ -31,7 +31,7 @@ include(cmake/CPM.cmake)
 find_package(Threads REQUIRED)
 
 CPMAddPackage(
-    URI "gh:libsdl-org/SDL#release-3.2.16"
+    URI "gh:libsdl-org/SDL#release-3.2.24"
     OPTIONS "SDL_AUDIO_DEFAULT OFF" 
     "SDL_GPU_DEFAULT OFF"
     "SDL_RENDER_DEFAULT OFF"
@@ -47,7 +47,7 @@ CPMAddPackage(
     "SDL_VULKAN OFF"
     "SDL_DIRECTX OFF"
     "SDL_SHARED OFF"
-    "SDL_STATIC on"
+    "SDL_STATIC ON"
 )
 
 add_definitions(-DCGLM_FORCE_LEFT_HANDED)
