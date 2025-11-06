@@ -2,14 +2,16 @@
 
 #include "log.h"
 
+// clang-format off
 #include <Jolt/Jolt.h>
-#include <Jolt/RegisterTypes.h>
 #include <Jolt/Core/JobSystemThreadPool.h>
-#include <Jolt/Physics/PhysicsSystem.h>
+#include <Jolt/Physics/Collision/BroadPhase/BroadPhaseLayerInterfaceTable.h>
+#include <Jolt/Physics/Collision/BroadPhase/ObjectVsBroadPhaseLayerFilterTable.h>
 #include <Jolt/Physics/Collision/ObjectLayer.h>
 #include <Jolt/Physics/Collision/ObjectLayerPairFilterTable.h>
-#include <Jolt/Physics/Collision/BroadPhase/ObjectVsBroadPhaseLayerFilterTable.h>
-#include <Jolt/Physics/Collision/BroadPhase/BroadPhaseLayerInterfaceTable.h>
+#include <Jolt/Physics/PhysicsSystem.h>
+#include <Jolt/RegisterTypes.h>
+// clang-format on
 
 namespace smol::physics
 {
@@ -28,7 +30,7 @@ namespace smol::physics
 
         class broad_phase_layer_interface_impl_t : public JPH::BroadPhaseLayerInterface
         {
-        public:
+          public:
             broad_phase_layer_interface_impl_t()
             {
                 broad_phase_layers.emplace_back("STATIC");
@@ -40,8 +42,9 @@ namespace smol::physics
             JPH::BroadPhaseLayer GetBroadPhaseLayer(JPH::ObjectLayer layer) const override
             {
                 broad_phase_layer_iter_t it = object_to_broadphase_layer.find(layer);
-                if (it != object_to_broadphase_layer.end()) return JPH::BroadPhaseLayer((u32_t)it->second);
-                
+                if (it != object_to_broadphase_layer.end())
+                    return JPH::BroadPhaseLayer((u32_t)it->second);
+
                 return JPH::BroadPhaseLayer((u32_t)broad_phase_layers_e::DYNAMIC);
             }
 #if defined(JPH_EXTERNAL_PROFILE) || defined(JPH_PROFILE_ENABLED) // for profiling
@@ -51,7 +54,7 @@ namespace smol::physics
             }
 #endif
 
-        private:
+          private:
             std::vector<const char*> broad_phase_layers;
         };
 
@@ -72,7 +75,7 @@ namespace smol::physics
 
             return table;
         }
-    }
+    } // namespace
 
     void init()
     {
@@ -96,21 +99,17 @@ namespace smol::physics
             broad_phase_interface,
             (u32_t)broad_phase_layers_e::COUNT,
             *object_layer_filter,
-            get_num_layers()
-        );
-        
+            get_num_layers());
+
         physics_system.Init(
-            1024, 0, 1024, 1024,
-            broad_phase_interface,
-            *broad_phase_filter,
-            *object_layer_filter
-        );
+            1024, 0, 1024, 1024, broad_phase_interface, *broad_phase_filter, *object_layer_filter);
     }
 
     layer_id_t set_layer(const std::string& name, broad_phase_layers_e broad_phase_type)
     {
         name_id_map_it_t it = name_to_id.find(name);
-        if (it != name_to_id.end()) return it->second;
+        if (it != name_to_id.end())
+            return it->second;
 
         layer_id_t id = static_cast<layer_id_t>(id_to_name.size());
         name_to_id[name] = id;
@@ -152,13 +151,19 @@ namespace smol::physics
         return it != name_to_id.end() ? it->second : 0;
     }
 
-    JPH::PhysicsSystem& get_physics_system() { return physics_system; }
+    JPH::PhysicsSystem& get_physics_system()
+    {
+        return physics_system;
+    }
 
-    JPH::BodyInterface& get_body_interface() { return physics_system.GetBodyInterface(); }
+    JPH::BodyInterface& get_body_interface()
+    {
+        return physics_system.GetBodyInterface();
+    }
 
     void update(f64 fixed_timestep)
     {
-        if (!temp_allocator || !job_system) return;
+        if (!temp_allocator || !job_system) { return; }
         physics_system.Update(fixed_timestep, 1, temp_allocator, job_system);
     }
 
@@ -184,4 +189,4 @@ namespace smol::physics
         id_to_name.clear();
         collision_matrix.clear();
     }
-}
+} // namespace smol::physics

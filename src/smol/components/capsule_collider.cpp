@@ -3,7 +3,7 @@
 namespace smol::components
 {
     void capsule_collider_ct::start()
-    {   
+    {
         JPH::CapsuleShapeSettings body_shape_settings(height, radius);
         body_shape_settings.SetDensity(1000.0);
         JPH::ShapeSettings::ShapeResult body_shape_result = body_shape_settings.Create();
@@ -22,4 +22,4 @@ namespace smol::components
     {
         return shape.GetPtr();
     }
-}
+} // namespace smol::components

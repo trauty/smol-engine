@@ -1,13 +1,13 @@
 #include "shader.h"
 
-#include <glad/gl.h>
-
-#include "smol/log.h"
-#include "smol/util.h"
-#include "smol/main_thread.h"
 #include "smol/color.h"
+#include "smol/log.h"
+#include "smol/main_thread.h"
 #include "smol/rendering/renderer.h"
+#include "smol/util.h"
 #include "texture.h"
+
+#include <glad/gl.h>
 
 namespace smol::asset
 {
@@ -23,7 +23,8 @@ namespace smol::asset
         std::string vert_src = smol::util::get_file_content(packed_path.substr(0, delim));
         std::string frag_src = smol::util::get_file_content(packed_path.substr(delim + 1));
 
-        smol::main_thread::enqueue([this, vert_src, frag_src](){
+        smol::main_thread::enqueue([this, vert_src, frag_src]()
+                                   {
             GLuint vert_shader_id = 0, frag_shader_id = 0;
             if (compile_shader(vert_src, GL_VERTEX_SHADER, vert_shader_id) != SMOL_SUCCESS) return;
             if (compile_shader(frag_src, GL_FRAGMENT_SHADER, frag_shader_id) != SMOL_SUCCESS) return;
@@ -46,19 +47,18 @@ namespace smol::asset
             glDeleteShader(vert_shader_id);
             glDeleteShader(frag_shader_id);
 
-            smol::renderer::bind_camera_to_shader(program_id);
-        });
+            smol::renderer::bind_camera_to_shader(program_id); });
     }
 
     shader_asset_t::~shader_asset_t()
     {
-        smol::main_thread::enqueue([this]() {
+        smol::main_thread::enqueue([this]()
+                                   {
             if (program_id) 
             {
                 glDeleteProgram(program_id);
                 smol::renderer::unbind_camera_to_shader(program_id);
-            }
-        });
+            } });
     }
 
     smol_result_e shader_asset_t::compile_shader(const std::string& src, GLenum type, GLuint& out_shader)
@@ -97,7 +97,8 @@ namespace smol::asset
             return;
         }
 
-        std::visit([&](auto&& val) {
+        std::visit([&](auto&& val)
+                   {
             using T = std::decay_t<decltype(val)>;
 
             if constexpr (std::is_same_v<T, i32>) glUniform1i(location, val);
@@ -105,8 +106,8 @@ namespace smol::asset
             if constexpr (std::is_same_v<T, smol::math::vec3_t>) glUniform3fv(location, 1, val.raw());
             if constexpr (std::is_same_v<T, smol::math::vec4_t>) glUniform4fv(location, 1, val.raw());
             if constexpr (std::is_same_v<T, smol::color_t>) glUniform4fv(location, 1, val.data);
-            if constexpr (std::is_same_v<T, smol::math::mat4_t>) glUniformMatrix4fv(location, 1, GL_FALSE, val.raw());
-        }, value);
+            if constexpr (std::is_same_v<T, smol::math::mat4_t>) glUniformMatrix4fv(location, 1, GL_FALSE, val.raw()); },
+                   value);
     }
 
     GLuint shader_asset_t::get_program_id() const
@@ -128,4 +129,4 @@ namespace smol::asset
         }
         glUniform1f(location, unit);
     }
-}
+} // namespace smol::asset

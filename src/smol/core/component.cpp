@@ -8,4 +8,4 @@ namespace smol::core
     {
         owner = new_owner;
     }
-}
+} // namespace smol::core

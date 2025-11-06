@@ -1,19 +1,19 @@
 #include "mesh_renderer.h"
 
-#include <glad/gl.h>
-
-#include "smol/rendering/material.h"
-#include "smol/asset/shader.h"
 #include "smol/asset/mesh.h"
-#include "smol/core/gameobject.h"
-
+#include "smol/asset/shader.h"
 #include "smol/color.h"
+#include "smol/core/gameobject.h"
+#include "smol/rendering/material.h"
+
+#include <glad/gl.h>
 
 namespace smol::components
 {
     void mesh_renderer_ct::render() const
     {
-        if (!mesh || !material) return;
+        if (!mesh || !material)
+            return;
 
         material->shader->bind();
 
@@ -43,4 +43,4 @@ namespace smol::components
     {
         this->material = material;
     }
-}
+} // namespace smol::components

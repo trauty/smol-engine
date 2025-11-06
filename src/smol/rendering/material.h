@@ -1,20 +1,19 @@
 #pragma once
+#include "smol/asset/asset.h"
+#include "smol/asset/shader.h"
 #include "smol/defines.h"
+#include "smol/math_util.h"
 
 #include <memory>
 #include <variant>
-
-#include "smol/asset/asset.h"
-#include "smol/math_util.h"
-#include "smol/asset/shader.h"
 
 using namespace smol::asset;
 
 namespace smol::rendering
 {
     class material_t
-    {   
-    public:
+    {
+      public:
         material_t() = default;
         material_t(asset_ptr_t<shader_asset_t> shader_asset);
         ~material_t() = default;
@@ -24,4 +23,4 @@ namespace smol::rendering
 
         asset_ptr_t<shader_asset_t> shader;
     };
-}
+} // namespace smol::rendering

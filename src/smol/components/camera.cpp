@@ -1,29 +1,30 @@
 #include "camera.h"
 
-#include <algorithm>
-#include "transform.h"
 #include "smol/core/gameobject.h"
+#include "smol/log.h"
 #include "smol/rendering/renderer.h"
 #include "smol/window.h"
-#include "smol/log.h"
+#include "transform.h"
 
+#include <algorithm>
 #include <iostream>
 
 namespace smol::components
-{   
+{
     camera_ct* camera_ct::main_camera = nullptr;
     std::vector<camera_ct*> camera_ct::all_cameras;
 
     camera_ct::camera_ct(
-        f32 fov_deg, 
-        f32 near_plane, 
-        f32 far_plane, 
-        f32 aspect
-    ) : aspect(aspect), near_plane(near_plane), far_plane(far_plane) 
+        f32 fov_deg,
+        f32 near_plane,
+        f32 far_plane,
+        f32 aspect) : aspect(aspect),
+                      near_plane(near_plane),
+                      far_plane(far_plane)
     {
         set_fov(fov_deg);
     }
-    
+
     camera_ct::~camera_ct()
     {
         std::vector<camera_ct*>::const_iterator it = std::find(all_cameras.begin(), all_cameras.end(), this);
@@ -32,7 +33,8 @@ namespace smol::components
             all_cameras.erase(it);
         }
 
-        if (main_camera == this) main_camera = nullptr;
+        if (main_camera == this)
+            main_camera = nullptr;
     }
 
     void camera_ct::start()
@@ -41,10 +43,10 @@ namespace smol::components
         all_cameras.push_back(this);
 
         sub_id = smol::events::subscribe<smol::window::window_size_changed_event_t>(
-            [this](const smol::window::window_size_changed_event_t& ctx) {
+            [this](const smol::window::window_size_changed_event_t& ctx)
+            {
                 aspect = (f32)ctx.width / (f32)ctx.height;
-            }
-        );
+            });
     }
 
     void camera_ct::update(f64 delta_time)
@@ -66,4 +68,4 @@ namespace smol::components
     {
         this->fov = 2.0f * atanf(tanf(glm_rad(fov) / 2.0f) / aspect);
     }
-}
+} // namespace smol::components

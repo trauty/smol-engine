@@ -1,11 +1,11 @@
 #include "window.h"
 
-#include <SDL3/SDL_init.h>
-#include <glad/gl.h>
-#include <SDL3/SDL_video.h>
-
 #include "smol/defines.h"
 #include "smol/events.h"
+
+#include <SDL3/SDL_init.h>
+#include <SDL3/SDL_video.h>
+#include <glad/gl.h>
 
 namespace smol::window
 {
@@ -33,7 +33,7 @@ namespace smol::window
     {
         SDL_SetWindowSize(window, width, height);
         glViewport(0, 0, width, height);
-        smol::events::emit(window_size_changed_event_t { width, height });
+        smol::events::emit(window_size_changed_event_t {width, height});
     }
 
     void set_window_position(i32 pos_x, i32 pos_y)
@@ -45,4 +45,4 @@ namespace smol::window
     {
         SDL_Quit();
     }
-}
+} // namespace smol::window

@@ -1,7 +1,7 @@
 #pragma once
 
-#include "smol/math_util.h"
 #include "smol/core/component.h"
+#include "smol/math_util.h"
 
 using namespace smol::math;
 
@@ -14,12 +14,12 @@ namespace smol::components
 {
     class SMOL_API transform_ct : public smol::core::component_t
     {
-    public:
+      public:
         transform_ct() = default;
 
         vec3_t local_position;
         quat_t local_rotation;
-        vec3_t local_scale { 1.0f, 1.0f, 1.0f };
+        vec3_t local_scale {1.0f, 1.0f, 1.0f};
 
         void set_local_position(vec3_t pos);
         void set_local_rotation(quat_t rot);
@@ -49,8 +49,8 @@ namespace smol::components
         mat4_t& get_world_matrix();
 
         transform_ct* get_parent_transform();
-    
-    private:
+
+      private:
         mutable mat4_t cached_world_matrix, cached_local_matrix;
         mutable bool world_dirty = true, local_dirty = true;
 
@@ -62,4 +62,4 @@ namespace smol::components
         inline float wrap_three_sixty(f32 angle);
         inline f32 delta_angle(f32 current, f32 target);
     };
-}
+} // namespace smol::components

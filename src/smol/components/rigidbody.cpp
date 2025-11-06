@@ -1,15 +1,15 @@
 #include "rigidbody.h"
 
-#include "smol/log.h"
-#include "smol/physics.h"
-#include "smol/core/gameobject.h"
 #include "collider.h"
 #include "smol/components/transform.h"
+#include "smol/core/gameobject.h"
+#include "smol/log.h"
+#include "smol/physics.h"
 
+#include <Jolt/Physics/Body/AllowedDOFs.h>
 #include <Jolt/Physics/Body/Body.h>
 #include <Jolt/Physics/Body/BodyCreationSettings.h>
 #include <Jolt/Physics/Collision/Shape/BoxShape.h>
-#include <Jolt/Physics/Body/AllowedDOFs.h>
 
 namespace smol::components
 {
@@ -47,20 +47,22 @@ namespace smol::components
             JPH::Vec3(pos.x, pos.y, pos.z),
             JPH::Quat(rot.x, rot.y, rot.z, rot.w),
             is_kinematic ? JPH::EMotionType::Kinematic : JPH::EMotionType::Dynamic,
-            static_cast<JPH::ObjectLayer>(collider->get_layer_id())
-        );
+            static_cast<JPH::ObjectLayer>(collider->get_layer_id()));
 
-        if (locked_x) settings.mAllowedDOFs &= ~JPH::EAllowedDOFs::RotationX;
-        if (locked_y) settings.mAllowedDOFs &= ~JPH::EAllowedDOFs::RotationY;
-        if (locked_z) settings.mAllowedDOFs &= ~JPH::EAllowedDOFs::RotationZ;
-        
+        if (locked_x)
+            settings.mAllowedDOFs &= ~JPH::EAllowedDOFs::RotationX;
+        if (locked_y)
+            settings.mAllowedDOFs &= ~JPH::EAllowedDOFs::RotationY;
+        if (locked_z)
+            settings.mAllowedDOFs &= ~JPH::EAllowedDOFs::RotationZ;
+
         body = smol::physics::get_body_interface().CreateBody(settings);
         if (!body)
         {
             SMOL_LOG_ERROR("RIGIDBODY", "Could not create body");
             return;
         }
-        
+
         body_id = body->GetID();
         smol::physics::get_body_interface().AddBody(body_id, JPH::EActivation::Activate);
     }
@@ -72,14 +74,15 @@ namespace smol::components
 
     void rigidbody_ct::fixed_update(f64 fixed_timestep)
     {
-        if (!body) return;
+        if (!body)
+            return;
 
         transform_ct* transform = get_gameobject()->get_transform();
         const JPH::RVec3 position = body->GetPosition();
         const JPH::Quat rotation = body->GetRotation();
-        vec3_t new_pos = { position.GetX(), position.GetY(), position.GetZ() };
-        quat_t new_rot = { rotation.GetX(), rotation.GetY(), rotation.GetZ(), rotation.GetW() };
-        
+        vec3_t new_pos = {position.GetX(), position.GetY(), position.GetZ()};
+        quat_t new_rot = {rotation.GetX(), rotation.GetY(), rotation.GetZ(), rotation.GetW()};
+
         transform->set_world_position(new_pos);
         transform->set_world_rotation(new_rot);
     }
@@ -101,4 +104,4 @@ namespace smol::components
         locked_y = y_axis;
         locked_z = z_axis;
     }
-}
+} // namespace smol::components

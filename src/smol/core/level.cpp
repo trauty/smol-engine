@@ -6,11 +6,11 @@
 
 namespace smol::core
 {
-    namespace 
+    namespace
     {
         using level_component_iter_t = std::unordered_map<std::type_index, std::vector<component_t*>>::iterator;
     }
-    
+
     void level_t::start()
     {
         for (level_component_iter_t it = component_registry.begin(); it != component_registry.end(); ++it)
@@ -77,7 +77,7 @@ namespace smol::core
             std::vector<component_t*> new_comp_list;
             new_comp_list.push_back(comp);
             component_registry[type_index] = new_comp_list;
-        } 
+        }
         else
         {
             it->second.push_back(comp);
@@ -98,4 +98,4 @@ namespace smol::core
 
         return std::span<T*>();
     }
-}
+} // namespace smol::core

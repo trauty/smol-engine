@@ -1,11 +1,10 @@
 #pragma once
+#include "asset.h"
+#include "smol/color.h"
 #include "smol/defines.h"
+#include "smol/math_util.h"
 
 #include <variant>
-
-#include "asset.h"
-#include "smol/math_util.h"
-#include "smol/color.h"
 
 using GLuint = u32;
 using GLenum = u32;
@@ -16,20 +15,20 @@ namespace smol::renderer
 }
 
 namespace smol::asset
-{   
+{
     class texture_asset_t;
 
     using uniform_value_t = std::variant<
-        i32, f32,
+        i32,
+        f32,
         smol::math::vec3_t,
         smol::math::vec4_t,
         smol::color_t,
-        smol::math::mat4_t
-    >;
+        smol::math::mat4_t>;
 
     class shader_asset_t : public asset_t
     {
-    public:
+      public:
         // derzeit nur vertex und fragment shader, keine zeit für hull/compute/geometry
         shader_asset_t(const std::string& packed_path);
         ~shader_asset_t();
@@ -39,8 +38,8 @@ namespace smol::asset
         void set_uniform(const std::string& name, const uniform_value_t& value) const;
         GLuint get_program_id() const;
         void bind_texture(const std::string& name, const texture_asset_t& texture, GLuint unit);
-    
-    private:
+
+      private:
         GLuint program_id;
     };
-}
+} // namespace smol::asset

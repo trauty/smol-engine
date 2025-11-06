@@ -1,16 +1,16 @@
 #pragma once
 
-#include <stddef.h>
-#include <atomic>
-#include <vector>
-#include <functional>
-#include <typeindex>
-#include <unordered_map>
-#include <type_traits>
-#include <utility>
-
 #include "defines.h"
 #include "log.h"
+
+#include <atomic>
+#include <functional>
+#include <stddef.h>
+#include <type_traits>
+#include <typeindex>
+#include <unordered_map>
+#include <utility>
+#include <vector>
 
 namespace smol::events
 {
@@ -48,11 +48,12 @@ namespace smol::events
 
         size_t id = get_counter().fetch_add(1);
         handler_map_t& handlers = get_subscribers()[typeid(EventT)];
-        handlers[id] = [cb](const event_t& event) {
+        handlers[id] = [cb](const event_t& event)
+        {
             cb(static_cast<const EventT&>(event));
         };
 
-        return subscription_id_t { typeid(EventT), id };
+        return subscription_id_t {typeid(EventT), id};
     }
 
     void unsubscribe(const subscription_id_t& sub_id);
@@ -71,4 +72,4 @@ namespace smol::events
             }
         }
     }
-}
+} // namespace smol::events

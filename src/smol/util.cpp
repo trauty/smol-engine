@@ -1,8 +1,8 @@
 #include "util.h"
 
-#include <fstream>
-
 #include "log.h"
+
+#include <fstream>
 
 namespace smol::util
 {
@@ -23,4 +23,4 @@ namespace smol::util
         SMOL_LOG_ERROR("UTIL", "Could not load file with path: {}", path);
         return nullptr;
     }
-}
+} // namespace smol::util

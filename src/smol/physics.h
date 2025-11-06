@@ -8,14 +8,14 @@ namespace JPH
 {
     class PhysicsSystem;
     class BodyInterface;
-}
+} // namespace JPH
 
 namespace smol::physics
 {
     using layer_id_t = u8_t;
 
     enum class broad_phase_layers_e : u32_t
-    {   
+    {
         STATIC,
         DYNAMIC,
         COUNT
@@ -37,4 +37,4 @@ namespace smol::physics
     void update(f64 fixed_timestep);
 
     void shutdown();
-}
+} // namespace smol::physics

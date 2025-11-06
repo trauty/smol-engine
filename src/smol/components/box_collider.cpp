@@ -3,7 +3,7 @@
 namespace smol::components
 {
     void box_collider_ct::start()
-    {   
+    {
         JPH::BoxShapeSettings body_shape_settings(JPH::Vec3(size.x, size.y, size.z));
         body_shape_settings.mConvexRadius = 0.02;
         body_shape_settings.SetDensity(1000.0);
@@ -22,4 +22,4 @@ namespace smol::components
     {
         return shape.GetPtr();
     }
-}
+} // namespace smol::components

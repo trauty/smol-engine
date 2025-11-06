@@ -43,40 +43,40 @@ enum smol_result_e
 };
 
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__)
-    #define SMOL_PLATFORM_WIN 1
-#ifndef _WIN64
-    #error "Only 64-Bit Windows is supported."
-#endif
+#    define SMOL_PLATFORM_WIN 1
+#    ifndef _WIN64
+#        error "Only 64-Bit Windows is supported."
+#    endif
 
 #elif defined(__linux__) || defined(__gnu_linux__)
-    #define SMOL_PLATFORM_LINUX 1
-#if defined(__ANDROID__)
-    #define SMOL_PLATFORM_ANDROID 1
-#endif
+#    define SMOL_PLATFORM_LINUX 1
+#    if defined(__ANDROID__)
+#        define SMOL_PLATFORM_ANDROID 1
+#    endif
 
 #elif defined(__unix__)
-    #define SMOL_PLATFORM_UNIX 1
+#    define SMOL_PLATFORM_UNIX 1
 
 #elif defined(_POSIX_VERSION)
-    #define SMOL_PLATFORM_POSIX 1
+#    define SMOL_PLATFORM_POSIX 1
 
 #elif __APPLE__
-    #define SMOL_PLATFORM_APPLE 1
-    #define SMOL_PLATFORM_MACOS 1 // no ios support, probably also no macos support
+#    define SMOL_PLATFORM_APPLE 1
+#    define SMOL_PLATFORM_MACOS 1 // no ios support, probably also no macos support
 #endif
 
 #if defined(_MSC_VER) && !defined(__clang__)
-    #if defined(SMOL_EXPORT)
-        #define SMOL_API __declspec(dllexport)
-    #else
-        #define SMOL_API __declspec(dllimport)
-    #endif
+#    if defined(SMOL_EXPORT)
+#        define SMOL_API __declspec(dllexport)
+#    else
+#        define SMOL_API __declspec(dllimport)
+#    endif
 #elif defined(__GNUC__) || defined(__clang__)
-    #define SMOL_API __attribute__((visibility("default")))
-#else 
-    #define SMOL_API
+#    define SMOL_API __attribute__((visibility("default")))
+#else
+#    define SMOL_API
 #endif
 
 #ifndef WIN32_LEAN_AND_MEAN
-    #define WIN32_LEAN_AND_MEAN
+#    define WIN32_LEAN_AND_MEAN
 #endif

@@ -1,8 +1,7 @@
 #include "material.h"
 
-#include "smol/defines.h"
-
 #include "smol/asset/shader.h"
+#include "smol/defines.h"
 
 namespace smol::rendering
 {
@@ -15,4 +14,4 @@ namespace smol::rendering
     {
         shader->set_uniform(name, value);
     }
-}
+} // namespace smol::rendering

@@ -3,7 +3,7 @@
 #include <algorithm>
 
 namespace smol::components
-{   
+{
     std::vector<renderer_ct*> renderer_ct::all_renderers;
 
     renderer_ct::renderer_ct()
@@ -19,4 +19,4 @@ namespace smol::components
             all_renderers.erase(it);
         }
     }
-}
+} // namespace smol::components

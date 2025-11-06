@@ -1,7 +1,7 @@
 #pragma once
 
-#include "smol/defines.h"
 #include "asset.h"
+#include "smol/defines.h"
 
 using GLuint = u32;
 
@@ -9,7 +9,7 @@ namespace smol::asset
 {
     class mesh_asset_t : public asset_t
     {
-    public:
+      public:
         mesh_asset_t(const std::string& path);
         ~mesh_asset_t();
 
@@ -18,7 +18,7 @@ namespace smol::asset
         i32 get_index_count() const;
         bool has_indices() const;
 
-    private:
+      private:
         GLuint vao = 0;
         GLuint vbo = 0;
         GLuint ebo = 0;
@@ -26,4 +26,4 @@ namespace smol::asset
         i32 index_count = 0;
         bool uses_indices = false;
     };
-}
+} // namespace smol::asset

@@ -1,10 +1,10 @@
 #include "mesh.h"
 
-#include <tinygltf/tiny_gltf.h>
-#include <glad/gl.h>
-
-#include "smol/main_thread.h"
 #include "smol/log.h"
+#include "smol/main_thread.h"
+
+#include <glad/gl.h>
+#include <tinygltf/tiny_gltf.h>
 
 namespace smol::asset
 {
@@ -23,7 +23,7 @@ namespace smol::asset
 
         bool is_glb = path.ends_with(".glb");
         bool loaded = is_glb ? loader.LoadBinaryFromFile(&model, &err, &warn, path) : loader.LoadASCIIFromFile(&model, &err, &warn, path);
-        
+
         if (!loaded)
         {
             SMOL_LOG_ERROR("MESH", "GLTF load error: {}", err);
@@ -73,11 +73,15 @@ namespace smol::asset
         {
             vertex_t& v = vertex_data[i];
             std::memcpy(v.position, &positions[i * 3], 3 * sizeof(f32));
-            if (has_normals) std::memcpy(v.normal, &normals[i * 3], 3 * sizeof(f32));
-            else std::memset(v.normal, 0, 3 * sizeof(f32));
+            if (has_normals)
+                std::memcpy(v.normal, &normals[i * 3], 3 * sizeof(f32));
+            else
+                std::memset(v.normal, 0, 3 * sizeof(f32));
 
-            if (has_uvs) std::memcpy(v.uv, &uvs[i * 2], 2 * sizeof(f32));
-            else std::memset(v.uv, 0, 2 * sizeof(f32));
+            if (has_uvs)
+                std::memcpy(v.uv, &uvs[i * 2], 2 * sizeof(f32));
+            else
+                std::memset(v.uv, 0, 2 * sizeof(f32));
         }
 
         std::vector<u32> indices;
@@ -92,7 +96,7 @@ namespace smol::asset
 
             switch (idx_accessor.componentType)
             {
-                case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT: 
+                case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
                 {
                     const u16* src = reinterpret_cast<const u16*>(raw_indices);
                     for (size_t i = 0; i < indices.size(); ++i) indices[i] = static_cast<u32>(src[i]);
@@ -115,7 +119,8 @@ namespace smol::asset
             uses_indices = true;
         }
 
-        smol::main_thread::enqueue([this, vertex_data = std::move(vertex_data), indices = std::move(indices)]() mutable {
+        smol::main_thread::enqueue([this, vertex_data = std::move(vertex_data), indices = std::move(indices)]() mutable
+                                   {
             glGenVertexArrays(1, &vao);
             glBindVertexArray(vao);
 
@@ -139,21 +144,32 @@ namespace smol::asset
                 glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(u32), indices.data(), GL_STATIC_DRAW);
             }
 
-            glBindVertexArray(0);
-        });
+            glBindVertexArray(0); });
     }
 
     mesh_asset_t::~mesh_asset_t()
     {
-        smol::main_thread::enqueue([this]() {
+        smol::main_thread::enqueue([this]()
+                                   {
             if (vbo) glDeleteBuffers(1, &vbo);
             if (ebo) glDeleteBuffers(1, &ebo);
-            if (vao) glDeleteVertexArrays(1, &vao);
-        });
+            if (vao) glDeleteVertexArrays(1, &vao); });
     }
 
-    GLuint mesh_asset_t::get_vao() const { return vao; }
-    i32 mesh_asset_t::get_vertex_count() const { return vertex_count; }
-    i32 mesh_asset_t::get_index_count() const { return index_count; }
-    bool mesh_asset_t::has_indices() const { return uses_indices; }
-}
+    GLuint mesh_asset_t::get_vao() const
+    {
+        return vao;
+    }
+    i32 mesh_asset_t::get_vertex_count() const
+    {
+        return vertex_count;
+    }
+    i32 mesh_asset_t::get_index_count() const
+    {
+        return index_count;
+    }
+    bool mesh_asset_t::has_indices() const
+    {
+        return uses_indices;
+    }
+} // namespace smol::asset

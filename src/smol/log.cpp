@@ -1,25 +1,24 @@
 #include "log.h"
 
-#include <fmt/format.h>
-#include <mutex>
-#include <condition_variable>
-#include <queue>
-#include <thread>
-#include <filesystem>
-#include <fstream>
-#include <string>
-#include <iostream>
-#include <chrono>
-#include <iomanip>
-#include <sstream>
-
-#include <fmt/chrono.h>
-
 #include "smol/defines.h"
 
+#include <chrono>
+#include <condition_variable>
+#include <filesystem>
+#include <fmt/chrono.h>
+#include <fmt/format.h>
+#include <fstream>
+#include <iomanip>
+#include <iostream>
+#include <mutex>
+#include <queue>
+#include <sstream>
+#include <string>
+#include <thread>
+
 #ifdef SMOL_PLATFORM_WIN
-#include <windows.h>
-#include <wtypes.h>
+#    include <windows.h>
+#    include <wtypes.h>
 #endif
 
 namespace smol::log
@@ -46,14 +45,14 @@ namespace smol::log
         bool is_running = false;
         std::thread worker;
 
-        const char *level_names[] = { "TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL" };
+        const char *level_names[] = {"TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL"};
         const char *ansi_level_colors[] = {
             "\033[90m", // TRACE - Gray
             "\033[36m", // DEBUG - Cyan
             "\033[37m", // INFO - White
             "\033[33m", // WARN - Yellow
             "\033[31m", // ERROR - Red
-            "\033[91m"  // FATAL - Bright Red
+            "\033[91m" // FATAL - Bright Red
         };
 
         const char *ansi_color_reset = "\033[0m";
@@ -73,7 +72,8 @@ namespace smol::log
 
         bool open_new_log_file()
         {
-            if (log_file.is_open()) log_file.close();
+            if (log_file.is_open())
+                log_file.close();
 
             std::string path_to_open = crt_file_index == 0 ? base_log_path : rotated_log_path(crt_file_index);
 
@@ -124,7 +124,7 @@ namespace smol::log
             SetConsoleMode(h_out, dw_mode);
         }
 #endif
-    }
+    } // namespace
 
     void set_level(level_e level)
     {
@@ -221,7 +221,8 @@ namespace smol::log
         }
 
         queue_vc.notify_all();
-        if (worker.joinable()) worker.join();
+        if (worker.joinable())
+            worker.join();
     }
 
 } // namespace smol::log

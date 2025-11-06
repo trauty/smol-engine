@@ -12,13 +12,14 @@ namespace smol::components
 {
     class capsule_collider_ct : public collider_ct
     {
-    public:
+      public:
         void start() override;
 
         JPH::Shape* get_shape() const override;
         void set_height_radius(f32 height, f32 radius);
-    private:
+
+      private:
         f32 height = 2.0f;
         f32 radius = 0.25f;
     };
-}
+} // namespace smol::components

@@ -1,11 +1,10 @@
 #include "transform.h"
 
 #include "smol/core/gameobject.h"
-
 #include "smol/log.h"
 
 namespace smol::components
-{   
+{
     void transform_ct::set_local_position(vec3_t pos)
     {
         glm_vec3_copy(pos.data, local_position.data);
@@ -28,11 +27,10 @@ namespace smol::components
     {
         vec3 angles;
         glm_euler_angles(cached_local_matrix.data, angles);
-        return vec3_t { 
-            wrap_three_sixty(glm_deg(angles[0])), 
+        return vec3_t {
+            wrap_three_sixty(glm_deg(angles[0])),
             wrap_three_sixty(glm_deg(angles[1])),
-            wrap_three_sixty(glm_deg(angles[2]))
-        };
+            wrap_three_sixty(glm_deg(angles[2]))};
     }
 
     vec3_t transform_ct::get_world_position()
@@ -59,7 +57,7 @@ namespace smol::components
         mat4_t& wm = get_world_matrix();
         vec3 scale;
         glm_decompose_scalev(wm.data, scale);
-        return vec3_t { scale };
+        return vec3_t {scale};
     }
 
     vec3_t transform_ct::get_world_euler_angles()
@@ -70,15 +68,15 @@ namespace smol::components
     vec3_t transform_ct::get_forward()
     {
         mat4_t& wm = get_world_matrix();
-        vec3_t forward = vec3_t { wm.m02, wm.m12, wm.m22 };
+        vec3_t forward = vec3_t {wm.m02, wm.m12, wm.m22};
         glm_vec3_normalize(forward.data);
         return forward;
     }
-    
+
     vec3_t transform_ct::get_right()
     {
         mat4_t& wm = get_world_matrix();
-        vec3_t right = vec3_t { wm.m00, wm.m10, wm.m20 };
+        vec3_t right = vec3_t {wm.m00, wm.m10, wm.m20};
         glm_vec3_normalize(right.data);
         return right;
     }
@@ -86,20 +84,22 @@ namespace smol::components
     vec3_t transform_ct::get_up()
     {
         mat4_t& wm = get_world_matrix();
-        vec3_t up = vec3_t { wm.m01, wm.m11, wm.m21 };
+        vec3_t up = vec3_t {wm.m01, wm.m11, wm.m21};
         glm_vec3_normalize(up.data);
         return up;
     }
 
     mat4_t& transform_ct::get_local_matrix()
     {
-        if (local_dirty) update_local_matrix();
+        if (local_dirty)
+            update_local_matrix();
         return cached_local_matrix;
     }
 
     mat4_t& transform_ct::get_world_matrix()
     {
-        if (world_dirty) update_world_matrix();
+        if (world_dirty)
+            update_world_matrix();
         return cached_world_matrix;
     }
 
@@ -154,7 +154,7 @@ namespace smol::components
 
     void transform_ct::set_world_euler_angles(vec3_t angles)
     {
-        vec3_t angles_rad { glm_rad(angles.x), glm_rad(angles.y), glm_rad(angles.z) };
+        vec3_t angles_rad {glm_rad(angles.x), glm_rad(angles.y), glm_rad(angles.z)};
         quat_t quat;
         glm_euler_xyz_quat(angles_rad.data, quat.data);
         set_world_rotation(quat);
@@ -168,13 +168,12 @@ namespace smol::components
 
     void transform_ct::rotate_local(vec3_t euler)
     {
-        vec3 r = { glm_rad(euler.x), glm_rad(euler.y), glm_rad(euler.z) };
+        vec3 r = {glm_rad(euler.x), glm_rad(euler.y), glm_rad(euler.z)};
         vec4 dq;
         glm_euler_zxy_quat(r, dq);
         glm_quat_mul(dq, local_rotation.data, local_rotation.data);
         glm_quat_normalize(local_rotation.data);
         mark_local_dirty();
-        
     }
 
     void transform_ct::scale_local(vec3_t scale)
@@ -201,7 +200,8 @@ namespace smol::components
 
     void transform_ct::mark_world_dirty()
     {
-        if (world_dirty) return;
+        if (world_dirty)
+            return;
 
         world_dirty = true;
 
@@ -233,10 +233,9 @@ namespace smol::components
         if (transform_ct* parent_transform = get_parent_transform())
         {
             glm_mat4_mul(
-                parent_transform->get_world_matrix().data, 
+                parent_transform->get_world_matrix().data,
                 crt_local_matrix.data,
-                cached_world_matrix.data
-            );
+                cached_world_matrix.data);
         }
         else
         {
@@ -249,7 +248,8 @@ namespace smol::components
     inline f32 transform_ct::wrap_three_sixty(f32 angle)
     {
         angle = std::fmodf(angle, 360.0f);
-        if (angle < 0.0f) angle += 360.0f;
+        if (angle < 0.0f)
+            angle += 360.0f;
         return angle;
     }
 
@@ -257,4 +257,4 @@ namespace smol::components
     {
         return std::fmodf(target - current + 540.0f, 360.0f) - 180.0f;
     }
-}
+} // namespace smol::components

@@ -1,10 +1,10 @@
 #include "asset_manager.h"
 
-#include <thread>
-
-#include "texture.h"
-#include "shader.h"
 #include "mesh.h"
+#include "shader.h"
+#include "texture.h"
+
+#include <thread>
 
 using namespace smol::asset;
 
@@ -28,9 +28,11 @@ namespace smol::asset_manager
             while (is_running)
             {
                 std::unique_lock lock(queue_mutex);
-                queue_cv.wait(lock, [] { return !task_queue.empty() || !is_running; });
+                queue_cv.wait(lock, []
+                              { return !task_queue.empty() || !is_running; });
 
-                if (!is_running && task_queue.empty()) break;
+                if (!is_running && task_queue.empty())
+                    break;
 
                 std::function<void()> task = std::move(task_queue.front());
                 task_queue.pop();
@@ -39,17 +41,32 @@ namespace smol::asset_manager
                 task();
             }
         }
-    }
+    } // namespace
 
-    namespace detail 
+    namespace detail
     {
-        std::unordered_map<std::string, std::shared_ptr<smol::asset::asset_t>>& get_asset_cache() { return asset_cache; }
-        std::unordered_map<std::type_index, loader_entry_t>& get_asset_loaders() { return asset_loaders; }
+        std::unordered_map<std::string, std::shared_ptr<smol::asset::asset_t>>& get_asset_cache()
+        {
+            return asset_cache;
+        }
+        std::unordered_map<std::type_index, loader_entry_t>& get_asset_loaders()
+        {
+            return asset_loaders;
+        }
 
-        std::mutex& get_queue_mutex() { return queue_mutex; }
-        std::queue<std::function<void()>>& get_task_queue() { return task_queue; }
-        std::condition_variable& get_queue_cv() { return queue_cv; }
-    }
+        std::mutex& get_queue_mutex()
+        {
+            return queue_mutex;
+        }
+        std::queue<std::function<void()>>& get_task_queue()
+        {
+            return task_queue;
+        }
+        std::condition_variable& get_queue_cv()
+        {
+            return queue_cv;
+        }
+    } // namespace detail
 
     void init()
     {
@@ -87,4 +104,4 @@ namespace smol::asset_manager
         const std::lock_guard lock(queue_mutex);
         asset_cache.erase(id);
     }
-}
+} // namespace smol::asset_manager

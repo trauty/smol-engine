@@ -1,14 +1,13 @@
 #pragma once
 
+#include "smol/core/component.h"
 #include "smol/defines.h"
+#include "smol/math_util.h"
 
 #include <Jolt/Jolt.h>
 #include <Jolt/Physics/Body/BodyID.h>
 #include <Jolt/Physics/Body/BodyInterface.h>
 #include <Jolt/Physics/Collision/Shape/Shape.h>
-
-#include "smol/math_util.h"
-#include "smol/core/component.h"
 
 using namespace smol::math;
 
@@ -16,7 +15,7 @@ namespace smol::components
 {
     class rigidbody_ct : public smol::core::component_t
     {
-    public:
+      public:
         rigidbody_ct() = default;
         ~rigidbody_ct();
 
@@ -29,10 +28,10 @@ namespace smol::components
 
         bool is_kinematic = false;
 
-    private:
+      private:
         JPH::BodyID body_id;
         JPH::Body* body = nullptr;
 
         bool locked_x = false, locked_y = false, locked_z = false;
     };
-}
+} // namespace smol::components

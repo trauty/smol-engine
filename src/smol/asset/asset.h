@@ -1,30 +1,30 @@
 #pragma once
 
-#include <memory>
-#include <string>
-#include <mutex>
-
 #include "smol/log.h"
+
+#include <memory>
+#include <mutex>
+#include <string>
 
 namespace smol::asset_manager
 {
     struct asset_handle_t;
     void unload(const std::string& id);
-}
+} // namespace smol::asset_manager
 
 namespace smol::asset
 {
     class asset_t
     {
-    public:
+      public:
         virtual ~asset_t() = default; // für shared_ptr
     };
 
-    template <typename T>
+    template<typename T>
     class asset_ptr_t
     {
-    public:
-        asset_ptr_t(const std::shared_ptr<T>& ptr, const std::string& id) : ptr_to_asset(ptr), handle_id(id) { }
+      public:
+        asset_ptr_t(const std::shared_ptr<T>& ptr, const std::string& id) : ptr_to_asset(ptr), handle_id(id) {}
         asset_ptr_t(const asset_ptr_t& other) = default;
         asset_ptr_t() = default;
         asset_ptr_t& operator=(const asset_ptr_t& other) = default;
@@ -46,8 +46,8 @@ namespace smol::asset
 
         std::shared_ptr<T> get() const { return ptr_to_asset; }
 
-    private:
+      private:
         std::shared_ptr<T> ptr_to_asset;
         std::string handle_id;
     };
-}
+} // namespace smol::asset

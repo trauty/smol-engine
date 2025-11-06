@@ -21,4 +21,4 @@ namespace smol::renderer
     void init();
     void render();
     void shutdown();
-}
+} // namespace smol::renderer

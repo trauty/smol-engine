@@ -2,8 +2,8 @@
 
 #include "defines.h"
 
-#include <string>
 #include <memory>
+#include <string>
 
 namespace smol::core
 {
@@ -19,4 +19,4 @@ namespace smol::engine
     SMOL_API void exit();
 
     SMOL_API smol_result_e load_level(std::shared_ptr<smol::core::level_t> level);
-}
+} // namespace smol::engine

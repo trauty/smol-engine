@@ -1,7 +1,6 @@
 #pragma once
 
 #include "smol/defines.h"
-
 #include "smol/log.h"
 
 #include <memory>
@@ -12,7 +11,7 @@ namespace smol::core
 
     class SMOL_API component_t
     {
-    public:
+      public:
         component_t() : active(true) {}
         component_t(bool state) : active(state) {}
         virtual ~component_t() = default;
@@ -27,8 +26,8 @@ namespace smol::core
         bool is_active() const { return active; }
         void set_active(bool state) { active = state; }
 
-    private:
+      private:
         std::weak_ptr<gameobject_t> owner;
         bool active;
     };
-}
+} // namespace smol::core

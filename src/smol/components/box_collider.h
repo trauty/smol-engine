@@ -12,12 +12,13 @@ namespace smol::components
 {
     class box_collider_ct : public collider_ct
     {
-    public:
+      public:
         void start() override;
 
         JPH::Shape* get_shape() const override;
         void set_size(vec3_t size);
-    private:
-        vec3_t size = { 1.0f, 1.0f, 1.0f };
+
+      private:
+        vec3_t size = {1.0f, 1.0f, 1.0f};
     };
-}
+} // namespace smol::components

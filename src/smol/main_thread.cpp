@@ -9,8 +9,8 @@ namespace smol::main_thread
     {
         std::mutex queue_mutex;
         std::queue<std::function<void()>> func_queue;
-    }
-    
+    } // namespace
+
     void enqueue(std::function<void()> func)
     {
         const std::lock_guard lock(queue_mutex);
@@ -26,4 +26,4 @@ namespace smol::main_thread
             func_queue.pop();
         }
     }
-}
+} // namespace smol::main_thread

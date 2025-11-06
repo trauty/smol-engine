@@ -1,7 +1,7 @@
 #include "gameobject.h"
 
-#include <atomic>
 #include <algorithm>
+#include <atomic>
 
 namespace smol::core
 {
@@ -22,11 +22,13 @@ namespace smol::core
 
     void gameobject_t::add_child(const std::shared_ptr<gameobject_t>& child)
     {
-        if (!child || child.get() == this) return;
+        if (!child || child.get() == this)
+            return;
 
         for (std::shared_ptr<gameobject_t> ancestor = shared_from_this(); ancestor; ancestor = ancestor->get_parent())
         {
-            if (ancestor == child) return;
+            if (ancestor == child)
+                return;
         }
 
         if (std::find(children.begin(), children.end(), child) == children.end())
@@ -42,7 +44,8 @@ namespace smol::core
 
     void gameobject_t::remove_child(const std::shared_ptr<gameobject_t>& child)
     {
-        if (!child) return;
+        if (!child)
+            return;
 
         children_iterator_t it = std::find(children.begin(), children.end(), child);
         if (it != children.end())
@@ -58,11 +61,13 @@ namespace smol::core
 
     void gameobject_t::set_parent(const std::shared_ptr<gameobject_t>& new_parent)
     {
-        if (new_parent.get() == this) return;
+        if (new_parent.get() == this)
+            return;
 
         for (std::shared_ptr<gameobject_t> p = new_parent; p; p = p->get_parent())
         {
-            if (p.get() == this) return;
+            if (p.get() == this)
+                return;
         }
 
         if (const std::shared_ptr<gameobject_t>& old_parent = parent.lock())
@@ -80,8 +85,8 @@ namespace smol::core
 
     static std::atomic<i32_t> instance_id_counter = 0;
 
-    i32_t gameobject_t::generate_id() 
+    i32_t gameobject_t::generate_id()
     {
         return instance_id_counter.fetch_add(1, std::memory_order_relaxed);
     }
-}
+} // namespace smol::core

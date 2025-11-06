@@ -1,25 +1,25 @@
 #include "renderer.h"
 
-#include <vector>
-#include <algorithm>
-
+#include "smol/components/camera.h"
+#include "smol/components/renderer_component.h"
+#include "smol/components/transform.h"
 #include "smol/log.h"
 #include "smol/math_util.h"
-#include "smol/components/camera.h"
-#include "smol/components/transform.h"
-#include "smol/components/renderer_component.h"
+
+#include <algorithm>
 #include <iostream>
+#include <vector>
 
 using namespace smol::components;
 
 namespace smol::renderer
 {
     namespace
-    {   
+    {
         std::vector<GLuint> all_shader_programs;
 
         // Camera UBO
-        struct alignas(32) camera_ubo_t 
+        struct alignas(32) camera_ubo_t
         {
             mat4 smol_view;
             mat4 smol_projection;
@@ -36,7 +36,7 @@ namespace smol::renderer
 
         GLuint camera_binding_point = 0;
         GLuint camera_ubo;
-    }
+    } // namespace
 
     void init()
     {
@@ -66,7 +66,7 @@ namespace smol::renderer
     }
 
     void unbind_camera_to_shader(GLuint shader_program)
-    {   
+    {
         std::vector<GLuint>::const_iterator it = std::find(all_shader_programs.begin(), all_shader_programs.end(), shader_program);
 
         if (it == all_shader_programs.end())
@@ -88,15 +88,16 @@ namespace smol::renderer
 
     void render()
     {
-        if (camera_ct::main_camera == nullptr) return;
-        
+        if (camera_ct::main_camera == nullptr)
+            return;
+
         glBindBuffer(GL_UNIFORM_BUFFER, camera_ubo);
         glBufferSubData(GL_UNIFORM_BUFFER, OFFSET_VIEW, sizeof(mat4), camera_ct::main_camera->view_matrix);
         glBufferSubData(GL_UNIFORM_BUFFER, OFFSET_PROJECTION, sizeof(mat4), camera_ct::main_camera->projection_matrix);
         glBufferSubData(GL_UNIFORM_BUFFER, OFFSET_POSITION, sizeof(vec3), camera_ct::main_camera->transform->get_world_position().data);
         glBufferSubData(GL_UNIFORM_BUFFER, OFFSET_DIRECTION, sizeof(vec3), camera_ct::main_camera->transform->get_world_euler_angles().data);
 
-        for (const renderer_ct* renderer : renderer_ct::all_renderers) 
+        for (const renderer_ct* renderer : renderer_ct::all_renderers)
         {
             if (renderer->is_active())
             {
@@ -107,6 +108,7 @@ namespace smol::renderer
 
     void shutdown()
     {
-        if (camera_ubo) glDeleteBuffers(1, &camera_ubo);
+        if (camera_ubo)
+            glDeleteBuffers(1, &camera_ubo);
     }
-}
+} // namespace smol::renderer

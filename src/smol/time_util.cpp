@@ -1,8 +1,8 @@
 #include "time_util.h"
 
-#include <SDL3/SDL_timer.h>
-
 #include "smol/defines.h"
+
+#include <SDL3/SDL_timer.h>
 
 namespace smol::time
 {
@@ -10,7 +10,7 @@ namespace smol::time
     {
         f64 delta_time;
         f64 fixed_delta_time;
-    }
+    } // namespace
 
     f64 get_delta_time()
     {
@@ -39,4 +39,4 @@ namespace smol::time
 
         return static_cast<f64>(counter) / static_cast<f64>(freq);
     }
-}
+} // namespace smol::time

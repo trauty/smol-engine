@@ -1,12 +1,11 @@
 #pragma once
 
+#include "smol/core/component.h"
 #include "smol/defines.h"
+#include "smol/events.h"
+#include "smol/math_util.h"
 
 #include <vector>
-
-#include "smol/math_util.h"
-#include "smol/core/component.h"
-#include "smol/events.h"
 
 using namespace smol::math;
 
@@ -16,7 +15,7 @@ namespace smol::components
 
     class SMOL_API camera_ct : public smol::core::component_t
     {
-    public:
+      public:
         static camera_ct* main_camera;
         static std::vector<camera_ct*> all_cameras;
 
@@ -35,7 +34,7 @@ namespace smol::components
         // horizontal FOV
         void set_fov(f32 fov);
 
-    private:
+      private:
         f32 fov;
         f32 aspect;
         f32 near_plane;
@@ -43,4 +42,4 @@ namespace smol::components
 
         smol::events::subscription_id_t sub_id;
     };
-}
+} // namespace smol::components

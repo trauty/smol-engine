@@ -1,4 +1,5 @@
 #include "events.h"
+
 #include <atomic>
 
 namespace smol::events
@@ -7,8 +8,8 @@ namespace smol::events
     {
         subscriber_map_t subscribers;
         std::atomic<size_t> handler_counter = 0;
-    }
-    
+    } // namespace detail
+
     subscriber_map_t& get_subscribers()
     {
         return detail::subscribers;
@@ -27,4 +28,4 @@ namespace smol::events
             it->second.erase(sub_id.handler_id);
         }
     }
-}
+} // namespace smol::events

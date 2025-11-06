@@ -1,16 +1,14 @@
 #pragma once
 
-#include "smol/defines.h"
-
-#include <unordered_map>
-#include <typeindex>
-#include <memory>
-#include <string>
-
 #include "component.h"
 #include "level.h"
-
 #include "smol/components/transform.h"
+#include "smol/defines.h"
+
+#include <memory>
+#include <string>
+#include <typeindex>
+#include <unordered_map>
 
 namespace smol::core
 {
@@ -19,7 +17,7 @@ namespace smol::core
 
     class SMOL_API gameobject_t : public std::enable_shared_from_this<gameobject_t>
     {
-    public:
+      public:
         explicit gameobject_t(std::string_view name) : id(generate_id()), name(name), active(true) {}
         ~gameobject_t() = default;
 
@@ -67,7 +65,8 @@ namespace smol::core
 
             for (const auto& [type, comp_ptr] : components)
             {
-                if (auto casted = dynamic_cast<T*>(comp_ptr.get())) return casted;
+                if (auto casted = dynamic_cast<T*>(comp_ptr.get()))
+                    return casted;
             }
 
             return nullptr;
@@ -79,16 +78,18 @@ namespace smol::core
             for (const std::shared_ptr<gameobject_t>& child : children)
             {
                 T* comp = child->get_component<T>();
-                if (comp != nullptr) return comp;
+                if (comp != nullptr)
+                    return comp;
 
                 comp = child->get_component_in_children<T>();
-                if (comp != nullptr) return comp;
+                if (comp != nullptr)
+                    return comp;
             }
 
             return nullptr;
         }
-        
-    private:
+
+      private:
         i32_t id;
         std::string name;
         bool active;
@@ -102,4 +103,4 @@ namespace smol::core
 
         i32_t generate_id();
     };
-}
+} // namespace smol::core

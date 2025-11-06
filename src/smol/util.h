@@ -1,10 +1,10 @@
 #pragma once
 
-#include <string>
-#include <type_traits>
-#include <functional>
 #include <concepts>
 #include <cstddef>
+#include <functional>
+#include <string>
+#include <type_traits>
 
 namespace smol::util
 {
@@ -12,6 +12,6 @@ namespace smol::util
 
     template<typename T>
     concept hashable_t = requires(T t) {
-        { std::hash<T>{}(t) } -> std::convertible_to<std::size_t>;
+        { std::hash<T> {}(t) } -> std::convertible_to<std::size_t>;
     };
-}
+} // namespace smol::util
