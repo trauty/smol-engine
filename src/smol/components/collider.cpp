@@ -3,6 +3,7 @@
 #include "smol/components/rigidbody.h"
 #include "smol/components/transform.h"
 #include "smol/core/gameobject.h"
+#include "smol/log.h"
 #include "smol/physics.h"
 
 namespace smol::components

@@ -1,7 +1,6 @@
 #pragma once
 
 #include "smol/defines.h"
-#include "smol/log.h"
 
 #include <memory>
 
@@ -21,7 +20,7 @@ namespace smol::core
         virtual void fixed_update([[maybe_unused]] f64 fixed_timestep) {};
 
         const std::shared_ptr<gameobject_t> get_gameobject() const { return owner.lock(); }
-        void set_owner(const std::shared_ptr<gameobject_t>& new_owner);
+        void set_owner(std::shared_ptr<gameobject_t> new_owner);
 
         bool is_active() const { return active; }
         void set_active(bool state) { active = state; }

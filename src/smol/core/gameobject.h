@@ -65,8 +65,7 @@ namespace smol::core
 
             for (const auto& [type, comp_ptr] : components)
             {
-                if (auto casted = dynamic_cast<T*>(comp_ptr.get()))
-                    return casted;
+                if (auto casted = dynamic_cast<T*>(comp_ptr.get())) { return casted; }
             }
 
             return nullptr;
@@ -78,12 +77,10 @@ namespace smol::core
             for (const std::shared_ptr<gameobject_t>& child : children)
             {
                 T* comp = child->get_component<T>();
-                if (comp != nullptr)
-                    return comp;
+                if (comp != nullptr) { return comp; }
 
                 comp = child->get_component_in_children<T>();
-                if (comp != nullptr)
-                    return comp;
+                if (comp != nullptr) { return comp; }
             }
 
             return nullptr;

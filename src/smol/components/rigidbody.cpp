@@ -67,12 +67,12 @@ namespace smol::components
         smol::physics::get_body_interface().AddBody(body_id, JPH::EActivation::Activate);
     }
 
-    void rigidbody_ct::update(f64 delta_time)
+    void rigidbody_ct::update([[maybe_unused]] f64 delta_time)
     {
         // interpolation
     }
 
-    void rigidbody_ct::fixed_update(f64 fixed_timestep)
+    void rigidbody_ct::fixed_update([[maybe_unused]] f64 fixed_timestep)
     {
         if (!body)
             return;

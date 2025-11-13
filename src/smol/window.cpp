@@ -33,7 +33,7 @@ namespace smol::window
     {
         SDL_SetWindowSize(window, width, height);
         glViewport(0, 0, width, height);
-        smol::events::emit(window_size_changed_event_t {width, height});
+        smol::events::emit(size_changed_event_t {width, height});
     }
 
     void set_window_position(i32 pos_x, i32 pos_y)

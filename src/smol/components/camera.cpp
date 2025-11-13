@@ -7,7 +7,6 @@
 #include "transform.h"
 
 #include <algorithm>
-#include <iostream>
 
 namespace smol::components
 {
@@ -31,10 +30,10 @@ namespace smol::components
         if (it != all_cameras.end())
         {
             all_cameras.erase(it);
+            SMOL_LOG_DEBUG("CAMERA", "deleted cam");
         }
 
-        if (main_camera == this)
-            main_camera = nullptr;
+        if (main_camera == this) { main_camera = nullptr; }
     }
 
     void camera_ct::start()
@@ -42,16 +41,16 @@ namespace smol::components
         transform = get_gameobject()->get_transform();
         all_cameras.push_back(this);
 
-        sub_id = smol::events::subscribe<smol::window::window_size_changed_event_t>(
-            [this](const smol::window::window_size_changed_event_t& ctx)
+        sub_id = smol::events::subscribe<smol::window::size_changed_event_t>(
+            [this](const smol::window::size_changed_event_t& ctx)
             {
                 aspect = (f32)ctx.width / (f32)ctx.height;
             });
     }
 
-    void camera_ct::update(f64 delta_time)
+    void camera_ct::update([[maybe_unused]] f64 delta_time)
     {
-        // 11.09.2025: thank jesus, i finally stopped being blind, rotations of camera are now correct
+        // 11.09.2025: thank Jesus, i finally stopped being blind, rotations of camera are now correct
         glm_perspective_lh_no(fov, aspect, near_plane, far_plane, projection_matrix.data);
 
         mat4_t& cam_world = transform->get_world_matrix();

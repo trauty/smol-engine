@@ -7,7 +7,6 @@
 #include "main_thread.h"
 #include "physics.h"
 #include "rendering/renderer.h"
-#include "smol/asset/asset.h"
 #include "time_util.h"
 #include "window.h"
 
@@ -133,6 +132,12 @@ namespace smol::engine
     int shutdown()
     {
         SMOL_LOG_INFO("ENGINE", "Stopping engine.");
+
+        if (current_level != nullptr)
+        {
+            current_level = nullptr;
+        }
+
         smol::renderer::shutdown();
         smol::physics::shutdown();
         smol::asset_manager::shutdown();

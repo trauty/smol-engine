@@ -4,7 +4,7 @@
 
 namespace smol::core
 {
-    void component_t::set_owner(const std::shared_ptr<gameobject_t>& new_owner)
+    void component_t::set_owner(std::shared_ptr<gameobject_t> new_owner)
     {
         owner = new_owner;
     }
