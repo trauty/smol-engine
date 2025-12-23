@@ -25,7 +25,7 @@ namespace smol::log
     SMOL_API void set_level(level_e level);
     SMOL_API void set_max_file_size(size_t size);
     SMOL_API bool to_file(const std::string& path);
-    SMOL_API void start();
+    SMOL_API void init();
     SMOL_API void shutdown();
     SMOL_API void write(level_e level, const char* category, std::string_view msg);
 } // namespace smol::log

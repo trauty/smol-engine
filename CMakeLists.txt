@@ -31,7 +31,7 @@ include(cmake/CPM.cmake)
 find_package(Threads REQUIRED)
 
 CPMAddPackage(
-    URI "gh:libsdl-org/SDL#release-3.2.24"
+    URI "gh:libsdl-org/SDL#release-3.2.28"
     OPTIONS "SDL_AUDIO_DEFAULT OFF" 
     "SDL_GPU_DEFAULT OFF"
     "SDL_RENDER_DEFAULT OFF"
@@ -70,6 +70,44 @@ CPMAddPackage(
 	SOURCE_SUBDIR "Build"
 )
 
+set(SLANG_VENDOR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/lib/slang")
+set(SLANG_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include/slang")
+
+if(WIN32)
+    set(SLANG_PLATFORM_DIR "${SLANG_VENDOR_DIR}/windows")
+    set(SLANG_LIB "${SLANG_PLATFORM_DIR}/slang.lib")
+
+    set(SLANG_RUNTIME_FILES 
+        "${SLANG_PLATFORM_DIR}/slang.dll"
+        "${SLANG_PLATFORM_DIR}/slang-glslang.dll"
+    )
+elseif(LINUX)
+    set(SLANG_PLATFORM_DIR "${SLANG_VENDOR_DIR}/linux")
+    set(SLANG_LIB "${SLANG_PLATFORM_DIR}/libslang.so")
+
+    set(SLANG_RUNTIME_FILES 
+        "${SLANG_PLATFORM_DIR}/libslang.so"
+        "${SLANG_PLATFORM_DIR}/libslang-glslang.so"
+    )
+endif()
+
+add_library(slang SHARED IMPORTED GLOBAL)
+
+set_target_properties(slang PROPERTIES
+    INTERFACE_INCLUDE_DIRECTORIES "${SLANG_INCLUDE_DIR}"
+)
+
+if(WIN32)
+    set_target_properties(slang PROPERTIES 
+        IMPORTED_IMPLIB "${SLANG_LIB}"
+        IMPORTED_LOCATION "${SLANG_PLATFORM_DIR}/slang.dll"
+    )
+elseif(LINUX)
+    set_target_properties(slang PROPERTIES 
+        IMPORTED_LOCATION "${SLANG_LIB}"
+    )
+endif()
+
 set(SMOL_ENGINE_NAME "smol-engine")
 set(SMOL_ENGINE_SRC_DIR "src/smol")
 
@@ -94,6 +132,7 @@ set(SMOL_ENGINE_SOURCES
 	${SMOL_ENGINE_SRC_DIR}/main_thread.cpp
 	${SMOL_ENGINE_SRC_DIR}/events.cpp
 	${SMOL_ENGINE_SRC_DIR}/physics.cpp
+	${SMOL_ENGINE_SRC_DIR}/asset.cpp
 
     ${SMOL_ENGINE_SRC_DIR}/core/component.cpp
     ${SMOL_ENGINE_SRC_DIR}/core/gameobject.cpp
@@ -108,7 +147,6 @@ set(SMOL_ENGINE_SOURCES
 	${SMOL_ENGINE_SRC_DIR}/components/capsule_collider.cpp
 	${SMOL_ENGINE_SRC_DIR}/components/rigidbody.cpp
 
-    ${SMOL_ENGINE_SRC_DIR}/asset/asset_manager.cpp
     ${SMOL_ENGINE_SRC_DIR}/asset/texture.cpp
     ${SMOL_ENGINE_SRC_DIR}/asset/shader.cpp
     ${SMOL_ENGINE_SRC_DIR}/asset/mesh.cpp
@@ -141,7 +179,7 @@ target_link_libraries(
 	fmt
     cglm
 	Jolt
-	${SMOL_ADDITIONAL_SYS_LIBS}
+	slang
 )
 
 target_include_directories(${SMOL_ENGINE_NAME} PUBLIC 
@@ -172,6 +210,13 @@ add_custom_target(copy_assets
 )
 
 add_dependencies(${SMOL_ENGINE_NAME} copy_assets)
+
+add_custom_command(TARGET ${SMOL_ENGINE_NAME} POST_BUILD
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+    ${SLANG_RUNTIME_FILES}
+    $<TARGET_FILE_DIR:${SMOL_ENGINE_NAME}>
+    COMMENT "Copying Slang runtime files to output directory..."
+)
 
 # CPack
 #set(CPACK_PROJECT_NAME ${SMOL_GAME_NAME})

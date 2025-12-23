@@ -1,11 +1,14 @@
 #pragma once
-#include "asset.h"
+#include "smol/asset.h"
+#include "smol/asset/shader.h"
 #include "smol/defines.h"
 
 #include <glad/gl.h>
+#include <memory>
+#include <optional>
 #include <string>
 
-namespace smol::asset
+namespace smol
 {
     enum class texture_type_e
     {
@@ -15,28 +18,28 @@ namespace smol::asset
         NORMAL
     };
 
-    struct texture_asset_args_t
+    struct texture_render_data_t
     {
-        texture_type_e type;
-        texture_asset_args_t(texture_type_e type) : type(type) {}
+        GLuint id = 0;
+
+        ~texture_render_data_t();
     };
 
-    class texture_asset_t : public asset_t
+    struct texture_asset_t
     {
-      public:
-        texture_asset_t(const std::string& path, texture_asset_args_t args);
-        ~texture_asset_t();
+        std::shared_ptr<texture_render_data_t> tex_data = std::make_shared<texture_render_data_t>();
 
-        u32 get_texture_id() const;
-        i32 get_width() const;
-        i32 get_height() const;
-        texture_type_e get_type() const;
+        i32 width = 0;
+        i32 height = 0;
+        texture_type_e type = texture_type_e::ALBEDO;
 
-      private:
-        GLuint texture_id;
-        i32 width;
-        i32 height;
-
-        texture_type_e type;
+        bool ready() const { return tex_data->id != 0; }
     };
-} // namespace smol::asset
+
+    template<>
+    struct asset_loader_t<texture_asset_t>
+    {
+        static std::optional<texture_asset_t> load(const std::string& path,
+                                                   texture_type_e type = texture_type_e::ALBEDO);
+    };
+} // namespace smol

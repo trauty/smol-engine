@@ -173,7 +173,7 @@ namespace smol::log
         queue_vc.notify_one();
     }
 
-    void start()
+    void init()
     {
         is_running = true;
 #if SMOL_PLATFORM_WIN

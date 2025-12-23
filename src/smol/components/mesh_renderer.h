@@ -1,17 +1,9 @@
 #pragma once
 
 #include "renderer_component.h"
-#include "smol/asset/asset.h"
-
-namespace smol::asset
-{
-    class mesh_asset_t;
-}
-
-namespace smol::rendering
-{
-    class material_t;
-}
+#include "smol/asset.h"
+#include "smol/asset/mesh.h"
+#include "smol/rendering/material.h"
 
 namespace smol::components
 {
@@ -20,11 +12,11 @@ namespace smol::components
       public:
         void render() const;
 
-        void set_mesh(smol::asset::asset_ptr_t<smol::asset::mesh_asset_t> mesh);
+        void set_mesh(smol::asset_t<smol::mesh_asset_t> mesh);
         void set_material(std::shared_ptr<smol::rendering::material_t> material);
 
       private:
-        smol::asset::asset_ptr_t<smol::asset::mesh_asset_t> mesh;
+        smol::asset_t<smol::mesh_asset_t> mesh;
         std::shared_ptr<smol::rendering::material_t> material;
     };
 } // namespace smol::components

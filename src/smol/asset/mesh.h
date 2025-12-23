@@ -1,29 +1,37 @@
 #pragma once
 
-#include "asset.h"
+#include "smol/asset.h"
 #include "smol/defines.h"
+#include <memory>
+#include <optional>
+#include <string>
 
-using GLuint = u32;
-
-namespace smol::asset
+namespace smol
 {
-    class mesh_asset_t : public asset_t
+    struct mesh_render_data_t
     {
-      public:
-        mesh_asset_t(const std::string& path);
-        ~mesh_asset_t();
+        u32 vao = 0;
+        u32 vbo = 0;
+        u32 ebo = 0;
 
-        GLuint get_vao() const;
-        i32 get_vertex_count() const;
-        i32 get_index_count() const;
-        bool has_indices() const;
+        ~mesh_render_data_t();
+    };
 
-      private:
-        GLuint vao = 0;
-        GLuint vbo = 0;
-        GLuint ebo = 0;
+    struct mesh_asset_t
+    {
+        std::shared_ptr<mesh_render_data_t> mesh_data = std::make_shared<mesh_render_data_t>();
+
         i32 vertex_count = 0;
         i32 index_count = 0;
         bool uses_indices = false;
+
+        u32 vao() const { return mesh_data->vao; }
+        bool ready() const { return mesh_data->vao != 0; }
     };
-} // namespace smol::asset
+
+    template<>
+    struct asset_loader_t<mesh_asset_t>
+    {
+        static std::optional<mesh_asset_t> load(const std::string& path);
+    };
+} // namespace smol

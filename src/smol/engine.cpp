@@ -1,6 +1,6 @@
 #include "engine.h"
 
-#include "asset/asset_manager.h"
+#include "asset.h"
 #include "core/level.h"
 #include "defines.h"
 #include "log.h"
@@ -16,9 +16,6 @@
 #include <SDL3/SDL_video.h>
 #include <glad/gl.h>
 
-using namespace smol::asset;
-using namespace smol::asset_manager;
-
 namespace smol::engine
 {
     namespace
@@ -28,9 +25,9 @@ namespace smol::engine
 
     int init(const std::string& game_name, i32 init_window_width, i32 init_window_height)
     {
-        smol::log::start();
+        smol::log::init();
         smol::log::set_level(smol::log::level_e::LOG_DEBUG);
-        smol::asset_manager::init();
+        smol::asset_manager_t::init();
         smol::physics::init();
 
         SMOL_LOG_INFO("ENGINE", "Starting engine.");
@@ -44,7 +41,8 @@ namespace smol::engine
         SDL_GL_SetAttribute(SDL_GL_DOUBLEBUFFER, 1);
         SDL_GL_SetAttribute(SDL_GL_DEPTH_SIZE, 24);
 
-        SDL_Window* window = SDL_CreateWindow(game_name.c_str(), init_window_width, init_window_height, SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
+        SDL_Window* window = SDL_CreateWindow(game_name.c_str(), init_window_width, init_window_height,
+                                              SDL_WINDOW_OPENGL | SDL_WINDOW_RESIZABLE);
         SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
         SDL_GL_CreateContext(window);
         smol::window::set_window(window);
@@ -69,7 +67,7 @@ namespace smol::engine
     {
         current_level->start();
 
-        constexpr f64 fixed_timestep = 1.0 / 60.0; // this should be in a settings menu later on
+        constexpr f64 fixed_timestep = 1.0 / 60.0; // this should be in a settings file later on
         f64 current_time = smol::time::get_time_in_seconds();
         f64 accumulator = 0.0;
 
@@ -82,10 +80,7 @@ namespace smol::engine
             const f64 new_time = smol::time::get_time_in_seconds();
             f64 frame_time = new_time - current_time;
 
-            if (frame_time >= 0.25)
-            {
-                frame_time = 0.25;
-            }
+            if (frame_time >= 0.25) { frame_time = 0.25; }
 
             current_time = new_time;
             accumulator += frame_time;
@@ -108,14 +103,11 @@ namespace smol::engine
             {
                 switch (event.type)
                 {
-                    case SDL_EVENT_QUIT:
-                        is_running = false;
-                        break;
+                    case SDL_EVENT_QUIT: is_running = false; break;
                     case SDL_EVENT_WINDOW_RESIZED:
                         smol::window::set_window_size(event.window.data1, event.window.data2);
                         break;
-                    default:
-                        break;
+                    default: break;
                 }
             }
 
@@ -133,14 +125,11 @@ namespace smol::engine
     {
         SMOL_LOG_INFO("ENGINE", "Stopping engine.");
 
-        if (current_level != nullptr)
-        {
-            current_level = nullptr;
-        }
+        if (current_level != nullptr) { current_level = nullptr; }
 
         smol::renderer::shutdown();
         smol::physics::shutdown();
-        smol::asset_manager::shutdown();
+        smol::asset_manager_t::shutdown();
         smol::window::shutdown();
         smol::log::shutdown();
         return 0;

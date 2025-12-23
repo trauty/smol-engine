@@ -43,6 +43,7 @@ namespace smol::window
 
     void shutdown()
     {
+        SDL_QuitSubSystem(SDL_INIT_VIDEO);
         SDL_Quit();
     }
 } // namespace smol::window

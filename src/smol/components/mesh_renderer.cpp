@@ -12,8 +12,7 @@ namespace smol::components
 {
     void mesh_renderer_ct::render() const
     {
-        if (!mesh || !material)
-            return;
+        if (!mesh || !material) return;
 
         material->shader->bind();
 
@@ -22,22 +21,16 @@ namespace smol::components
         material->set_uniform("smol_model_mat", model_mat);
         material->apply_uniforms();
 
-        glBindVertexArray(mesh->get_vao());
-        if (mesh->has_indices())
-        {
-            glDrawElements(GL_TRIANGLES, mesh->get_index_count(), GL_UNSIGNED_INT, 0);
-        }
+        glBindVertexArray(mesh->vao());
+        if (mesh->uses_indices) { glDrawElements(GL_TRIANGLES, mesh->index_count, GL_UNSIGNED_INT, 0); }
         else
         {
-            glDrawArrays(GL_TRIANGLES, 0, mesh->get_vertex_count());
+            glDrawArrays(GL_TRIANGLES, 0, mesh->vertex_count);
         }
         glBindVertexArray(0);
     }
 
-    void mesh_renderer_ct::set_mesh(smol::asset::asset_ptr_t<smol::asset::mesh_asset_t> mesh)
-    {
-        this->mesh = mesh;
-    }
+    void mesh_renderer_ct::set_mesh(smol::asset_t<smol::mesh_asset_t> mesh) { this->mesh = mesh; }
 
     void mesh_renderer_ct::set_material(std::shared_ptr<smol::rendering::material_t> material)
     {
