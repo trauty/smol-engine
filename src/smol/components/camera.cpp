@@ -48,11 +48,7 @@ namespace smol::components
         glm_mat4_inv(cam_world.data, view_matrix.data);
     }
 
-    void camera_ct::set_as_main_camera()
-    {
-        main_camera = this;
-        smol::renderer::rebind_camera_block_to_all_shaders();
-    }
+    void camera_ct::set_as_main_camera() { main_camera = this; }
 
     void camera_ct::set_fov(f32 fov) { this->fov = 2.0f * atanf(tanf(glm_rad(fov) / 2.0f) / aspect); }
 } // namespace smol::components

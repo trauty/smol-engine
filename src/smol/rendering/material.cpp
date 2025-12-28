@@ -2,10 +2,21 @@
 
 #include "smol/asset/shader.h"
 #include "smol/defines.h"
+#include <cstring>
 
-namespace smol::rendering
+namespace smol
 {
-    material_t::material_t(smol::asset_t<smol::shader_asset_t> shader_asset) { this->shader = shader_asset; }
+    void material_t::init(const smol::shader_asset_t& s)
+    {
+        shader = s;
 
-    void material_t::set_uniform(const std::string& name, uniform_value_t value) { shader->set_uniform(name, value); }
-} // namespace smol::rendering
+        if (shader.shader_data->reflection.ubo_sizes.count(1))
+        {
+            size_t size = shader.shader_data->reflection.ubo_sizes[1];
+            parameter_buf.resize(size);
+            std::memset(parameter_buf.data(), 0, size);
+
+            ubo.init(size);
+        }
+    }
+} // namespace smol

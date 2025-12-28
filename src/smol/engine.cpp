@@ -7,6 +7,7 @@
 #include "main_thread.h"
 #include "physics.h"
 #include "rendering/renderer.h"
+#include "smol/rendering/shader_compiler.h"
 #include "time_util.h"
 #include "window.h"
 
@@ -58,6 +59,7 @@ namespace smol::engine
         glFrontFace(GL_CW);
 
         glViewport(0, 0, init_window_width, init_window_height);
+        smol::shader_compiler::init();
         smol::renderer::init();
 
         return 0;
@@ -127,7 +129,6 @@ namespace smol::engine
 
         if (current_level != nullptr) { current_level = nullptr; }
 
-        smol::renderer::shutdown();
         smol::physics::shutdown();
         smol::asset_manager_t::shutdown();
         smol::window::shutdown();

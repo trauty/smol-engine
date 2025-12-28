@@ -5,7 +5,7 @@ set(CMAKE_SYSTEM_NAME Windows)
 set(CMAKE_C_COMPILER clang)
 set(CMAKE_CXX_COMPILER clang++)
 
-set(CMAKE_CXX_FLAGS_INIT "-target x86_64-w64-mingw32 -stdlib=libc++")
+set(CMAKE_CXX_FLAGS_INIT "-target x86_64-w64-mingw32")
 
 set(CMAKE_EXE_LINKER_FLAGS_INIT "-fuse-ld=lld")
 set(CMAKE_SHARED_LINKER_FLAGS_INIT "-fuse-ld=lld")

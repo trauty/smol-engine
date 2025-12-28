@@ -5,8 +5,10 @@
 #include "smol/log.h"
 #include "smol/main_thread.h"
 #include "smol/rendering/renderer.h"
+#include "smol/rendering/shader_compiler.h"
 #include "smol/util.h"
 
+#include <cstddef>
 #include <glad/gl.h>
 #include <optional>
 #include <slang-com-ptr.h>
@@ -22,20 +24,104 @@ namespace smol
         {
             std::string vert_glsl;
             std::string frag_glsl;
+            shader_reflection_t reflection;
             bool success = false;
         };
+
+        smol::shader_data_type_e map_slang_type(slang::TypeReflection* type)
+        {
+            slang::TypeReflection::Kind field_type = type->getKind();
+            if (field_type == slang::TypeReflection::Kind::Scalar)
+            {
+                if (type->getScalarType() == slang::TypeReflection::ScalarType::Float32)
+                {
+                    return shader_data_type_e::FLOAT;
+                }
+                if (type->getScalarType() == slang::TypeReflection::ScalarType::Int32)
+                {
+                    return shader_data_type_e::INT;
+                }
+            }
+            else if (field_type == slang::TypeReflection::Kind::Vector)
+            {
+                size_t count = type->getElementCount();
+
+                switch (count)
+                {
+                    case 2: return shader_data_type_e::FLOAT2; break;
+                    case 3: return shader_data_type_e::FLOAT3; break;
+                    case 4: return shader_data_type_e::FLOAT4; break;
+                }
+            }
+            else if (field_type == slang::TypeReflection::Kind::Matrix)
+            {
+                u32 rows = type->getRowCount();
+                u32 cols = type->getColumnCount();
+
+                if (rows == 4 && cols == 4) { return shader_data_type_e::MAT4; }
+            }
+            else if (field_type == slang::TypeReflection::Kind::Resource) { return shader_data_type_e::TEXTURE; }
+
+            return shader_data_type_e::UNDEFINED;
+        }
+
+        shader_reflection_t reflect_slang_layout(slang::ProgramLayout* layout)
+        {
+            shader_reflection_t reflection;
+
+            u32 param_count = layout->getParameterCount();
+            for (u32 i = 0; i < param_count; i++)
+            {
+                slang::VariableLayoutReflection* param = layout->getParameterByIndex(i);
+                slang::TypeLayoutReflection* type = param->getTypeLayout();
+
+                SMOL_LOG_INFO("SHADER", "Type name: {}", type->getName());
+
+                if (type->getKind() == slang::TypeReflection::Kind::ConstantBuffer)
+                {
+                    u32 binding_index = param->getBindingIndex();
+                    size_t total_size = type->getSize();
+
+                    reflection.ubo_sizes[binding_index] = total_size;
+
+                    u32 field_count = type->getFieldCount();
+                    for (u32 f = 0; f < field_count; f++)
+                    {
+                        slang::VariableLayoutReflection* field = type->getFieldByIndex(f);
+
+                        shader_field_t info;
+                        info.name = field->getName();
+                        info.type = map_slang_type(field->getTypeLayout()->getType());
+                        info.ubo_binding = binding_index;
+                        info.offset = field->getOffset();
+                        info.size = field->getTypeLayout()->getSize();
+
+                        reflection.material_fields[info.name] = info;
+                    }
+                }
+                else if (type->getKind() == slang::TypeReflection::Kind::Resource)
+                {
+                    shader_field_t info;
+                    info.name = param->getName();
+                    info.type = shader_data_type_e::TEXTURE;
+                    info.tex_unit = param->getBindingIndex();
+
+                    reflection.material_fields[info.name] = info;
+                }
+            }
+            return reflection;
+        }
 
         slang_compilation_res_t compile_slang_to_glsl(const std::string& path)
         {
             slang_compilation_res_t res;
 
-            Slang::ComPtr<slang::IGlobalSession> global_session;
-            slang::createGlobalSession(global_session.writeRef());
+            slang::IGlobalSession* global_session = smol::shader_compiler::get_global_session();
 
             slang::SessionDesc session_desc = {};
             slang::TargetDesc target_desc = {};
             target_desc.format = SLANG_GLSL;
-            target_desc.profile = global_session->findProfile("glsl450");
+            target_desc.profile = global_session->findProfile("glsl_330");
             session_desc.targets = &target_desc;
             session_desc.targetCount = 1;
 
@@ -61,6 +147,10 @@ namespace smol
 
             Slang::ComPtr<slang::IComponentType> composed_program;
             session->createCompositeComponentType(components.data(), components.size(), composed_program.writeRef());
+
+            // reflection logic
+            slang::ProgramLayout* layout = composed_program->getLayout();
+            res.reflection = reflect_slang_layout(layout);
 
             Slang::ComPtr<slang::IBlob> kernel_blob;
             composed_program->getEntryPointCode(0, 0, kernel_blob.writeRef(), diag_blob.writeRef());
@@ -106,6 +196,7 @@ namespace smol
         }
 
         shader_asset_t shader_asset;
+        shader_asset.shader_data->reflection = compiled_shader.reflection;
 
         smol::main_thread::enqueue([shader_data = shader_asset.shader_data,
                                     vert_src = std::move(compiled_shader.vert_glsl),
@@ -139,10 +230,16 @@ namespace smol
                 shader_data->program_id = program_id;
             }
 
+            for (auto& [name, field] : shader_data->reflection.material_fields)
+            {
+                if (field.type == shader_data_type_e::TEXTURE)
+                {
+                    field.location = glGetUniformLocation(program_id, name.c_str());
+                }
+            }
+
             glDeleteShader(vert_shader_id);
             glDeleteShader(frag_shader_id);
-
-            smol::renderer::bind_camera_to_shader(program_id);
         });
 
         return shader_asset;
@@ -153,48 +250,7 @@ namespace smol
         u32 id = program_id;
         if (id != 0)
         {
-            smol::main_thread::enqueue([id]() {
-                glDeleteProgram(id);
-                smol::renderer::unbind_camera_to_shader(id);
-            });
+            smol::main_thread::enqueue([id]() { glDeleteProgram(id); });
         }
-    }
-
-    void shader_asset_t::set_uniform(const std::string& name, const uniform_value_t& value) const
-    {
-        GLint location = glGetUniformLocation(shader_data->program_id, name.c_str());
-        if (location == -1)
-        {
-            SMOL_LOG_ERROR("SHADER", "Could not set uniform with name '{}'", name);
-            return;
-        }
-
-        std::visit(
-            [&](auto&& val) {
-                using T = std::decay_t<decltype(val)>;
-
-                if constexpr (std::is_same_v<T, i32>) glUniform1i(location, val);
-                if constexpr (std::is_same_v<T, f32>) glUniform1f(location, val);
-                if constexpr (std::is_same_v<T, smol::math::vec3_t>) glUniform3fv(location, 1, val.raw());
-                if constexpr (std::is_same_v<T, smol::math::vec4_t>) glUniform4fv(location, 1, val.raw());
-                if constexpr (std::is_same_v<T, smol::color_t>) glUniform4fv(location, 1, val.data);
-                if constexpr (std::is_same_v<T, smol::math::mat4_t>)
-                    glUniformMatrix4fv(location, 1, GL_FALSE, val.raw());
-            },
-            value);
-    }
-
-    void shader_asset_t::bind_texture(const std::string& name, u32 tex_id, u32 slot) const
-    {
-        glActiveTexture(GL_TEXTURE0 + slot);
-        glBindTexture(GL_TEXTURE_2D, tex_id);
-
-        GLint location = glGetUniformLocation(shader_data->program_id, name.c_str());
-        if (location == -1)
-        {
-            SMOL_LOG_ERROR("SHADER", "Could not set sampler with name '{}'", name);
-            return;
-        }
-        glUniform1f(location, slot);
     }
 } // namespace smol

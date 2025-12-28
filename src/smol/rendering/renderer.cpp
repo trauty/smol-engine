@@ -1,12 +1,19 @@
 #include "renderer.h"
 
+#include "smol/asset/mesh.h"
 #include "smol/components/camera.h"
-#include "smol/components/renderer_component.h"
+#include "smol/components/renderer.h"
 #include "smol/components/transform.h"
+#include "smol/core/gameobject.h"
 #include "smol/log.h"
 #include "smol/math_util.h"
+#include "smol/rendering/material.h"
+#include "smol/rendering/ubo.h"
 
+#include <SDL3/SDL_opengl.h>
 #include <algorithm>
+#include <cglm/mat4.h>
+#include <cglm/vec3.h>
 #include <iostream>
 #include <vector>
 
@@ -19,7 +26,7 @@ namespace smol::renderer
         std::vector<GLuint> all_shader_programs;
 
         // Camera UBO
-        struct alignas(32) camera_ubo_t
+        struct alignas(32) camera_data_t
         {
             mat4 smol_view;
             mat4 smol_projection;
@@ -29,84 +36,70 @@ namespace smol::renderer
             f32 padding1;
         };
 
-        constexpr std::size_t OFFSET_VIEW = offsetof(camera_ubo_t, smol_view);
-        constexpr std::size_t OFFSET_PROJECTION = offsetof(camera_ubo_t, smol_projection);
-        constexpr std::size_t OFFSET_POSITION = offsetof(camera_ubo_t, smol_camera_position);
-        constexpr std::size_t OFFSET_DIRECTION = offsetof(camera_ubo_t, smol_camera_direction);
+        ubo_t cam_buf;
 
-        GLuint camera_binding_point = 0;
-        GLuint camera_ubo;
+        struct object_data_t
+        {
+            mat4 smol_model_matrix;
+        };
+
+        ubo_t obj_buf;
     } // namespace
 
     void init()
     {
-        glGenBuffers(1, &camera_ubo);
-        glBindBuffer(GL_UNIFORM_BUFFER, camera_ubo);
-        glBufferData(GL_UNIFORM_BUFFER, sizeof(camera_ubo_t), nullptr, GL_DYNAMIC_DRAW);
-        glBindBufferBase(GL_UNIFORM_BUFFER, camera_binding_point, camera_ubo);
-        glBindBuffer(GL_UNIFORM_BUFFER, 0);
-    }
-
-    void bind_camera_to_shader(GLuint shader_program)
-    {
-        if (std::find(all_shader_programs.begin(), all_shader_programs.end(), shader_program) ==
-            all_shader_programs.end())
-        {
-            all_shader_programs.push_back(shader_program);
-        }
-
-        GLuint block_index = glGetUniformBlockIndex(shader_program, "smol_camera");
-        if (block_index != GL_INVALID_INDEX)
-        {
-            glUniformBlockBinding(shader_program, block_index, camera_binding_point);
-        }
-        else
-        {
-            SMOL_LOG_ERROR("RENDER", "Shader programm '{}' tried to bind to smol_camera UBO without it existing",
-                           shader_program);
-        }
-    }
-
-    void unbind_camera_to_shader(GLuint shader_program)
-    {
-        std::vector<GLuint>::const_iterator it =
-            std::find(all_shader_programs.begin(), all_shader_programs.end(), shader_program);
-
-        if (it == all_shader_programs.end())
-        {
-            SMOL_LOG_ERROR("RENDER", "Tried to unbind shader with program id '{}', but none with that id exists",
-                           shader_program);
-            return;
-        }
-
-        all_shader_programs.erase(it);
-    }
-
-    void rebind_camera_block_to_all_shaders()
-    {
-        for (GLuint program : all_shader_programs) { bind_camera_to_shader(program); }
+        cam_buf.init(sizeof(camera_data_t));
+        obj_buf.init(sizeof(object_data_t));
     }
 
     void render()
     {
-        if (camera_ct::main_camera == nullptr) return;
+        return;
+        if (camera_ct::main_camera == nullptr) { return; }
 
-        glBindBuffer(GL_UNIFORM_BUFFER, camera_ubo);
-        glBufferSubData(GL_UNIFORM_BUFFER, OFFSET_VIEW, sizeof(mat4), camera_ct::main_camera->view_matrix);
-        glBufferSubData(GL_UNIFORM_BUFFER, OFFSET_PROJECTION, sizeof(mat4), camera_ct::main_camera->projection_matrix);
-        glBufferSubData(GL_UNIFORM_BUFFER, OFFSET_POSITION, sizeof(vec3),
-                        camera_ct::main_camera->transform->get_world_position().data);
-        glBufferSubData(GL_UNIFORM_BUFFER, OFFSET_DIRECTION, sizeof(vec3),
-                        camera_ct::main_camera->transform->get_world_euler_angles().data);
+        camera_ct* cam = camera_ct::main_camera;
+
+        camera_data_t cam_data;
+        glm_mat4_copy(cam->view_matrix.data, cam_data.smol_view);
+        glm_mat4_copy(cam->projection_matrix.data, cam_data.smol_projection);
+        glm_vec3_copy(cam->transform->get_world_position().data, cam_data.smol_camera_position);
+        glm_vec3_copy(cam->transform->get_world_euler_angles().data, cam_data.smol_camera_direction);
+
+        cam_buf.update(&cam_data, sizeof(camera_data_t));
+        cam_buf.bind(0);
 
         for (const renderer_ct* renderer : renderer_ct::all_renderers)
         {
-            if (renderer->is_active()) { renderer->render(); }
-        }
-    }
+            if (!renderer->is_active()) { continue; }
 
-    void shutdown()
-    {
-        if (camera_ubo) glDeleteBuffers(1, &camera_ubo);
+            const material_t& mat = renderer->material;
+            const mesh_asset_t& mesh = renderer->mesh;
+
+            if (!mat.shader.ready() || !mesh.ready()) { continue; }
+
+            mat.shader.bind();
+
+            if (mat.ubo.ready()) { mat.ubo.bind(1); }
+
+            // textures (no explicit bindings in opengl 3.3)
+            for (size_t i = 0; i < mat.active_textures.size(); ++i)
+            {
+                const texture_binding_t& bind = mat.active_textures[i];
+
+                glActiveTexture(GL_TEXTURE0 + i);
+                glBindTexture(GL_TEXTURE_2D, bind.id);
+                glUniform1i(bind.location, (i32)i);
+            }
+
+            object_data_t obj_data;
+            glm_mat4_copy(renderer->get_gameobject()->get_transform()->get_world_matrix().data,
+                          obj_data.smol_model_matrix);
+            obj_buf.update(&obj_data, sizeof(object_data_t));
+            obj_buf.bind(2);
+
+            glBindVertexArray(mesh.vao());
+            // need to force the use of the ebo, this just assumes it exists, which it does in most cases (still bad)
+            glDrawElements(GL_TRIANGLES, mesh.index_count, GL_UNSIGNED_INT, 0);
+        }
     }
 } // namespace smol::renderer

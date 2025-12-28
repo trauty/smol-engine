@@ -29,6 +29,7 @@ set(CPM_SOURCE_CACHE "${CMAKE_CURRENT_SOURCE_DIR}/.cpmcache" CACHE STRING "CPM c
 include(cmake/CPM.cmake)
 
 find_package(Threads REQUIRED)
+find_package(Vulkan REQUIRED)
 
 CPMAddPackage(
     URI "gh:libsdl-org/SDL#release-3.2.28"
@@ -43,8 +44,8 @@ CPMAddPackage(
     "SDL_DIALOG_DEFAULT OFF"
     "SDL_TEST_LIBRARY OFF"
     "SDL_OPENGLES OFF"
-    "SDL_OPENGL ON"
-    "SDL_VULKAN OFF"
+    "SDL_OPENGL OFF"
+    "SDL_VULKAN ON"
     "SDL_DIRECTX OFF"
     "SDL_SHARED OFF"
     "SDL_STATIC ON"
@@ -70,6 +71,15 @@ CPMAddPackage(
 	SOURCE_SUBDIR "Build"
 )
 
+find_library(VULKAN_LOADER_LIB 
+        NAMES vulkan libvulkan
+        HINTS "$ENV{VULKAN_SDK}"
+        PATH_SUFFIXES lib
+        NO_DEFAULT_PATH
+    )
+
+message(${VULKAN_LOADER_LIB})
+
 set(SLANG_VENDOR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/lib/slang")
 set(SLANG_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include/slang")
 
@@ -77,17 +87,18 @@ if(WIN32)
     set(SLANG_PLATFORM_DIR "${SLANG_VENDOR_DIR}/windows")
     set(SLANG_LIB "${SLANG_PLATFORM_DIR}/slang.lib")
 
-    set(SLANG_RUNTIME_FILES 
+    set(SLANG_RUNTIME_FILES
         "${SLANG_PLATFORM_DIR}/slang.dll"
-        "${SLANG_PLATFORM_DIR}/slang-glslang.dll"
+        #"${SLANG_PLATFORM_DIR}/slang-glslang.dll"
+
     )
 elseif(LINUX)
     set(SLANG_PLATFORM_DIR "${SLANG_VENDOR_DIR}/linux")
     set(SLANG_LIB "${SLANG_PLATFORM_DIR}/libslang.so")
 
-    set(SLANG_RUNTIME_FILES 
+    set(SLANG_RUNTIME_FILES
         "${SLANG_PLATFORM_DIR}/libslang.so"
-        "${SLANG_PLATFORM_DIR}/libslang-glslang.so"
+        #"${SLANG_PLATFORM_DIR}/libslang-glslang.so"
     )
 endif()
 
@@ -98,12 +109,12 @@ set_target_properties(slang PROPERTIES
 )
 
 if(WIN32)
-    set_target_properties(slang PROPERTIES 
+    set_target_properties(slang PROPERTIES
         IMPORTED_IMPLIB "${SLANG_LIB}"
         IMPORTED_LOCATION "${SLANG_PLATFORM_DIR}/slang.dll"
     )
 elseif(LINUX)
-    set_target_properties(slang PROPERTIES 
+    set_target_properties(slang PROPERTIES
         IMPORTED_LOCATION "${SLANG_LIB}"
     )
 endif()
@@ -139,9 +150,8 @@ set(SMOL_ENGINE_SOURCES
     ${SMOL_ENGINE_SRC_DIR}/core/level.cpp
 
     ${SMOL_ENGINE_SRC_DIR}/components/transform.cpp
-    ${SMOL_ENGINE_SRC_DIR}/components/mesh_renderer.cpp
     ${SMOL_ENGINE_SRC_DIR}/components/camera.cpp
-    ${SMOL_ENGINE_SRC_DIR}/components/renderer_component.cpp
+    ${SMOL_ENGINE_SRC_DIR}/components/renderer.cpp
     ${SMOL_ENGINE_SRC_DIR}/components/collider.cpp
 	${SMOL_ENGINE_SRC_DIR}/components/box_collider.cpp
 	${SMOL_ENGINE_SRC_DIR}/components/capsule_collider.cpp
@@ -153,7 +163,8 @@ set(SMOL_ENGINE_SOURCES
 
     ${SMOL_ENGINE_SRC_DIR}/rendering/renderer.cpp
     ${SMOL_ENGINE_SRC_DIR}/rendering/material.cpp
-    ${SMOL_ENGINE_SRC_DIR}/rendering/spatial_material.cpp
+    ${SMOL_ENGINE_SRC_DIR}/rendering/ubo.cpp
+    ${SMOL_ENGINE_SRC_DIR}/rendering/shader_compiler.cpp
 
 )
 
@@ -163,8 +174,12 @@ set_target_properties(${SMOL_ENGINE_NAME} PROPERTIES PREFIX "")
 if(LINUX)
     set_target_properties(${SMOL_ENGINE_NAME} PROPERTIES
         BUILD_WITH_INSTALL_RPATH TRUE
-        INSTALL_RPATH "\$ORIGIN"
+        INSTALL_RPATH "$ORIGIN"
         SKIP_BUILD_RPATH FALSE
+    )
+    # need to move that to a policy
+    target_link_options(${SMOL_ENGINE_NAME} PRIVATE
+        LINKER:--disable-new-dtags
     )
 endif()
 
@@ -179,6 +194,7 @@ target_link_libraries(
 	fmt
     cglm
 	Jolt
+    Vulkan::Vulkan
 	slang
 )
 
@@ -197,8 +213,6 @@ install(
 
 install(FILES "$<TARGET_FILE:SDL3::SDL3>" DESTINATION .)
 install(FILES "$<TARGET_FILE:${SMOL_ENGINE_NAME}>" DESTINATION .)
-
-#install(DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/assets DESTINATION .)
 
 # Copy assets folder
 
@@ -224,7 +238,3 @@ add_custom_command(TARGET ${SMOL_ENGINE_NAME} POST_BUILD
 #set(CPACK_PACKAGE_DIRECTORY "${CMAKE_BINARY_DIR}/packages")
 #set(CPACK_INCLUDE_TOPLEVEL_DIRECTORY OFF)
 #include(CPack)
-
-#include(CTest)
-#enable_testing()
-#add_test(NAME all_tests COMMAND unit_tests)
