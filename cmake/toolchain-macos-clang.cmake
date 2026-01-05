@@ -1,4 +1,4 @@
-# Deprecated
+# Deprecated (dont have an apple device to test, is definitely broken)
 
 set(CMAKE_SYSTEM_NAME Darwin)
 

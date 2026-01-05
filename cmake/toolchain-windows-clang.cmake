@@ -1,4 +1,4 @@
-# this needs to be revamped
+# this needs to be revamped asap
 
 set(CMAKE_SYSTEM_NAME Windows)
 

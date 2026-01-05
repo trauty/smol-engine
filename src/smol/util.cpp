@@ -21,6 +21,6 @@ namespace smol::util
         }
 
         SMOL_LOG_ERROR("UTIL", "Could not load file with path: {}", path);
-        return nullptr;
+        return "";
     }
 } // namespace smol::util

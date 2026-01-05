@@ -5,9 +5,10 @@ if(CMAKE_SYSTEM_NAME STREQUAL "Linux")
   set(LINUX true)
 endif()
 
+include(cmake/policies.cmake)
+
 set(CMAKE_LIBRARY_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 set(CMAKE_RUNTIME_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
-#set(CMAKE_ARCHIVE_OUTPUT_DIRECTORY ${CMAKE_BINARY_DIR}/bin)
 
 set(CMAKE_EXPORT_COMPILE_COMMANDS ON)
 
@@ -71,34 +72,40 @@ CPMAddPackage(
 	SOURCE_SUBDIR "Build"
 )
 
-find_library(VULKAN_LOADER_LIB 
-        NAMES vulkan libvulkan
-        HINTS "$ENV{VULKAN_SDK}"
-        PATH_SUFFIXES lib
-        NO_DEFAULT_PATH
-    )
+find_library(
+    VULKAN_LOADER_LIB 
+    NAMES vulkan libvulkan
+    HINTS "$ENV{VULKAN_SDK}"
+    PATH_SUFFIXES lib
+    NO_DEFAULT_PATH
+)
 
-message(${VULKAN_LOADER_LIB})
+set(VULKAN_VENDOR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/lib/vulkan")
 
 set(SLANG_VENDOR_DIR "${CMAKE_CURRENT_SOURCE_DIR}/lib/slang")
 set(SLANG_INCLUDE_DIR "${CMAKE_CURRENT_SOURCE_DIR}/include/slang")
 
 if(WIN32)
+    set(VULKAN_PLATFORM_DIR "${VULKAN_VENDOR_DIR}/windows")
+    set(VULKAN_LIB "${VULKAN_PLATFORM_DIR}/vulkan-1.dll")
+
     set(SLANG_PLATFORM_DIR "${SLANG_VENDOR_DIR}/windows")
     set(SLANG_LIB "${SLANG_PLATFORM_DIR}/slang.lib")
 
-    set(SLANG_RUNTIME_FILES
+    set(
+        SLANG_RUNTIME_FILES
         "${SLANG_PLATFORM_DIR}/slang.dll"
-        #"${SLANG_PLATFORM_DIR}/slang-glslang.dll"
-
     )
 elseif(LINUX)
+    set(VULKAN_PLATFORM_DIR "${VULKAN_VENDOR_DIR}/linux")
+    set(VULKAN_LIB "${VULKAN_PLATFORM_DIR}/libvulkan.so.1")
+
     set(SLANG_PLATFORM_DIR "${SLANG_VENDOR_DIR}/linux")
     set(SLANG_LIB "${SLANG_PLATFORM_DIR}/libslang.so")
 
-    set(SLANG_RUNTIME_FILES
+    set(
+        SLANG_RUNTIME_FILES
         "${SLANG_PLATFORM_DIR}/libslang.so"
-        #"${SLANG_PLATFORM_DIR}/libslang-glslang.so"
     )
 endif()
 
@@ -171,17 +178,7 @@ set(SMOL_ENGINE_SOURCES
 # engine lib
 add_library(${SMOL_ENGINE_NAME} SHARED ${SMOL_ENGINE_SOURCES})
 set_target_properties(${SMOL_ENGINE_NAME} PROPERTIES PREFIX "")
-if(LINUX)
-    set_target_properties(${SMOL_ENGINE_NAME} PROPERTIES
-        BUILD_WITH_INSTALL_RPATH TRUE
-        INSTALL_RPATH "$ORIGIN"
-        SKIP_BUILD_RPATH FALSE
-    )
-    # need to move that to a policy
-    target_link_options(${SMOL_ENGINE_NAME} PRIVATE
-        LINKER:--disable-new-dtags
-    )
-endif()
+smol_set_rpath_policy(${PROJECT_NAME})
 
 target_compile_features(${SMOL_ENGINE_NAME} PUBLIC cxx_std_20)
 target_compile_definitions(${SMOL_ENGINE_NAME} PRIVATE SMOL_EXPORT)
@@ -216,21 +213,31 @@ install(FILES "$<TARGET_FILE:${SMOL_ENGINE_NAME}>" DESTINATION .)
 
 # Copy assets folder
 
-add_custom_target(copy_assets
+add_custom_target(
+    copy_assets
     COMMAND ${CMAKE_COMMAND} -E copy_directory_if_different 
             ${CMAKE_SOURCE_DIR}/assets
             ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}/assets
     COMMENT "Copying assets to build output directory"
 )
 
-add_dependencies(${SMOL_ENGINE_NAME} copy_assets)
-
-add_custom_command(TARGET ${SMOL_ENGINE_NAME} POST_BUILD
-    COMMAND ${CMAKE_COMMAND} -E copy_if_different
-    ${SLANG_RUNTIME_FILES}
-    $<TARGET_FILE_DIR:${SMOL_ENGINE_NAME}>
-    COMMENT "Copying Slang runtime files to output directory..."
+add_custom_target(
+    copy_vulkan_runtime_lib
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different 
+            ${VULKAN_LIB}
+            ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
+    COMMENT "Copying Vulkan loader library to runtime directory"
 )
+
+add_custom_target(
+    copy_slang_runtime_files
+    COMMAND ${CMAKE_COMMAND} -E copy_if_different
+            ${SLANG_RUNTIME_FILES}
+            ${CMAKE_RUNTIME_OUTPUT_DIRECTORY}
+    COMMENT "Copying Slang runtime files to output directory"
+)
+
+add_dependencies(${SMOL_ENGINE_NAME} copy_assets copy_vulkan_runtime_lib copy_slang_runtime_files)
 
 # CPack
 #set(CPACK_PROJECT_NAME ${SMOL_GAME_NAME})
