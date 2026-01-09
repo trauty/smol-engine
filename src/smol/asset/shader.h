@@ -13,64 +13,54 @@
 #include <unordered_map>
 #include <variant>
 
+#include <vulkan/vulkan_core.h>
+
 namespace smol
 {
-    enum class shader_stage_e;
-
-    enum class shader_data_type_e
-    {
-        FLOAT,
-        FLOAT2,
-        FLOAT3,
-        FLOAT4,
-        MAT4,
-        INT,
-        TEXTURE,
-        UNDEFINED
-    };
-
-    struct shader_field_t
+    struct shader_uniform_member_t
     {
         std::string name;
-        shader_data_type_e type;
+        u32 offset = 0;
+        u32 size = 0;
+        u32 set = 0;
+        u32 binding = 0;
+    };
 
-        u32 ubo_binding = 0;
-        size_t offset = 0;
-        size_t size = 0;
-
-        // unfortunately opengl 3.3 doesn't support explicit bindings...(Vulkan renderer when???)
-        u32 tex_unit = 0;
-        i32 location = -1;
+    struct descriptor_binding_t
+    {
+        u32 set = 0;
+        u32 binding = 0;
+        u32 count = 1;
+        VkDescriptorType type = VK_DESCRIPTOR_TYPE_MAX_ENUM;
     };
 
     struct shader_reflection_t
     {
-        std::unordered_map<std::string, shader_field_t> material_fields;
-        std::unordered_map<u32, size_t> ubo_sizes;
+        std::unordered_map<std::string, descriptor_binding_t> bindings;
+        std::unordered_map<std::string, shader_uniform_member_t> uniform_members;
 
-        bool has_field(const std::string& name) const { return material_fields.find(name) != material_fields.end(); }
+        u32 get_ubo_size(u32 set, u32 binding) const;
+        std::vector<VkDescriptorSetLayoutBinding> get_layout_bindings_for_set(u32 set) const;
     };
 
-    struct shader_render_data_t
+    struct shader_data_t
     {
-        u32 program_id;
+        VkPipeline pipeline = VK_NULL_HANDLE;
+        VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
+
+        VkDescriptorSetLayout material_set_layout = VK_NULL_HANDLE;
 
         shader_reflection_t reflection;
 
-        ~shader_render_data_t();
+        ~shader_data_t();
     };
 
     struct shader_asset_t
     {
-        std::shared_ptr<shader_render_data_t> shader_data = std::make_shared<shader_render_data_t>();
+        std::shared_ptr<shader_data_t> shader_data = std::make_shared<shader_data_t>();
 
-        bool ready() const { return shader_data->program_id != 0; }
-
-        // only call on main thread
-        void bind() const
-        {
-            if (ready()) { glUseProgram(shader_data->program_id); }
-        }
+        bool ready() const { return shader_data->pipeline != VK_NULL_HANDLE; }
+        shader_data_t* get_data() const { return shader_data.get(); }
     };
 
     template<>

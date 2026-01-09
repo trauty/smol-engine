@@ -1,20 +1,23 @@
 #include "shader.h"
 
 #include "smol/asset.h"
+#include "smol/asset/mesh.h"
 #include "smol/color.h"
 #include "smol/log.h"
 #include "smol/main_thread.h"
+#include "smol/math_util.h"
 #include "smol/rendering/renderer.h"
 #include "smol/rendering/shader_compiler.h"
 #include "smol/util.h"
 
 #include <cstddef>
-#include <glad/gl.h>
+#include <cstring>
 #include <optional>
 #include <slang-com-ptr.h>
 #include <slang.h>
 #include <string>
 #include <vector>
+#include <vulkan/vulkan_core.h>
 
 namespace smol
 {
@@ -22,108 +25,210 @@ namespace smol
     {
         struct slang_compilation_res_t
         {
-            std::string vert_glsl;
-            std::string frag_glsl;
+            std::vector<u32> vert_spirv;
+            std::vector<u32> frag_spirv;
             shader_reflection_t reflection;
             bool success = false;
         };
 
-        smol::shader_data_type_e map_slang_type(slang::TypeReflection* type)
+        VkShaderModule create_shader_module(const std::vector<u32>& code)
         {
-            slang::TypeReflection::Kind field_type = type->getKind();
-            if (field_type == slang::TypeReflection::Kind::Scalar)
+            VkShaderModuleCreateInfo shader_module_info = {VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+            shader_module_info.pNext = nullptr;
+            shader_module_info.codeSize = code.size() * 4;
+            shader_module_info.pCode = code.data();
+
+            VkShaderModule module;
+            if (vkCreateShaderModule(renderer::ctx::device, &shader_module_info, nullptr, &module) != VK_SUCCESS)
             {
-                if (type->getScalarType() == slang::TypeReflection::ScalarType::Float32)
+                SMOL_LOG_ERROR("VULKAN", "Failed to create shader module");
+                return VK_NULL_HANDLE;
+            }
+
+            return module;
+        }
+
+        struct traversal_state_t
+        {
+            slang::TypeLayoutReflection* type_layout;
+            std::string prefix;
+            u32 base_offset;
+        };
+
+        void reflect_struct_members(slang::TypeLayoutReflection* root_type_layout, shader_reflection_t& res, u32 set,
+                                    u32 binding)
+        {
+            std::stack<traversal_state_t> traversal_stack;
+            traversal_stack.push({root_type_layout, "", 0});
+
+            while (!traversal_stack.empty())
+            {
+                traversal_state_t cur = traversal_stack.top();
+                traversal_stack.pop();
+
+                u32 field_count = cur.type_layout->getFieldCount();
+
+                for (u32 i = 0; i < field_count; i++)
                 {
-                    return shader_data_type_e::FLOAT;
-                }
-                if (type->getScalarType() == slang::TypeReflection::ScalarType::Int32)
-                {
-                    return shader_data_type_e::INT;
+                    slang::VariableLayoutReflection* field_var = cur.type_layout->getFieldByIndex(i);
+                    slang::TypeLayoutReflection* field_type = field_var->getTypeLayout();
+
+                    const char* field_name_cstr = field_var->getName();
+                    std::string field_name = cur.prefix + (field_name_cstr ? field_name_cstr : "");
+
+                    u32 relative_offset = (u32)field_var->getOffset();
+                    u32 absolute_offset = cur.base_offset + relative_offset;
+                    u32 size = (u32)field_type->getSize();
+
+                    slang::TypeReflection::Kind kind = field_type->getKind();
+
+                    if (kind == slang::TypeReflection::Kind::Scalar || kind == slang::TypeReflection::Kind::Vector ||
+                        kind == slang::TypeReflection::Kind::Matrix)
+                    {
+                        shader_uniform_member_t member = {};
+                        member.name = field_name;
+                        member.offset = absolute_offset;
+                        member.size = size;
+                        member.set = set;
+                        member.binding = binding;
+
+                        res.uniform_members[field_name] = member;
+                        SMOL_LOG_INFO("SHADER", "Found member: {}; Offset: {}; Size: {};", field_name, absolute_offset,
+                                      size);
+                    }
+                    else if (kind == slang::TypeReflection::Kind::Struct)
+                    {
+                        traversal_stack.push({field_type, field_name + ".", absolute_offset});
+                    }
+                    else if (kind == slang::TypeReflection::Kind::Array)
+                    {
+                        slang::TypeLayoutReflection* element_type = field_type->getElementTypeLayout();
+                        u32 element_count = (u32)field_type->getElementCount();
+                        u32 element_stride = (u32)field_type->getElementStride(SLANG_PARAMETER_CATEGORY_UNIFORM);
+
+                        for (u32 j = 0; j < element_count; j++)
+                        {
+                            std::string array_element_name = field_name + "[" + std::to_string(j) + "]";
+                            u32 cur_element_offset = absolute_offset + (j * element_stride);
+                            slang::TypeReflection::Kind elem_kind = element_type->getKind();
+
+                            if (elem_kind == slang::TypeReflection::Kind::Scalar ||
+                                elem_kind == slang::TypeReflection::Kind::Vector ||
+                                elem_kind == slang::TypeReflection::Kind::Matrix)
+                            {
+                                shader_uniform_member_t member = {};
+                                member.name = array_element_name;
+                                member.offset = cur_element_offset;
+                                member.size = (u32)element_type->getSize();
+                                member.set = set;
+                                member.binding = binding;
+
+                                res.uniform_members[array_element_name] = member;
+                                SMOL_LOG_INFO("SHADER", "Found member: {}; Offset: {}; Size: {};", field_name,
+                                              absolute_offset, size);
+                            }
+                            else if (elem_kind == slang::TypeReflection::Kind::Struct)
+                            {
+                                traversal_stack.push({element_type, array_element_name + ".", cur_element_offset});
+                            }
+                        }
+                    }
                 }
             }
-            else if (field_type == slang::TypeReflection::Kind::Vector)
-            {
-                size_t count = type->getElementCount();
-
-                switch (count)
-                {
-                    case 2: return shader_data_type_e::FLOAT2; break;
-                    case 3: return shader_data_type_e::FLOAT3; break;
-                    case 4: return shader_data_type_e::FLOAT4; break;
-                }
-            }
-            else if (field_type == slang::TypeReflection::Kind::Matrix)
-            {
-                u32 rows = type->getRowCount();
-                u32 cols = type->getColumnCount();
-
-                if (rows == 4 && cols == 4) { return shader_data_type_e::MAT4; }
-            }
-            else if (field_type == slang::TypeReflection::Kind::Resource) { return shader_data_type_e::TEXTURE; }
-
-            return shader_data_type_e::UNDEFINED;
         }
 
         shader_reflection_t reflect_slang_layout(slang::ProgramLayout* layout)
         {
-            shader_reflection_t reflection;
+            shader_reflection_t res;
 
             u32 param_count = layout->getParameterCount();
             for (u32 i = 0; i < param_count; i++)
             {
-                slang::VariableLayoutReflection* param = layout->getParameterByIndex(i);
-                slang::TypeLayoutReflection* type = param->getTypeLayout();
+                slang::VariableLayoutReflection* var = layout->getParameterByIndex(i);
+                slang::TypeLayoutReflection* type = var->getTypeLayout();
+                std::string name = std::string(type->getName());
+                std::string var_name = std::string(var->getName());
 
-                SMOL_LOG_INFO("SHADER", "Type name: {}", type->getName());
+                SMOL_LOG_INFO("SHADER", "Type name: {}", name);
 
-                if (type->getKind() == slang::TypeReflection::Kind::ConstantBuffer)
+                if (var->getCategory() == slang::ParameterCategory::DescriptorTableSlot)
                 {
-                    u32 binding_index = param->getBindingIndex();
-                    size_t total_size = type->getSize();
+                    bool is_engine_global = (std::strcmp(var_name.c_str(), "smol") == 0);
 
-                    reflection.ubo_sizes[binding_index] = total_size;
+                    u32 set_index = var->getBindingSpace();
+                    if (set_index == 0 && !is_engine_global) { set_index = 1; }
 
-                    u32 field_count = type->getFieldCount();
-                    for (u32 f = 0; f < field_count; f++)
+                    descriptor_binding_t binding_info;
+                    binding_info.binding = var->getBindingIndex();
+                    binding_info.set = set_index;
+                    binding_info.count = 1;
+
+                    slang::TypeReflection::Kind kind = type->getKind();
+
+                    if (kind == slang::TypeReflection::Kind::Array)
                     {
-                        slang::VariableLayoutReflection* field = type->getFieldByIndex(f);
+                        binding_info.count = (u32)type->getElementCount();
+                        type = type->getElementTypeLayout(); // unwrapping
+                    }
 
-                        shader_field_t info;
-                        info.name = field->getName();
-                        info.type = map_slang_type(field->getTypeLayout()->getType());
-                        info.ubo_binding = binding_index;
-                        info.offset = field->getOffset();
-                        info.size = field->getTypeLayout()->getSize();
+                    if (kind == slang::TypeReflection::Kind::Resource)
+                    {
+                        SlangResourceShape shape = type->getResourceShape();
+                        if (shape == SlangResourceShape::SLANG_TEXTURE_2D)
+                        {
+                            binding_info.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
 
-                        reflection.material_fields[info.name] = info;
+                            res.bindings[var_name] = binding_info;
+                            SMOL_LOG_INFO("SHADER", "Resource: {} --> Set: {}; Binding: {}; Count: {};", name,
+                                          set_index, binding_info.binding, binding_info.count);
+                        }
+                    }
+                    else if (kind == slang::TypeReflection::Kind::ConstantBuffer)
+                    {
+                        binding_info.type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+                        res.bindings[var_name] = binding_info;
+
+                        SMOL_LOG_INFO("SHADER", "UBO: {} --> Set: {}; Binding: {};", name, set_index,
+                                      binding_info.binding);
+
+                        slang::TypeLayoutReflection* content_type = type->getElementTypeLayout();
+                        if (content_type->getKind() == slang::TypeReflection::Kind::Struct)
+                        {
+                            reflect_struct_members(content_type, res, set_index, binding_info.binding);
+                        }
                     }
                 }
-                else if (type->getKind() == slang::TypeReflection::Kind::Resource)
-                {
-                    shader_field_t info;
-                    info.name = param->getName();
-                    info.type = shader_data_type_e::TEXTURE;
-                    info.tex_unit = param->getBindingIndex();
-
-                    reflection.material_fields[info.name] = info;
-                }
             }
-            return reflection;
+            return res;
         }
 
-        slang_compilation_res_t compile_slang_to_glsl(const std::string& path)
+        slang_compilation_res_t compile_slang_to_spirv(const std::string& path)
         {
             slang_compilation_res_t res;
 
             slang::IGlobalSession* global_session = smol::shader_compiler::get_global_session();
 
+            const char* include_paths[] = {"assets/shaders"};
+
             slang::SessionDesc session_desc = {};
-            slang::TargetDesc target_desc = {};
-            target_desc.format = SLANG_GLSL;
-            target_desc.profile = global_session->findProfile("glsl_330");
-            session_desc.targets = &target_desc;
-            session_desc.targetCount = 1;
+            session_desc.searchPaths = include_paths;
+            session_desc.searchPathCount = 1;
+
+            slang::CompilerOptionEntry spirv_options[] = {
+                {slang::CompilerOptionName::EmitSpirvDirectly,
+                 {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}}};
+
+            slang::TargetDesc target_descs[2] = {};
+            target_descs[0].format = SLANG_SPIRV;
+            target_descs[0].profile = global_session->findProfile("spirv_1_5");
+            target_descs[0].compilerOptionEntries = spirv_options;
+            target_descs[0].compilerOptionEntryCount = 1;
+            target_descs[1].format = SLANG_SPIRV_ASM;
+            target_descs[1].profile = global_session->findProfile("spirv_1_5");
+            target_descs[1].compilerOptionEntries = spirv_options;
+            target_descs[1].compilerOptionEntryCount = 1;
+            session_desc.targets = target_descs;
+            session_desc.targetCount = 2;
 
             Slang::ComPtr<slang::ISession> session;
             global_session->createSession(session_desc, session.writeRef());
@@ -148,46 +253,72 @@ namespace smol
             Slang::ComPtr<slang::IComponentType> composed_program;
             session->createCompositeComponentType(components.data(), components.size(), composed_program.writeRef());
 
-            // reflection logic
-            slang::ProgramLayout* layout = composed_program->getLayout();
-            res.reflection = reflect_slang_layout(layout);
+            Slang::ComPtr<slang::IComponentType> linked_program;
+            {
+                SlangResult link_res = composed_program->link(linked_program.writeRef(), diag_blob.writeRef());
+
+                if (diag_blob && diag_blob->getBufferSize() > 0)
+                {
+                    SMOL_LOG_ERROR("SHADER", "Linking of shader program failed: {}",
+                                   (const char*)diag_blob->getBufferPointer());
+                }
+
+                if (SLANG_FAILED(link_res) || !linked_program) { return res; }
+            }
+
+            res.reflection = reflect_slang_layout(linked_program->getLayout());
+
+            auto log_assembly = [&](int entryPointIndex, const char* stageName) {
+                Slang::ComPtr<slang::IBlob> asm_blob;
+                Slang::ComPtr<slang::IBlob> asm_diag;
+
+                SlangResult res =
+                    linked_program->getEntryPointCode(entryPointIndex, 1, asm_blob.writeRef(), asm_diag.writeRef());
+
+                if (asm_diag)
+                {
+                    SMOL_LOG_ERROR("SPIRV-ASM", "{} Diagnostics:\n{}", stageName,
+                                   (const char*)asm_diag->getBufferPointer());
+                }
+
+                if (SLANG_FAILED(res) || !asm_blob)
+                {
+                    SMOL_LOG_ERROR("SPIRV-ASM", "Failed to generate assembly for {}. (Result: {:x})", stageName, res);
+                    return;
+                }
+
+                const char* asm_text = (const char*)asm_blob->getBufferPointer();
+                SMOL_LOG_INFO("SPIRV-ASM", "--- {} Assembly ---\n{}", stageName, asm_text);
+            };
+
+            log_assembly(0, "vertexMain");
+            log_assembly(1, "fragmentMain");
 
             Slang::ComPtr<slang::IBlob> kernel_blob;
-            composed_program->getEntryPointCode(0, 0, kernel_blob.writeRef(), diag_blob.writeRef());
-            if (kernel_blob) { res.vert_glsl = std::string((const char*)kernel_blob->getBufferPointer()); }
+            linked_program->getEntryPointCode(0, 0, kernel_blob.writeRef(), diag_blob.writeRef());
+            if (kernel_blob)
+            {
+                res.vert_spirv.assign((u32*)kernel_blob->getBufferPointer(),
+                                      (u32*)kernel_blob->getBufferPointer() + kernel_blob->getBufferSize() / 4);
+            }
 
             kernel_blob = nullptr;
 
-            composed_program->getEntryPointCode(1, 0, kernel_blob.writeRef(), diag_blob.writeRef());
-            if (kernel_blob) { res.frag_glsl = std::string((const char*)kernel_blob->getBufferPointer()); }
-
-            res.success = !res.vert_glsl.empty() && !res.frag_glsl.empty();
-            return res;
-        }
-
-        GLuint compile_glsl_shader(const std::string& src, GLenum type)
-        {
-            const char* c_src = src.c_str();
-            GLuint shader = glCreateShader(type);
-            glShaderSource(shader, 1, &c_src, nullptr);
-            glCompileShader(shader);
-
-            GLint success;
-            glGetShaderiv(shader, GL_COMPILE_STATUS, &success);
-            if (!success)
+            linked_program->getEntryPointCode(1, 0, kernel_blob.writeRef(), diag_blob.writeRef());
+            if (kernel_blob)
             {
-                char log[1024];
-                glGetShaderInfoLog(shader, 1024, nullptr, log);
-                SMOL_LOG_ERROR("SHADER", "GLSL compile error:\n{}", log);
-                return 0;
+                res.frag_spirv.assign((u32*)kernel_blob->getBufferPointer(),
+                                      (u32*)kernel_blob->getBufferPointer() + kernel_blob->getBufferSize() / 4);
             }
-            return shader;
+
+            res.success = !res.vert_spirv.empty() && !res.frag_spirv.empty();
+            return res;
         }
     } // namespace
 
     std::optional<shader_asset_t> smol::asset_loader_t<shader_asset_t>::load(const std::string& path)
     {
-        slang_compilation_res_t compiled_shader = compile_slang_to_glsl(path);
+        slang_compilation_res_t compiled_shader = compile_slang_to_spirv(path);
 
         if (!compiled_shader.success)
         {
@@ -198,59 +329,223 @@ namespace smol
         shader_asset_t shader_asset;
         shader_asset.shader_data->reflection = compiled_shader.reflection;
 
-        smol::main_thread::enqueue([shader_data = shader_asset.shader_data,
-                                    vert_src = std::move(compiled_shader.vert_glsl),
-                                    frag_src = std::move(compiled_shader.frag_glsl)]() {
-            GLuint vert_shader_id = compile_glsl_shader(vert_src, GL_VERTEX_SHADER);
-            GLuint frag_shader_id = compile_glsl_shader(frag_src, GL_FRAGMENT_SHADER);
+        VkShaderModule vert_mod = create_shader_module(compiled_shader.vert_spirv);
+        VkShaderModule frag_mod = create_shader_module(compiled_shader.frag_spirv);
 
-            if (!vert_shader_id || !frag_shader_id)
-            {
-                if (vert_shader_id) { glDeleteShader(vert_shader_id); }
-                if (frag_shader_id) { glDeleteShader(frag_shader_id); }
-                return;
-            }
+        if (!vert_mod || !frag_mod)
+        {
+            if (vert_mod) { vkDestroyShaderModule(renderer::ctx::device, vert_mod, nullptr); }
+            if (frag_mod) { vkDestroyShaderModule(renderer::ctx::device, frag_mod, nullptr); }
+            SMOL_LOG_ERROR("SHADER", "Could not create Vulkan shader module from file at: {}", path);
+            return std::nullopt;
+        }
 
-            GLuint program_id = glCreateProgram();
-            glAttachShader(program_id, vert_shader_id);
-            glAttachShader(program_id, frag_shader_id);
-            glLinkProgram(program_id);
+        VkPipelineShaderStageCreateInfo vert_stage_info = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO};
+        vert_stage_info.pNext = nullptr;
+        vert_stage_info.stage = VK_SHADER_STAGE_VERTEX_BIT;
+        vert_stage_info.module = vert_mod;
+        vert_stage_info.pName = "main";
 
-            GLint success;
-            glGetProgramiv(program_id, GL_LINK_STATUS, &success);
-            if (!success)
-            {
-                i8 info_log[1024];
-                glGetProgramInfoLog(program_id, 1024, nullptr, info_log);
-                SMOL_LOG_ERROR("SHADER", "Program linking failed:\n{}", info_log);
-                glDeleteProgram(program_id);
-            }
-            else
-            {
-                shader_data->program_id = program_id;
-            }
+        VkPipelineShaderStageCreateInfo frag_stage_info = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO};
+        frag_stage_info.pNext = nullptr;
+        frag_stage_info.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+        frag_stage_info.module = frag_mod;
+        frag_stage_info.pName = "main";
 
-            for (auto& [name, field] : shader_data->reflection.material_fields)
-            {
-                if (field.type == shader_data_type_e::TEXTURE)
-                {
-                    field.location = glGetUniformLocation(program_id, name.c_str());
-                }
-            }
+        VkPipelineShaderStageCreateInfo shader_stages[] = {vert_stage_info, frag_stage_info};
 
-            glDeleteShader(vert_shader_id);
-            glDeleteShader(frag_shader_id);
-        });
+        VkVertexInputBindingDescription binding_desc = {};
+        binding_desc.binding = 0;
+        binding_desc.stride = 8 * sizeof(f32);
+        binding_desc.inputRate = VK_VERTEX_INPUT_RATE_VERTEX;
+
+        VkVertexInputAttributeDescription attribs[3] = {};
+        // pos
+        attribs[0] = {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(vertex_t, position)};
+
+        // uvs
+        attribs[1] = {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(vertex_t, normal)};
+
+        // normals
+        attribs[2] = {2, 0, VK_FORMAT_R32G32_SFLOAT, offsetof(vertex_t, uv)};
+
+        VkPipelineVertexInputStateCreateInfo vertex_input_info = {
+            VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO};
+        vertex_input_info.pNext = nullptr;
+        vertex_input_info.vertexBindingDescriptionCount = 1;
+        vertex_input_info.pVertexBindingDescriptions = &binding_desc;
+        vertex_input_info.vertexAttributeDescriptionCount = 3;
+        vertex_input_info.pVertexAttributeDescriptions = attribs;
+
+        VkPipelineInputAssemblyStateCreateInfo input_assembly = {
+            VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO};
+        input_assembly.pNext = nullptr;
+        input_assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+        input_assembly.primitiveRestartEnable = VK_FALSE;
+
+        VkPipelineViewportStateCreateInfo viewport_state = {VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO};
+        viewport_state.pNext = nullptr;
+        viewport_state.viewportCount = 1;
+        viewport_state.scissorCount = 1;
+
+        VkPipelineRasterizationStateCreateInfo rasterizer = {
+            VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO};
+        rasterizer.pNext = nullptr;
+        rasterizer.depthClampEnable = VK_FALSE;
+        rasterizer.rasterizerDiscardEnable = VK_FALSE;
+        rasterizer.polygonMode = VK_POLYGON_MODE_FILL;
+        rasterizer.lineWidth = 1.0f;
+        rasterizer.cullMode = VK_CULL_MODE_BACK_BIT;
+        rasterizer.frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE; // left handed coordinate system
+        rasterizer.depthBiasEnable = VK_FALSE;
+
+        VkPipelineMultisampleStateCreateInfo multisampling_info = {
+            VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO};
+        multisampling_info.pNext = nullptr;
+        multisampling_info.sampleShadingEnable = VK_FALSE;
+        multisampling_info.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+
+        VkPipelineDepthStencilStateCreateInfo depth_stencil_info = {
+            VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO};
+        depth_stencil_info.pNext = nullptr;
+        depth_stencil_info.depthTestEnable = VK_TRUE;
+        depth_stencil_info.depthWriteEnable = VK_TRUE;
+        depth_stencil_info.depthCompareOp = VK_COMPARE_OP_LESS;
+        depth_stencil_info.depthBoundsTestEnable = VK_FALSE;
+        depth_stencil_info.stencilTestEnable = VK_FALSE;
+
+        VkPipelineColorBlendAttachmentState color_blend_attachment_info = {};
+        color_blend_attachment_info.colorWriteMask =
+            VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+        color_blend_attachment_info.blendEnable =
+            VK_FALSE; // enables transparency, off for now (should be decided per shader)
+
+        VkPipelineColorBlendStateCreateInfo color_blend_info = {
+            VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO};
+        color_blend_info.pNext = nullptr;
+        color_blend_info.logicOpEnable = VK_FALSE;
+        color_blend_info.attachmentCount = 1;
+        color_blend_info.pAttachments = &color_blend_attachment_info;
+
+        std::vector<VkDynamicState> dynamic_states = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+        VkPipelineDynamicStateCreateInfo dynamic_state = {VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO};
+        dynamic_state.pNext = nullptr;
+        dynamic_state.dynamicStateCount = static_cast<u32>(dynamic_states.size());
+        dynamic_state.pDynamicStates = dynamic_states.data();
+
+        // pipeline layout gen
+        VkDescriptorSetLayout material_layout;
+        std::vector<VkDescriptorSetLayoutBinding> mat_bindings =
+            shader_asset.shader_data->reflection.get_layout_bindings_for_set(1);
+
+        VkDescriptorSetLayoutCreateInfo layout_info = {VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO};
+        layout_info.pNext = nullptr;
+        layout_info.bindingCount = static_cast<u32>(mat_bindings.size());
+        layout_info.pBindings = mat_bindings.data();
+
+        if (vkCreateDescriptorSetLayout(renderer::ctx::device, &layout_info, nullptr, &material_layout) != VK_SUCCESS)
+        {
+            SMOL_LOG_ERROR("SHADER", "Failed to create material descriptor set layout from file at: {}", path);
+            return std::nullopt;
+        }
+
+        shader_asset.shader_data->material_set_layout = material_layout;
+
+        VkPushConstantRange push_constant = {};
+        push_constant.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+        push_constant.offset = 0;
+        push_constant.size = sizeof(smol::math::mat4_t);
+
+        VkDescriptorSetLayout set_layouts[] = {renderer::ctx::global_set_layout, material_layout};
+
+        VkPipelineLayoutCreateInfo pipeline_layout_info = {VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+        pipeline_layout_info.pNext = nullptr;
+        pipeline_layout_info.setLayoutCount = 2;
+        pipeline_layout_info.pSetLayouts = set_layouts;
+        pipeline_layout_info.pushConstantRangeCount = 1;
+        pipeline_layout_info.pPushConstantRanges = &push_constant;
+
+        if (vkCreatePipelineLayout(renderer::ctx::device, &pipeline_layout_info, nullptr,
+                                   &shader_asset.shader_data->pipeline_layout) != VK_SUCCESS)
+        {
+            SMOL_LOG_ERROR("SHADER", "Failed to create pipeline layout for shader at path: {}", path);
+            return std::nullopt;
+        }
+
+        VkGraphicsPipelineCreateInfo pipeline_info = {VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
+        pipeline_info.pNext = nullptr;
+        pipeline_info.stageCount = 2;
+        pipeline_info.pStages = shader_stages;
+        pipeline_info.pVertexInputState = &vertex_input_info;
+        pipeline_info.pInputAssemblyState = &input_assembly;
+        pipeline_info.pViewportState = &viewport_state;
+        pipeline_info.pRasterizationState = &rasterizer;
+        pipeline_info.pMultisampleState = &multisampling_info;
+        pipeline_info.pDepthStencilState = &depth_stencil_info;
+        pipeline_info.pColorBlendState = &color_blend_info;
+        pipeline_info.pDynamicState = &dynamic_state;
+        pipeline_info.layout = shader_asset.shader_data->pipeline_layout;
+        pipeline_info.renderPass = renderer::ctx::render_pass;
+        pipeline_info.subpass = 0;
+        pipeline_info.basePipelineHandle = VK_NULL_HANDLE;
+
+        if (vkCreateGraphicsPipelines(renderer::ctx::device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr,
+                                      &shader_asset.shader_data->pipeline) != VK_SUCCESS)
+        {
+            SMOL_LOG_ERROR("SHADER", "Failed to create pipeline for shader at path: {}", path);
+            return std::nullopt;
+        }
+
+        vkDestroyShaderModule(renderer::ctx::device, vert_mod, nullptr);
+        vkDestroyShaderModule(renderer::ctx::device, frag_mod, nullptr);
 
         return shader_asset;
     }
 
-    shader_render_data_t::~shader_render_data_t()
+    u32 shader_reflection_t::get_ubo_size(u32 set, u32 binding) const
     {
-        u32 id = program_id;
-        if (id != 0)
+        u32 max_offset = 0;
+        for (const auto& [name, member] : uniform_members)
         {
-            smol::main_thread::enqueue([id]() { glDeleteProgram(id); });
+            if (member.set == set && member.binding == binding)
+            {
+                u32 end = member.offset + member.size;
+                if (end > max_offset) { max_offset = end; }
+            }
+        }
+
+        return (max_offset + 15) & ~15; // round up to nearest 16 bytes
+    }
+
+    std::vector<VkDescriptorSetLayoutBinding> shader_reflection_t::get_layout_bindings_for_set(u32 set) const
+    {
+        std::vector<VkDescriptorSetLayoutBinding> res;
+        for (const auto& [name, bind] : bindings)
+        {
+            if (bind.set == set)
+            {
+                VkDescriptorSetLayoutBinding layout_bind = {};
+                layout_bind.binding = bind.binding;
+                layout_bind.descriptorCount = bind.count;
+                layout_bind.descriptorType = bind.type;
+                layout_bind.stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+                res.push_back(layout_bind);
+            }
+        }
+
+        return res;
+    }
+
+    shader_data_t::~shader_data_t()
+    {
+        if (pipeline != VK_NULL_HANDLE) { vkDestroyPipeline(renderer::ctx::device, pipeline, nullptr); }
+        if (pipeline_layout != VK_NULL_HANDLE)
+        {
+            vkDestroyPipelineLayout(renderer::ctx::device, pipeline_layout, nullptr);
+        }
+        if (material_set_layout != VK_NULL_HANDLE)
+        {
+            vkDestroyDescriptorSetLayout(renderer::ctx::device, material_set_layout, nullptr);
         }
     }
 } // namespace smol

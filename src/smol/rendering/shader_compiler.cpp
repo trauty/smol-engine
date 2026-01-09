@@ -15,7 +15,7 @@ namespace smol::shader_compiler
     void init()
     {
         SlangGlobalSessionDesc global_desc = {};
-        global_desc.enableGLSL = false;
+        global_desc.enableGLSL = true;
         SMOL_LOG_INFO("SHADER", "Slang global instance: {}",
                       slang::createGlobalSession(&global_desc, global_session.writeRef()));
     }

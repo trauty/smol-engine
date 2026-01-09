@@ -3,31 +3,25 @@
 #include "smol/asset.h"
 #include "smol/log.h"
 #include "smol/main_thread.h"
+#include "smol/rendering/renderer.h"
 
-#include <glad/gl.h>
+#include <cstdint>
+#include <mutex>
 #include <optional>
 #include <tinygltf/tiny_gltf.h>
+#include <vulkan/vulkan_core.h>
 
 namespace smol
 {
-    struct vertex_t
+    mesh_data_t::~mesh_data_t()
     {
-        f32 position[3];
-        f32 normal[3];
-        f32 uv[2];
-    };
-
-    mesh_render_data_t::~mesh_render_data_t()
-    {
-        u32 c_vao = vao, c_vbo = vbo, c_ebo = ebo;
-
-        if (c_vao != 0 || c_vbo != 0 || c_ebo != 0)
+        // this one too, should actually check if gpu is using them before deleting them
+        if (renderer::ctx::device != VK_NULL_HANDLE)
         {
-            smol::main_thread::enqueue([c_vao, c_vbo, c_ebo]() {
-                if (c_vbo) glDeleteBuffers(1, &c_vbo);
-                if (c_ebo) glDeleteBuffers(1, &c_ebo);
-                if (c_vao) glDeleteVertexArrays(1, &c_vao);
-            });
+            if (vertex_buffer) { vkDestroyBuffer(renderer::ctx::device, vertex_buffer, nullptr); }
+            if (vertex_memory) { vkFreeMemory(renderer::ctx::device, vertex_memory, nullptr); }
+            if (index_buffer) { vkDestroyBuffer(renderer::ctx::device, index_buffer, nullptr); }
+            if (index_memory) { vkFreeMemory(renderer::ctx::device, index_memory, nullptr); }
         }
     }
 
@@ -135,33 +129,86 @@ namespace smol
             mesh_asset.uses_indices = true;
         }
 
-        smol::main_thread::enqueue([mesh_data = mesh_asset.mesh_data, vertex_data = std::move(vertex_data),
-                                    indices = std::move(indices)]() mutable {
-            glGenVertexArrays(1, &mesh_data->vao);
-            glBindVertexArray(mesh_data->vao);
+        VkDeviceSize vertex_size = vertex_data.size() * sizeof(vertex_t);
+        VkDeviceSize index_size = vertex_data.size() * sizeof(u32);
+        VkDeviceSize total_staging_size = vertex_size + index_size;
 
-            glGenBuffers(1, &mesh_data->vbo);
-            glBindBuffer(GL_ARRAY_BUFFER, mesh_data->vbo);
-            glBufferData(GL_ARRAY_BUFFER, vertex_data.size() * sizeof(vertex_t), vertex_data.data(), GL_STATIC_DRAW);
+        VkBuffer staging_buf;
+        VkDeviceMemory staging_mem;
 
-            glEnableVertexAttribArray(0);
-            glVertexAttribPointer(0, 3, GL_FLOAT, GL_FALSE, sizeof(vertex_t), (void*)offsetof(vertex_t, position));
+        renderer::create_buffer(total_staging_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+                                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, staging_buf,
+                                staging_mem);
 
-            glEnableVertexAttribArray(1);
-            glVertexAttribPointer(1, 3, GL_FLOAT, GL_FALSE, sizeof(vertex_t), (void*)offsetof(vertex_t, normal));
+        void* data;
+        vkMapMemory(renderer::ctx::device, staging_mem, 0, total_staging_size, 0, &data);
+        std::memcpy(data, vertex_data.data(), (size_t)vertex_size);
+        if (index_size > 0) { std::memcpy((u8*)data + vertex_size, indices.data(), (size_t)index_size); }
+        vkUnmapMemory(renderer::ctx::device, staging_mem);
 
-            glEnableVertexAttribArray(2);
-            glVertexAttribPointer(2, 2, GL_FLOAT, GL_FALSE, sizeof(vertex_t), (void*)offsetof(vertex_t, uv));
+        renderer::create_buffer(vertex_size, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
+                                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, mesh_asset.mesh_data->vertex_buffer,
+                                mesh_asset.mesh_data->vertex_memory);
 
-            if (!indices.empty())
-            {
-                glGenBuffers(1, &mesh_data->ebo);
-                glBindBuffer(GL_ELEMENT_ARRAY_BUFFER, mesh_data->ebo);
-                glBufferData(GL_ELEMENT_ARRAY_BUFFER, indices.size() * sizeof(u32), indices.data(), GL_STATIC_DRAW);
-            }
+        if (index_size > 0)
+        {
+            renderer::create_buffer(index_size, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
+                                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, mesh_asset.mesh_data->index_buffer,
+                                    mesh_asset.mesh_data->index_memory);
+        }
 
-            glBindVertexArray(0);
-        });
+        VkCommandBufferAllocateInfo cmd_alloc = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
+        cmd_alloc.pNext = nullptr;
+        cmd_alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+        cmd_alloc.commandPool = renderer::ctx::command_pool;
+        cmd_alloc.commandBufferCount = 1;
+
+        VkCommandBuffer cmd_buf;
+        {
+            std::scoped_lock lock(renderer::ctx::queue_mutex);
+            vkAllocateCommandBuffers(renderer::ctx::device, &cmd_alloc, &cmd_buf);
+        }
+
+        VkCommandBufferBeginInfo cmd_buf_begin_info = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
+        cmd_buf_begin_info.pNext = nullptr;
+        cmd_buf_begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+        vkBeginCommandBuffer(cmd_buf, &cmd_buf_begin_info);
+
+        VkBufferCopy copy_region = {};
+        copy_region.size = vertex_size;
+        vkCmdCopyBuffer(cmd_buf, staging_buf, mesh_asset.mesh_data->vertex_buffer, 1, &copy_region);
+
+        if (index_size > 0)
+        {
+            copy_region.srcOffset = vertex_size;
+            copy_region.dstOffset = 0;
+            copy_region.size = index_size;
+            vkCmdCopyBuffer(cmd_buf, staging_buf, mesh_asset.mesh_data->index_buffer, 1, &copy_region);
+        }
+
+        vkEndCommandBuffer(cmd_buf);
+
+        VkSubmitInfo submit = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
+        submit.pNext = nullptr;
+        submit.commandBufferCount = 1;
+        submit.pCommandBuffers = &cmd_buf;
+
+        VkFence fence;
+        VkFenceCreateInfo fence_info = {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
+        fence_info.pNext = nullptr;
+        vkCreateFence(renderer::ctx::device, &fence_info, nullptr, &fence);
+
+        {
+            std::scoped_lock lock(renderer::ctx::queue_mutex);
+            vkQueueSubmit(renderer::ctx::graphics_queue, 1, &submit, fence);
+        }
+
+        vkWaitForFences(renderer::ctx::device, 1, &fence, VK_TRUE, UINT64_MAX);
+
+        vkDestroyFence(renderer::ctx::device, fence, nullptr);
+        vkFreeCommandBuffers(renderer::ctx::device, renderer::ctx::command_pool, 1, &cmd_buf);
+        vkDestroyBuffer(renderer::ctx::device, staging_buf, nullptr);
+        vkFreeMemory(renderer::ctx::device, staging_mem, nullptr);
 
         return mesh_asset;
     }

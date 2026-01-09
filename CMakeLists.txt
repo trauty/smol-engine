@@ -130,10 +130,6 @@ set(SMOL_ENGINE_NAME "smol-engine")
 set(SMOL_ENGINE_SRC_DIR "src/smol")
 
 set(SMOL_ENGINE_SOURCES
-    
-    # Glad
-	lib/glad/gl.c
-
     # stb
     lib/stb/stb_image.cpp
     lib/stb/stb_image_write.cpp
@@ -170,7 +166,7 @@ set(SMOL_ENGINE_SOURCES
 
     ${SMOL_ENGINE_SRC_DIR}/rendering/renderer.cpp
     ${SMOL_ENGINE_SRC_DIR}/rendering/material.cpp
-    ${SMOL_ENGINE_SRC_DIR}/rendering/ubo.cpp
+    #${SMOL_ENGINE_SRC_DIR}/rendering/ubo.cpp
     ${SMOL_ENGINE_SRC_DIR}/rendering/shader_compiler.cpp
 
 )

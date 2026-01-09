@@ -3,43 +3,44 @@
 #include "smol/asset/shader.h"
 #include "smol/defines.h"
 
-#include <glad/gl.h>
 #include <memory>
 #include <optional>
 #include <string>
+#include <vulkan/vulkan_core.h>
 
 namespace smol
 {
-    enum class texture_type_e
+    enum class texture_format_e
     {
-        ALBEDO,
-        METALLIC,
-        ROUGHNESS,
-        NORMAL
+        SRGB,
+        LINEAR
     };
 
-    struct texture_render_data_t
+    struct texture_data_t
     {
-        GLuint id = 0;
+        VkImage image = VK_NULL_HANDLE;
+        VkDeviceMemory memory = VK_NULL_HANDLE;
+        VkImageView view = VK_NULL_HANDLE;
+        VkSampler sampler = VK_NULL_HANDLE;
 
-        ~texture_render_data_t();
+        ~texture_data_t();
     };
 
     struct texture_asset_t
     {
-        std::shared_ptr<texture_render_data_t> tex_data = std::make_shared<texture_render_data_t>();
-
         i32 width = 0;
         i32 height = 0;
-        texture_type_e type = texture_type_e::ALBEDO;
+        texture_format_e type = texture_format_e::SRGB;
 
-        bool ready() const { return tex_data->id != 0; }
+        std::shared_ptr<texture_data_t> tex_data = std::make_shared<texture_data_t>();
+
+        bool ready() const { return tex_data->image != VK_NULL_HANDLE; }
     };
 
     template<>
     struct asset_loader_t<texture_asset_t>
     {
         static std::optional<texture_asset_t> load(const std::string& path,
-                                                   texture_type_e type = texture_type_e::ALBEDO);
+                                                   texture_format_e type = texture_format_e::SRGB);
     };
 } // namespace smol
