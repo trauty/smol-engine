@@ -149,6 +149,16 @@ namespace smol
             }
         }
 
+        template<typename T>
+        static void unload(const std::string& path)
+        {
+            std::scoped_lock lock(storage_t<T>::mutex);
+            storage_t<T>::cache.erase(path);
+            SMOL_LOG_INFO("ASSET", "Unloaded asset: {}", path);
+        }
+
+        static void clear_all();
+
       private:
         template<typename T>
         struct storage_t
@@ -157,9 +167,21 @@ namespace smol
             static inline std::mutex mutex;
         };
 
+        static inline std::vector<std::function<void()>> cleanup_registry;
+        static inline std::mutex registry_mutex;
+
         template<typename T>
         static std::shared_ptr<asset_slot_t<T>> get_slot(const std::string& path)
         {
+            static std::once_flag register_flag;
+            std::call_once(register_flag, []() {
+                std::scoped_lock lock(registry_mutex);
+                cleanup_registry.push_back([]() {
+                    std::scoped_lock cache_lock(storage_t<T>::mutex);
+                    storage_t<T>::cache.clear();
+                });
+            });
+
             std::scoped_lock lock(storage_t<T>::mutex);
             auto& cache = storage_t<T>::cache;
 

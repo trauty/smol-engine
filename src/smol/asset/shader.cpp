@@ -169,6 +169,7 @@ namespace smol
                     {
                         binding_info.count = (u32)type->getElementCount();
                         type = type->getElementTypeLayout(); // unwrapping
+                        kind = type->getKind();
                     }
 
                     if (kind == slang::TypeReflection::Kind::Resource)
@@ -176,12 +177,20 @@ namespace smol
                         SlangResourceShape shape = type->getResourceShape();
                         if (shape == SlangResourceShape::SLANG_TEXTURE_2D)
                         {
-                            binding_info.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+                            binding_info.type = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
 
                             res.bindings[var_name] = binding_info;
-                            SMOL_LOG_INFO("SHADER", "Resource: {} --> Set: {}; Binding: {}; Count: {};", name,
-                                          set_index, binding_info.binding, binding_info.count);
+                            SMOL_LOG_INFO("SHADER", "Texture: {} --> Set: {}; Binding: {}; Count: {};", name, set_index,
+                                          binding_info.binding, binding_info.count);
                         }
+                    }
+                    else if (kind == slang::TypeReflection::Kind::SamplerState)
+                    {
+                        binding_info.type = VK_DESCRIPTOR_TYPE_SAMPLER;
+
+                        res.bindings[var_name] = binding_info;
+                        SMOL_LOG_INFO("SHADER", "Sampler: {} --> Set: {}; Binding: {}; Count: {};", name, set_index,
+                                      binding_info.binding, binding_info.count);
                     }
                     else if (kind == slang::TypeReflection::Kind::ConstantBuffer)
                     {
@@ -214,21 +223,11 @@ namespace smol
             session_desc.searchPaths = include_paths;
             session_desc.searchPathCount = 1;
 
-            slang::CompilerOptionEntry spirv_options[] = {
-                {slang::CompilerOptionName::EmitSpirvDirectly,
-                 {slang::CompilerOptionValueKind::Int, 1, 0, nullptr, nullptr}}};
-
-            slang::TargetDesc target_descs[2] = {};
+            slang::TargetDesc target_descs[1] = {};
             target_descs[0].format = SLANG_SPIRV;
             target_descs[0].profile = global_session->findProfile("spirv_1_5");
-            target_descs[0].compilerOptionEntries = spirv_options;
-            target_descs[0].compilerOptionEntryCount = 1;
-            target_descs[1].format = SLANG_SPIRV_ASM;
-            target_descs[1].profile = global_session->findProfile("spirv_1_5");
-            target_descs[1].compilerOptionEntries = spirv_options;
-            target_descs[1].compilerOptionEntryCount = 1;
             session_desc.targets = target_descs;
-            session_desc.targetCount = 2;
+            session_desc.targetCount = 1;
 
             Slang::ComPtr<slang::ISession> session;
             global_session->createSession(session_desc, session.writeRef());
@@ -267,32 +266,6 @@ namespace smol
             }
 
             res.reflection = reflect_slang_layout(linked_program->getLayout());
-
-            auto log_assembly = [&](int entryPointIndex, const char* stageName) {
-                Slang::ComPtr<slang::IBlob> asm_blob;
-                Slang::ComPtr<slang::IBlob> asm_diag;
-
-                SlangResult res =
-                    linked_program->getEntryPointCode(entryPointIndex, 1, asm_blob.writeRef(), asm_diag.writeRef());
-
-                if (asm_diag)
-                {
-                    SMOL_LOG_ERROR("SPIRV-ASM", "{} Diagnostics:\n{}", stageName,
-                                   (const char*)asm_diag->getBufferPointer());
-                }
-
-                if (SLANG_FAILED(res) || !asm_blob)
-                {
-                    SMOL_LOG_ERROR("SPIRV-ASM", "Failed to generate assembly for {}. (Result: {:x})", stageName, res);
-                    return;
-                }
-
-                const char* asm_text = (const char*)asm_blob->getBufferPointer();
-                SMOL_LOG_INFO("SPIRV-ASM", "--- {} Assembly ---\n{}", stageName, asm_text);
-            };
-
-            log_assembly(0, "vertexMain");
-            log_assembly(1, "fragmentMain");
 
             Slang::ComPtr<slang::IBlob> kernel_blob;
             linked_program->getEntryPointCode(0, 0, kernel_blob.writeRef(), diag_blob.writeRef());

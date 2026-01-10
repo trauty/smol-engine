@@ -62,19 +62,6 @@ namespace smol::engine
 
             return VK_FALSE;
         }
-
-        VkFormat find_depth_format()
-        {
-            VkFormat formats[] = {VK_FORMAT_D32_SFLOAT, VK_FORMAT_D32_SFLOAT_S8_UINT, VK_FORMAT_D24_UNORM_S8_UINT};
-            for (VkFormat format : formats)
-            {
-                VkFormatProperties props;
-                vkGetPhysicalDeviceFormatProperties(renderer::ctx::physical_device, format, &props);
-                if (props.optimalTilingFeatures & VK_FORMAT_FEATURE_DEPTH_STENCIL_ATTACHMENT_BIT) { return format; }
-            }
-
-            return VK_FORMAT_UNDEFINED;
-        }
     } // namespace
 
     int init(const std::string& game_name, i32 init_window_width, i32 init_window_height)
@@ -182,78 +169,7 @@ namespace smol::engine
         vkGetDeviceQueue(renderer::ctx::device, 0, 0, &renderer::ctx::graphics_queue);
         renderer::ctx::present_queue = renderer::ctx::graphics_queue;
 
-        VkSurfaceCapabilitiesKHR caps;
-        VK_CHECK(
-            vkGetPhysicalDeviceSurfaceCapabilitiesKHR(renderer::ctx::physical_device, renderer::ctx::surface, &caps));
-
-        VkExtent2D extent;
-        if (caps.currentExtent.width != UINT32_MAX) { extent = caps.currentExtent; }
-        else
-        {
-            i32 w, h;
-            SDL_GetWindowSize(window, &w, &h);
-
-            extent.width = std::clamp(static_cast<u32>(w), caps.minImageExtent.width, caps.maxImageExtent.width);
-            extent.height = std::clamp(static_cast<u32>(h), caps.minImageExtent.height, caps.maxImageExtent.height);
-        }
-
-        renderer::ctx::swapchain_extent = extent;
-        renderer::ctx::swapchain_format = VK_FORMAT_B8G8R8A8_SRGB; // the selection of the format is also simplified
-
-        VkSwapchainCreateInfoKHR swapchain_info = {VK_STRUCTURE_TYPE_SWAPCHAIN_CREATE_INFO_KHR};
-        swapchain_info.pNext = nullptr;
-        swapchain_info.surface = renderer::ctx::surface;
-        swapchain_info.minImageCount = caps.minImageCount + 1;
-        swapchain_info.imageFormat = renderer::ctx::swapchain_format;
-        swapchain_info.imageColorSpace = VK_COLOR_SPACE_SRGB_NONLINEAR_KHR;
-        swapchain_info.imageExtent = renderer::ctx::swapchain_extent;
-        swapchain_info.imageArrayLayers = 1;
-        swapchain_info.imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
-        swapchain_info.preTransform = caps.currentTransform;
-        swapchain_info.compositeAlpha = VK_COMPOSITE_ALPHA_OPAQUE_BIT_KHR;
-        swapchain_info.presentMode = VK_PRESENT_MODE_FIFO_KHR; // currently forcing "hard vsync"
-        swapchain_info.clipped = VK_TRUE;
-
-        VK_CHECK(vkCreateSwapchainKHR(renderer::ctx::device, &swapchain_info, nullptr, &renderer::ctx::swapchain));
-
-        u32 image_count = 0;
-        vkGetSwapchainImagesKHR(renderer::ctx::device, renderer::ctx::swapchain, &image_count, nullptr);
-        renderer::ctx::swapchain_images.resize(image_count);
-        SMOL_LOG_INFO("ENGINE", "Swapchain images: {}", image_count);
-        vkGetSwapchainImagesKHR(renderer::ctx::device, renderer::ctx::swapchain, &image_count,
-                                renderer::ctx::swapchain_images.data());
-
-        VkFormat depth_format = find_depth_format();
-        renderer::create_image(renderer::ctx::swapchain_extent.width, renderer::ctx::swapchain_extent.height,
-                               depth_format, VK_IMAGE_TILING_OPTIMAL, VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT,
-                               VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, renderer::ctx::depth_image,
-                               renderer::ctx::depth_image_mem);
-
-        VkImageViewCreateInfo depth_view_info = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
-        depth_view_info.pNext = nullptr;
-        depth_view_info.image = renderer::ctx::depth_image;
-        depth_view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-        depth_view_info.format = depth_format;
-        depth_view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_DEPTH_BIT;
-        depth_view_info.subresourceRange.levelCount = 1;
-        depth_view_info.subresourceRange.layerCount = 1;
-        VK_CHECK(vkCreateImageView(renderer::ctx::device, &depth_view_info, nullptr, &renderer::ctx::depth_image_view));
-
-        renderer::ctx::swapchain_image_views.resize(image_count);
-        for (u32 i = 0; i < image_count; i++)
-        {
-            VkImageViewCreateInfo view_info = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
-            view_info.pNext = nullptr;
-            view_info.image = renderer::ctx::swapchain_images[i];
-            view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
-            view_info.format = renderer::ctx::swapchain_format;
-            view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
-            view_info.subresourceRange.levelCount = 1;
-            view_info.subresourceRange.layerCount = 1;
-
-            VK_CHECK(vkCreateImageView(renderer::ctx::device, &view_info, nullptr,
-                                       &renderer::ctx::swapchain_image_views[i]));
-        }
+        renderer::ctx::swapchain_format = VK_FORMAT_B8G8R8A8_SRGB;
 
         VkAttachmentDescription color_attachment = {};
         color_attachment.format = renderer::ctx::swapchain_format;
@@ -268,7 +184,7 @@ namespace smol::engine
         VkAttachmentReference color_attachment_ref = {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL};
 
         VkAttachmentDescription depth_attachment = {};
-        depth_attachment.format = depth_format;
+        depth_attachment.format = renderer::find_depth_format();
         depth_attachment.samples = VK_SAMPLE_COUNT_1_BIT;
         depth_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
         depth_attachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
@@ -308,22 +224,7 @@ namespace smol::engine
 
         VK_CHECK(vkCreateRenderPass(renderer::ctx::device, &render_pass_info, nullptr, &renderer::ctx::render_pass));
 
-        renderer::ctx::framebuffers.resize(image_count);
-        for (u32 i = 0; i < image_count; i++)
-        {
-            VkImageView fb_attachments[] = {renderer::ctx::swapchain_image_views[i], renderer::ctx::depth_image_view};
-
-            VkFramebufferCreateInfo fb_info = {VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO};
-            fb_info.pNext = nullptr;
-            fb_info.renderPass = renderer::ctx::render_pass;
-            fb_info.attachmentCount = 2;
-            fb_info.pAttachments = fb_attachments;
-            fb_info.width = renderer::ctx::swapchain_extent.width;
-            fb_info.height = renderer::ctx::swapchain_extent.height;
-            fb_info.layers = 1;
-
-            VK_CHECK(vkCreateFramebuffer(renderer::ctx::device, &fb_info, nullptr, &renderer::ctx::framebuffers[i]));
-        }
+        renderer::create_swapchain();
 
         VkCommandPoolCreateInfo cmd_pool_info = {VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
         cmd_pool_info.pNext = nullptr;
@@ -340,9 +241,9 @@ namespace smol::engine
         VK_CHECK(vkAllocateCommandBuffers(renderer::ctx::device, &alloc_info, renderer::ctx::command_buffers.data()));
 
         renderer::ctx::image_available_semaphores.resize(renderer::ctx::MAX_FRAMES_IN_FLIGHT);
-        renderer::ctx::render_finished_semaphores.resize(image_count);
+        renderer::ctx::render_finished_semaphores.resize(renderer::ctx::swapchain_images.size());
         renderer::ctx::in_flight_fences.resize(renderer::ctx::MAX_FRAMES_IN_FLIGHT);
-        renderer::ctx::images_in_flight.resize(image_count, VK_NULL_HANDLE);
+        renderer::ctx::images_in_flight.resize(renderer::ctx::swapchain_images.size(), VK_NULL_HANDLE);
 
         VkSemaphoreCreateInfo sem_info = {VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
         sem_info.pNext = nullptr;
@@ -356,7 +257,7 @@ namespace smol::engine
                                        &renderer::ctx::image_available_semaphores[i]));
             VK_CHECK(vkCreateFence(renderer::ctx::device, &fence_info, nullptr, &renderer::ctx::in_flight_fences[i]));
         }
-        for (u32 i = 0; i < image_count; i++)
+        for (u32 i = 0; i < renderer::ctx::swapchain_images.size(); i++)
         {
             VK_CHECK(vkCreateSemaphore(renderer::ctx::device, &sem_info, nullptr,
                                        &renderer::ctx::render_finished_semaphores[i]));
@@ -376,13 +277,14 @@ namespace smol::engine
                                              &renderer::ctx::global_set_layout));
 
         // currently arbitrary size
-        VkDescriptorPoolSize pool_sizes[2] = {{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000},
-                                              {VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, 4000}};
+        VkDescriptorPoolSize pool_sizes[3] = {{VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1000},
+                                              {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, 1000},
+                                              {VK_DESCRIPTOR_TYPE_SAMPLER, 1000}};
 
         VkDescriptorPoolCreateInfo pool_create_info = {VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO};
         pool_create_info.pNext = nullptr;
         pool_create_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
-        pool_create_info.poolSizeCount = 2;
+        pool_create_info.poolSizeCount = 3;
         pool_create_info.pPoolSizes = pool_sizes;
         pool_create_info.maxSets = 2000;
         VK_CHECK(
@@ -440,17 +342,18 @@ namespace smol::engine
 
             smol::renderer::render();
         }
-
-        vkDeviceWaitIdle(renderer::ctx::device); // maybe unnecessary
     }
 
     int shutdown()
     {
         SMOL_LOG_INFO("ENGINE", "Stopping engine.");
 
-        if (renderer::ctx::device != VK_NULL_HANDLE) { vkDeviceWaitIdle(renderer::ctx::device); }
+        vkDeviceWaitIdle(renderer::ctx::device);
 
         if (current_level != nullptr) { current_level = nullptr; }
+
+        smol::asset_manager_t::clear_all();
+        smol::asset_manager_t::shutdown();
 
         smol::renderer::shutdown();
 
@@ -462,7 +365,6 @@ namespace smol::engine
         if (renderer::ctx::instance != VK_NULL_HANDLE) { vkDestroyInstance(renderer::ctx::instance, nullptr); }
 
         smol::physics::shutdown();
-        smol::asset_manager_t::shutdown();
         smol::window::shutdown();
         smol::log::shutdown();
         return 0;

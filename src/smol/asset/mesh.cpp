@@ -130,7 +130,7 @@ namespace smol
         }
 
         VkDeviceSize vertex_size = vertex_data.size() * sizeof(vertex_t);
-        VkDeviceSize index_size = vertex_data.size() * sizeof(u32);
+        VkDeviceSize index_size = indices.size() * sizeof(u32);
         VkDeviceSize total_staging_size = vertex_size + index_size;
 
         VkBuffer staging_buf;

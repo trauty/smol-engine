@@ -1,6 +1,7 @@
 #pragma once
 
 #include "smol/defines.h"
+#include "smol/events.h"
 #include "smol/log.h"
 
 #include <mutex>
@@ -45,6 +46,8 @@ namespace smol::renderer
 
         inline std::mutex queue_mutex;
         inline std::mutex descriptor_mutex;
+
+        inline smol::events::subscription_id_t sub_id;
     } // namespace ctx
 
     enum class shader_stage_e
@@ -58,6 +61,10 @@ namespace smol::renderer
     void init();
     void render();
     void shutdown();
+
+    void create_swapchain(VkSwapchainKHR old_swapchain = VK_NULL_HANDLE);
+    void recreate_swapchain();
+    VkFormat find_depth_format();
 
     u32 find_mem_type(u32 type_filter, VkMemoryPropertyFlags props);
 

@@ -28,7 +28,8 @@ namespace smol
 
         void init(const smol::shader_asset_t& shader);
         void set_data(const std::string& block_name, const void* data, size_t size);
-        void set_texture(const std::string& name, const smol::texture_asset_t& texture);
+        void set_texture(const std::string& tex_name, const std::string& sampler_name,
+                         const smol::texture_asset_t& texture);
 
         template<typename T>
         void set_parameter(const std::string& name, const T& value)
