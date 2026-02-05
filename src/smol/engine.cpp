@@ -18,7 +18,6 @@
 #include <SDL3/SDL_video.h>
 
 #include <SDL3/SDL_vulkan.h>
-#include <algorithm>
 #include <cstddef>
 #include <cstdint>
 #include <tracy/Tracy.hpp>
@@ -95,7 +94,6 @@ namespace smol::engine
 
     int init(const std::string& game_name, i32 init_window_width, i32 init_window_height)
     {
-        tracy::SetThreadName("MainThread");
         smol::log::init();
         smol::log::set_level(smol::log::level_e::LOG_DEBUG);
         smol::asset_manager_t::init();

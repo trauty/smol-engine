@@ -58,20 +58,15 @@ CPMAddPackage(URI "gh:recp/cglm#v0.9.6" OPTIONS "CGLM_STATIC ON")
 
 CPMAddPackage(URI "gh:fmtlib/fmt#12.0.0" OPTIONS "CMAKE_POSITION_INDEPENDENT_CODE ON")
 
-option(SMOL_ENABLE_PROFILING "Enable Tracy Profiling" ON)
-if(SMOL_ENABLE_PROFILING)
-    add_definitions(-DTRACY_ENABLE)
-
-    CPMAddPackage(
-        NAME Tracy
-        GITHUB_REPOSITORY wolfpld/tracy
-        GIT_TAG v0.13.1
-        OPTIONS
-        "TRACY_ENABLE ON"
-        "TRACY_ON_DEMAND ON"
-        "TRACY_NO_EXIT ON"
-    )
-endif()
+option(SMOL_ENABLE_PROFILING "Enable Tracy Profiling" OFF)
+CPMAddPackage(
+    NAME Tracy
+    GITHUB_REPOSITORY wolfpld/tracy
+    GIT_TAG v0.13.1
+    OPTIONS
+    "TRACY_ON_DEMAND ON"
+    "TRACY_NO_EXIT ON"
+)
 
 CPMAddPackage(
   	NAME JoltPhysics
@@ -186,18 +181,6 @@ set(SMOL_ENGINE_SOURCES
 
 )
 
-if(SMOL_ENABLE_PROFILING)
-    set(TRACY_CLIENT_SRC "${Tracy_SOURCE_DIR}/public/TracyClient.cpp")
-    
-    list(APPEND SMOL_ENGINE_SOURCES ${TRACY_CLIENT_SRC})
-
-    set_source_files_properties(
-        ${TRACY_CLIENT_SRC}
-        PROPERTIES
-        COMPILE_OPTIONS "-w" 
-    )
-endif()
-
 # engine lib
 add_library(${SMOL_ENGINE_NAME} SHARED ${SMOL_ENGINE_SOURCES})
 set_target_properties(${SMOL_ENGINE_NAME} PROPERTIES PREFIX "")
@@ -205,13 +188,6 @@ smol_set_rpath_policy(${PROJECT_NAME})
 
 target_compile_definitions(${SMOL_ENGINE_NAME} PRIVATE SMOL_EXPORT)
 target_compile_options(${SMOL_ENGINE_NAME} PRIVATE -Wall -Wextra -Wpedantic -Wno-gnu-anonymous-struct -Wno-nested-anon-types -Wno-missing-field-initializers)
-
-if(SMOL_ENABLE_PROFILING)
-    target_compile_definitions(${SMOL_ENGINE_NAME} PUBLIC TRACY_ENABLE)
-    target_compile_definitions(${SMOL_ENGINE_NAME} PRIVATE TRACY_EXPORTS)
-    target_compile_definitions(${SMOL_ENGINE_NAME} INTERFACE TRACY_IMPORTS)
-    target_include_directories(${SMOL_ENGINE_NAME} PUBLIC "${Tracy_SOURCE_DIR}/public")
-endif()
 
 if (WIN32)
     target_link_options(${ENGINE_TARGET_NAME} PRIVATE
@@ -237,6 +213,13 @@ target_link_libraries(
     Vulkan::Vulkan
 	slang
 )
+
+if(SMOL_ENABLE_PROFILING)
+    add_definitions(-DTRACY_ENABLE)
+    target_link_libraries(${SMOL_ENGINE_NAME} PUBLIC Tracy::TracyClient)
+else()
+    target_include_directories(${SMOL_ENGINE_NAME} PUBLIC ${Tracy_SOURCE_DIR}/public)
+endif()
 
 target_include_directories(${SMOL_ENGINE_NAME} PUBLIC 
     ${CMAKE_CURRENT_SOURCE_DIR}/include

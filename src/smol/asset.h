@@ -207,7 +207,6 @@ namespace smol
 
         static void worker_func()
         {
-            tracy::SetThreadName("AssetWorkerThread");
             while (true)
             {
                 std::function<void()> task;
