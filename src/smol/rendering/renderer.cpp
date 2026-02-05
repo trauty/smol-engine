@@ -22,6 +22,7 @@
 #include <cstdint>
 #include <cstring>
 #include <iostream>
+#include <tracy/Tracy.hpp>
 #include <vector>
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_core.h>
@@ -98,6 +99,7 @@ namespace smol::renderer
 
     void render()
     {
+        ZoneScoped;
         if (camera_ct::main_camera == nullptr) { return; }
 
         vkWaitForFences(ctx::device, 1, &ctx::in_flight_fences[ctx::cur_frame], VK_TRUE, UINT64_MAX);
@@ -241,6 +243,7 @@ namespace smol::renderer
 
     void shutdown()
     {
+        ZoneScoped;
         for (frame_data_t frame : frames)
         {
             if (frame.global_data_buffer) { vkDestroyBuffer(ctx::device, frame.global_data_buffer, nullptr); }

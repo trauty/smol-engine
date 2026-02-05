@@ -21,6 +21,7 @@
 #include <algorithm>
 #include <cstddef>
 #include <cstdint>
+#include <tracy/Tracy.hpp>
 #include <vector>
 #include <vulkan/vk_platform.h>
 #include <vulkan/vulkan.h>
@@ -44,8 +45,9 @@ namespace smol::engine
         PFN_vkDestroyDebugUtilsMessengerEXT pfn_vkDestroyDebugUtilsMessengerEXT = nullptr;
 
         static VKAPI_ATTR VkBool32 VKAPI_CALL debug_callback(
-            VkDebugUtilsMessageSeverityFlagBitsEXT message_severity, VkDebugUtilsMessageTypeFlagsEXT message_type,
-            const VkDebugUtilsMessengerCallbackDataEXT* p_callback_data, void* ptr_user_data)
+            VkDebugUtilsMessageSeverityFlagBitsEXT message_severity,
+            [[maybe_unused]] VkDebugUtilsMessageTypeFlagsEXT message_type,
+            const VkDebugUtilsMessengerCallbackDataEXT* p_callback_data, [[maybe_unused]] void* ptr_user_data)
         {
             if (message_severity >= VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT)
             {
@@ -62,10 +64,38 @@ namespace smol::engine
 
             return VK_FALSE;
         }
+
+        bool check_validation_layer_support(const std::vector<const char*>& validation_layers)
+        {
+            uint32_t layer_count;
+            vkEnumerateInstanceLayerProperties(&layer_count, nullptr);
+
+            std::vector<VkLayerProperties> available_layers(layer_count);
+            vkEnumerateInstanceLayerProperties(&layer_count, available_layers.data());
+
+            for (const char* layer_name : validation_layers)
+            {
+                bool layer_found = false;
+
+                for (const auto& layer_properties : available_layers)
+                {
+                    if (strcmp(layer_name, layer_properties.layerName) == 0)
+                    {
+                        layer_found = true;
+                        break;
+                    }
+                }
+
+                if (!layer_found) { return false; }
+            }
+
+            return true;
+        }
     } // namespace
 
     int init(const std::string& game_name, i32 init_window_width, i32 init_window_height)
     {
+        tracy::SetThreadName("MainThread");
         smol::log::init();
         smol::log::set_level(smol::log::level_e::LOG_DEBUG);
         smol::asset_manager_t::init();
@@ -89,16 +119,24 @@ namespace smol::engine
         u32 sdl_ext_count = 0;
         const char* const* sdl_extensions = SDL_Vulkan_GetInstanceExtensions(&sdl_ext_count);
         std::vector<const char*> extensions(sdl_extensions, sdl_extensions + sdl_ext_count);
-        if (enable_validation_layers) { extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME); }
-        for (const char* ext : extensions) { SMOL_LOG_INFO("VULKAN EXT", "{}", ext); }
+
+        bool use_validation = enable_validation_layers && check_validation_layer_support(validation_layers);
+        SMOL_LOG_DEBUG("ENGINE", "{}", check_validation_layer_support(validation_layers));
+        if (enable_validation_layers && !use_validation)
+        {
+            SMOL_LOG_WARN("VULKAN", "Validation layers requested but not available");
+        }
 
         VkInstanceCreateInfo create_info = {VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
         create_info.pApplicationInfo = &app_info;
+
+        if (use_validation) { extensions.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME); }
+
         create_info.enabledExtensionCount = static_cast<u32>(extensions.size());
         create_info.ppEnabledExtensionNames = extensions.data();
 
         VkDebugUtilsMessengerCreateInfoEXT debug_create_info = {};
-        if (enable_validation_layers)
+        if (use_validation)
         {
             create_info.enabledLayerCount = static_cast<u32>(validation_layers.size());
             create_info.ppEnabledLayerNames = validation_layers.data();
@@ -119,6 +157,8 @@ namespace smol::engine
             create_info.enabledLayerCount = 0;
             create_info.pNext = nullptr;
         }
+
+        for (const char* ext : extensions) { SMOL_LOG_INFO("VULKAN EXT", "{}", ext); }
 
         VK_CHECK(vkCreateInstance(&create_info, nullptr, &renderer::ctx::instance));
 
@@ -341,6 +381,8 @@ namespace smol::engine
             }
 
             smol::renderer::render();
+
+            FrameMark;
         }
     }
 

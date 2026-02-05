@@ -186,6 +186,34 @@ namespace smol
             vkCmdCopyBuffer(cmd_buf, staging_buf, mesh_asset.mesh_data->index_buffer, 1, &copy_region);
         }
 
+        VkBufferMemoryBarrier barriers[2] = {};
+        barriers[0].pNext = nullptr;
+        barriers[0].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+        barriers[0].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+        barriers[0].dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
+        barriers[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barriers[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+        barriers[0].buffer = mesh_asset.mesh_data->vertex_buffer;
+        barriers[0].offset = 0;
+        barriers[0].size = vertex_size;
+
+        u32 barrier_count = 1;
+        if (index_size > 0)
+        {
+            barriers[1].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+            barriers[1].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
+            barriers[1].dstAccessMask = VK_ACCESS_INDEX_READ_BIT;
+            barriers[1].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barriers[1].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+            barriers[1].buffer = mesh_asset.mesh_data->index_buffer;
+            barriers[1].offset = 0;
+            barriers[1].size = index_size;
+            barrier_count++;
+        }
+
+        vkCmdPipelineBarrier(cmd_buf, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, 0, 0, nullptr,
+                             barrier_count, barriers, 0, nullptr);
+
         vkEndCommandBuffer(cmd_buf);
 
         VkSubmitInfo submit = {VK_STRUCTURE_TYPE_SUBMIT_INFO};

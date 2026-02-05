@@ -22,7 +22,6 @@ namespace smol::window
     void set_window_size(i32 width, i32 height)
     {
         SDL_SetWindowSize(window, width, height);
-        // glViewport(0, 0, width, height);
         smol::events::emit(size_changed_event_t{width, height});
     }
 

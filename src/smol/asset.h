@@ -3,6 +3,7 @@
 #include "smol/log.h"
 
 #include <atomic>
+#include <common/TracySystem.hpp>
 #include <condition_variable>
 #include <functional>
 #include <memory>
@@ -206,6 +207,7 @@ namespace smol
 
         static void worker_func()
         {
+            tracy::SetThreadName("AssetWorkerThread");
             while (true)
             {
                 std::function<void()> task;

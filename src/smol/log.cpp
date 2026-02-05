@@ -17,8 +17,8 @@
 #include <thread>
 
 #ifdef SMOL_PLATFORM_WIN
-#    include <windows.h>
-#    include <wtypes.h>
+#include <windows.h>
+#include <wtypes.h>
 #endif
 
 namespace smol::log
@@ -45,17 +45,17 @@ namespace smol::log
         bool is_running = false;
         std::thread worker;
 
-        const char *level_names[] = {"TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL"};
-        const char *ansi_level_colors[] = {
+        const char* level_names[] = {"TRACE", "DEBUG", "INFO", "WARN", "ERROR", "FATAL"};
+        const char* ansi_level_colors[] = {
             "\033[90m", // TRACE - Gray
             "\033[36m", // DEBUG - Cyan
             "\033[37m", // INFO - White
             "\033[33m", // WARN - Yellow
             "\033[31m", // ERROR - Red
-            "\033[91m" // FATAL - Bright Red
+            "\033[91m"  // FATAL - Bright Red
         };
 
-        const char *ansi_color_reset = "\033[0m";
+        const char* ansi_color_reset = "\033[0m";
 
         std::string rotated_log_path(u32_t index)
         {
@@ -72,18 +72,14 @@ namespace smol::log
 
         bool open_new_log_file()
         {
-            if (log_file.is_open())
-                log_file.close();
+            if (log_file.is_open()) log_file.close();
 
             std::string path_to_open = crt_file_index == 0 ? base_log_path : rotated_log_path(crt_file_index);
 
             std::filesystem::create_directories(std::filesystem::path(path_to_open).parent_path());
 
             log_file.open(path_to_open, std::ios::out | std::ios::app);
-            if (!log_file.is_open())
-            {
-                return false;
-            }
+            if (!log_file.is_open()) { return false; }
 
             log_file.seekp(0, std::ios::end);
             crt_file_size = (size_t)log_file.tellp();
@@ -91,15 +87,12 @@ namespace smol::log
             return true;
         }
 
-        std::string format_line(level_e level, const char *category, std::string_view msg, bool include_date)
+        std::string format_line(level_e level, const char* category, std::string_view msg, bool include_date)
         {
             std::chrono::time_point cur_time = time_point_cast<std::chrono::seconds>(std::chrono::system_clock::now());
             std::string time_str;
 
-            if (include_date)
-            {
-                time_str = fmt::format("{:%Y-%m-%d %H:%M:%S}", cur_time);
-            }
+            if (include_date) { time_str = fmt::format("{:%Y-%m-%d %H:%M:%S}", cur_time); }
             else
             {
                 time_str = fmt::format("{:%H:%M:%S}", cur_time);
@@ -113,12 +106,10 @@ namespace smol::log
         void setup_ansi_console_colors_windows()
         {
             HANDLE h_out = GetStdHandle(STD_OUTPUT_HANDLE);
-            if (h_out == INVALID_HANDLE_VALUE)
-                return;
+            if (h_out == INVALID_HANDLE_VALUE) return;
 
             DWORD dw_mode = 0;
-            if (!GetConsoleMode(h_out, &dw_mode))
-                return;
+            if (!GetConsoleMode(h_out, &dw_mode)) return;
 
             dw_mode |= ENABLE_VIRTUAL_TERMINAL_PROCESSING;
             SetConsoleMode(h_out, dw_mode);
@@ -126,24 +117,15 @@ namespace smol::log
 #endif
     } // namespace
 
-    void set_level(level_e level)
-    {
-        crt_level = level;
-    }
+    void set_level(level_e level) { crt_level = level; }
 
-    void set_max_file_size(size_t new_max_file_size)
-    {
-        max_file_size = new_max_file_size;
-    }
+    void set_max_file_size(size_t new_max_file_size) { max_file_size = new_max_file_size; }
 
-    bool to_file(const std::string &path)
+    bool to_file(const std::string& path)
     {
         std::filesystem::path fs_path(path);
 
-        if (!std::filesystem::is_directory(fs_path))
-        {
-            std::filesystem::create_directories(fs_path);
-        }
+        if (!std::filesystem::is_directory(fs_path)) { std::filesystem::create_directories(fs_path); }
 
         if (path.back() == '/' || path.back() == '\\' || !fs_path.has_extension())
         {
@@ -156,18 +138,15 @@ namespace smol::log
         return open_new_log_file();
     }
 
-    void write(level_e level, const char *category, std::string_view msg)
+    void write(level_e level, const char* category, std::string_view msg)
     {
-        if (level < crt_level)
-            return;
+        if (level < crt_level) return;
 
         {
             const std::lock_guard<std::mutex> lock(queue_mutex);
-            msg_queue.push({ansi_level_colors[(u8)level] + format_line(level, category, msg, false) + ansi_color_reset, true});
-            if (log_file.is_open())
-            {
-                msg_queue.push({format_line(level, category, msg, true), false});
-            }
+            msg_queue.push(
+                {ansi_level_colors[(u8)level] + format_line(level, category, msg, false) + ansi_color_reset, true});
+            if (log_file.is_open()) { msg_queue.push({format_line(level, category, msg, true), false}); }
         }
 
         queue_vc.notify_one();
@@ -179,8 +158,7 @@ namespace smol::log
 #if SMOL_PLATFORM_WIN
         setup_ansi_console_colors_windows();
 #endif
-        worker = std::thread([]
-                             {
+        worker = std::thread([] {
             while (is_running || !msg_queue.empty())
             {
                 std::unique_lock<std::mutex> lock(queue_mutex);
@@ -210,7 +188,8 @@ namespace smol::log
                         }
                     }
                 }
-            } });
+            }
+        });
     }
 
     void shutdown()
@@ -221,8 +200,7 @@ namespace smol::log
         }
 
         queue_vc.notify_all();
-        if (worker.joinable())
-            worker.join();
+        if (worker.joinable()) worker.join();
     }
 
 } // namespace smol::log

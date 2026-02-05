@@ -7,7 +7,7 @@
 #include <string_view>
 
 #ifdef ERROR
-#    undef ERROR
+#undef ERROR
 #endif
 
 namespace smol::log
@@ -31,31 +31,31 @@ namespace smol::log
 } // namespace smol::log
 
 #ifndef SMOL_LOG_LEVEL
-#    define SMOL_LOG_LEVEL smol::log::level_e::LOG_DEBUG
+#define SMOL_LOG_LEVEL smol::log::level_e::LOG_DEBUG
 #endif
 
-#define SMOL_LOG_TRACE(cat, fmtstr, ...)                           \
-    if constexpr (smol::log::level_e::LOG_TRACE >= SMOL_LOG_LEVEL) \
+#define SMOL_LOG_TRACE(cat, fmtstr, ...)                                                                               \
+    if constexpr (smol::log::level_e::LOG_TRACE >= SMOL_LOG_LEVEL)                                                     \
     smol::log::write(smol::log::level_e::LOG_TRACE, cat, fmt::format(fmtstr __VA_OPT__(, ) __VA_ARGS__))
 
-#define SMOL_LOG_DEBUG(cat, fmtstr, ...)                           \
-    if constexpr (smol::log::level_e::LOG_DEBUG >= SMOL_LOG_LEVEL) \
+#define SMOL_LOG_DEBUG(cat, fmtstr, ...)                                                                               \
+    if constexpr (smol::log::level_e::LOG_DEBUG >= SMOL_LOG_LEVEL)                                                     \
     smol::log::write(smol::log::level_e::LOG_DEBUG, cat, fmt::format(fmtstr __VA_OPT__(, ) __VA_ARGS__))
 
-#define SMOL_LOG_INFO(cat, fmtstr, ...)                           \
-    if constexpr (smol::log::level_e::LOG_INFO >= SMOL_LOG_LEVEL) \
+#define SMOL_LOG_INFO(cat, fmtstr, ...)                                                                                \
+    if constexpr (smol::log::level_e::LOG_INFO >= SMOL_LOG_LEVEL)                                                      \
     smol::log::write(smol::log::level_e::LOG_INFO, cat, fmt::format(fmtstr __VA_OPT__(, ) __VA_ARGS__))
 
-#define SMOL_LOG_WARN(cat, fmtstr, ...)                           \
-    if constexpr (smol::log::level_e::LOG_WARN >= SMOL_LOG_LEVEL) \
+#define SMOL_LOG_WARN(cat, fmtstr, ...)                                                                                \
+    if constexpr (smol::log::level_e::LOG_WARN >= SMOL_LOG_LEVEL)                                                      \
     smol::log::write(smol::log::level_e::LOG_WARN, cat, fmt::format(fmtstr __VA_OPT__(, ) __VA_ARGS__))
 
-#define SMOL_LOG_ERROR(cat, fmtstr, ...)                           \
-    if constexpr (smol::log::level_e::LOG_ERROR >= SMOL_LOG_LEVEL) \
+#define SMOL_LOG_ERROR(cat, fmtstr, ...)                                                                               \
+    if constexpr (smol::log::level_e::LOG_ERROR >= SMOL_LOG_LEVEL)                                                     \
     smol::log::write(smol::log::level_e::LOG_ERROR, cat, fmt::format(fmtstr __VA_OPT__(, ) __VA_ARGS__))
 
-#define SMOL_LOG_FATAL(cat, fmtstr, ...)                           \
-    if constexpr (smol::log::level_e::LOG_FATAL >= SMOL_LOG_LEVEL) \
+#define SMOL_LOG_FATAL(cat, fmtstr, ...)                                                                               \
+    if constexpr (smol::log::level_e::LOG_FATAL >= SMOL_LOG_LEVEL)                                                     \
     smol::log::write(smol::log::level_e::LOG_FATAL, cat, fmt::format(fmtstr __VA_OPT__(, ) __VA_ARGS__))
 
 /*SMOL_LOG_DEBUG(
