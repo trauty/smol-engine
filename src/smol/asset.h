@@ -3,7 +3,9 @@
 #include "smol/log.h"
 
 #include <atomic>
+#ifdef SMOL_ENABLE_PROFILING
 #include <common/TracySystem.hpp>
+#endif
 #include <condition_variable>
 #include <functional>
 #include <memory>
