@@ -1,17 +1,16 @@
 #pragma once
 
 #include "defines.h"
+#include "smol/core/level.h"
+#include "smol/ecs.h"
 
 #include <memory>
 #include <string>
 
-namespace smol::core
-{
-    class level_t;
-}
-
 namespace smol::engine
 {
+    using system_func_t = void (*)(smol::ecs::registry_t&, f64);
+
     SMOL_API int init(const std::string& game_name, i32 init_window_width, i32 init_window_height);
     SMOL_API void run();
     SMOL_API int shutdown();
