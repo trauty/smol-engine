@@ -11,7 +11,8 @@ CTestTestfile.cmake
 _deps
 CMakeUserPresets.json
 build/
-.cpmcache/
+.pkgcache/
 **/.DS_Store
 include/smol-engine/
-.xmake
+.xmake/
+.toolchains/

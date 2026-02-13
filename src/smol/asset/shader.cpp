@@ -15,6 +15,7 @@
 #include <optional>
 #include <slang-com-ptr.h>
 #include <slang.h>
+#include <stack>
 #include <string>
 #include <vector>
 #include <vulkan/vulkan_core.h>
