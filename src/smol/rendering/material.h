@@ -1,10 +1,11 @@
 #pragma once
-#include "smol/asset/shader.h"
-#include "smol/asset/texture.h"
+#include "smol/assets/shader.h"
+#include "smol/assets/texture.h"
 #include "smol/log.h"
 
 #include <cstring>
 #include <unordered_map>
+#include <utility>
 #include <vulkan/vulkan_core.h>
 
 namespace smol
@@ -19,17 +20,33 @@ namespace smol
 
     struct material_t
     {
-        smol::shader_asset_t shader;
+        smol::shader_t shader;
         VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
 
         std::unordered_map<u32, ubo_resource_t> ubos;
 
+        material_t(material_t&& other) noexcept
+            : shader(std::move(other.shader)), descriptor_set(other.descriptor_set), ubos(std::move(other.ubos))
+        {
+            other.descriptor_set = VK_NULL_HANDLE;
+        }
+
+        material_t& operator=(material_t&& other) noexcept
+        {
+            if (this != &other)
+            {
+                this->~material_t();
+                new (this) material_t(std::move(other));
+            }
+
+            return *this;
+        }
+
         ~material_t();
 
-        void init(const smol::shader_asset_t& shader);
+        void init(const smol::shader_t& shader);
         void set_data(const std::string& block_name, const void* data, size_t size);
-        void set_texture(const std::string& tex_name, const std::string& sampler_name,
-                         const smol::texture_asset_t& texture);
+        void set_texture(const std::string& tex_name, const std::string& sampler_name, const smol::texture_t& texture);
 
         template<typename T>
         void set_parameter(const std::string& name, const T& value)

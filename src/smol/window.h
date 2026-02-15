@@ -7,12 +7,10 @@ struct SDL_Window;
 
 namespace smol::window
 {
-    struct size_changed_event_t : smol::events::event_t
+    struct window_size_changed_event
     {
-        i32 width;
-        i32 height;
-
-        size_changed_event_t(i32 w, i32 h) : width(w), height(h) {}
+        i32_t width;
+        i32_t height;
     };
 
     void set_window(SDL_Window* new_window);

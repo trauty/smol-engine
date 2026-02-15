@@ -1,6 +1,7 @@
 #pragma once
 
 #include "smol/defines.h"
+#include "smol/ecs.h"
 #include "smol/events.h"
 #include "smol/log.h"
 
@@ -46,8 +47,6 @@ namespace smol::renderer
 
         inline std::mutex queue_mutex;
         inline std::mutex descriptor_mutex;
-
-        inline smol::events::subscription_id_t sub_id;
     } // namespace ctx
 
     enum class shader_stage_e
@@ -59,7 +58,7 @@ namespace smol::renderer
     };
 
     void init();
-    void render();
+    void render(ecs::registry_t& reg);
     void shutdown();
 
     void create_swapchain(VkSwapchainKHR old_swapchain = VK_NULL_HANDLE);

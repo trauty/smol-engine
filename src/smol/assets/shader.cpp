@@ -1,11 +1,11 @@
 #include "shader.h"
 
 #include "smol/asset.h"
-#include "smol/asset/mesh.h"
+#include "smol/assets/mesh.h"
 #include "smol/color.h"
 #include "smol/log.h"
 #include "smol/main_thread.h"
-#include "smol/math_util.h"
+#include "smol/math.h"
 #include "smol/rendering/renderer.h"
 #include "smol/rendering/shader_compiler.h"
 #include "smol/util.h"
@@ -290,7 +290,7 @@ namespace smol
         }
     } // namespace
 
-    std::optional<shader_asset_t> smol::asset_loader_t<shader_asset_t>::load(const std::string& path)
+    std::optional<shader_t> smol::asset_loader_t<shader_t>::load(const std::string& path)
     {
         slang_compilation_res_t compiled_shader = compile_slang_to_spirv(path);
 
@@ -300,7 +300,7 @@ namespace smol
             return std::nullopt;
         }
 
-        shader_asset_t shader_asset;
+        shader_t shader_asset;
         shader_asset.shader_data->reflection = compiled_shader.reflection;
 
         VkShaderModule vert_mod = create_shader_module(compiled_shader.vert_spirv);
@@ -428,7 +428,7 @@ namespace smol
         VkPushConstantRange push_constant = {};
         push_constant.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
         push_constant.offset = 0;
-        push_constant.size = sizeof(smol::math::mat4_t);
+        push_constant.size = sizeof(mat4_t);
 
         VkDescriptorSetLayout set_layouts[] = {renderer::ctx::global_set_layout, material_layout};
 

@@ -1,10 +1,11 @@
 #pragma once
 
+#include "cglm/quat.h"
 #include "defines.h"
 
 #include <cglm/cglm.h>
 
-namespace smol::math
+namespace smol
 {
     struct vec3_t
     {
@@ -56,7 +57,7 @@ namespace smol::math
             versor data;
         };
 
-        constexpr quat_t() : x(0.0f), y(0.0f), z(0.0f), w(1.0f) {}
+        constexpr quat_t() { glm_quat_identity(data); }
         constexpr quat_t(f32 x, f32 y, f32 z, f32 w) : x(x), y(y), z(z), w(w) {}
 
         operator const versor&() const { return data; }
@@ -104,4 +105,4 @@ namespace smol::math
         float* raw() { return &data[0][0]; }
         const float* raw() const { return &data[0][0]; }
     };
-} // namespace smol::math
+} // namespace smol

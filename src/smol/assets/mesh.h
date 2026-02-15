@@ -28,7 +28,7 @@ namespace smol
         ~mesh_data_t();
     };
 
-    struct mesh_asset_t
+    struct mesh_t
     {
         std::shared_ptr<mesh_data_t> mesh_data = std::make_shared<mesh_data_t>();
 
@@ -40,8 +40,8 @@ namespace smol
     };
 
     template<>
-    struct asset_loader_t<mesh_asset_t>
+    struct asset_loader_t<mesh_t>
     {
-        static std::optional<mesh_asset_t> load(const std::string& path);
+        static std::optional<mesh_t> load(const std::string& path);
     };
 } // namespace smol

@@ -1,27 +1,24 @@
 #pragma once
 
-#include "smol/asset/mesh.h"
-#include "smol/core/component.h"
-#include "smol/defines.h"
-#include "smol/math_util.h"
+#include "smol/asset.h"
+#include "smol/assets/mesh.h"
 #include "smol/rendering/material.h"
-
-#include <vector>
 
 namespace smol::components
 {
-    class renderer_ct : public smol::core::component_t
+    struct mesh_renderer_t
     {
-      public:
-        static std::vector<renderer_ct*> all_renderers;
+        asset_t<mesh_t> mesh;
+        material_t material;
 
-        smol::mesh_asset_t mesh;
-        smol::material_t material;
+        bool active = true;
 
-        renderer_ct();
-        ~renderer_ct();
+        mesh_renderer_t() = default;
 
-        void set_mesh(const smol::mesh_asset_t& new_mesh);
-        void set_material(const smol::material_t& new_mat);
+        mesh_renderer_t(mesh_renderer_t&&) = default;
+        mesh_renderer_t& operator=(mesh_renderer_t&&) = default;
+
+        mesh_renderer_t(const mesh_renderer_t&) = delete;
+        mesh_renderer_t& operator=(const mesh_renderer_t&) = delete;
     };
 } // namespace smol::components

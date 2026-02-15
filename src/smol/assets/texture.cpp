@@ -29,7 +29,7 @@ namespace smol
         }
     }
 
-    std::optional<texture_asset_t> asset_loader_t<texture_asset_t>::load(const std::string& path, texture_format_e type)
+    std::optional<texture_t> asset_loader_t<texture_t>::load(const std::string& path, texture_format_e type)
     {
         i32 width, height, channels;
         u8* pixels = stbi_load(path.c_str(), &width, &height, &channels, STBI_rgb_alpha);
@@ -42,7 +42,7 @@ namespace smol
 
         VkDeviceSize image_size = width * height * 4;
 
-        texture_asset_t tex_asset;
+        texture_t tex_asset;
         tex_asset.width = width;
         tex_asset.height = height;
         tex_asset.type = type;

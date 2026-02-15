@@ -1,14 +1,15 @@
 #include "renderer.h"
 
-#include "smol/asset/mesh.h"
-#include "smol/asset/shader.h"
+#include "cglm/euler.h"
+#include "cglm/quat.h"
+#include "smol/assets/mesh.h"
+#include "smol/assets/shader.h"
 #include "smol/components/camera.h"
 #include "smol/components/renderer.h"
 #include "smol/components/transform.h"
-#include "smol/core/gameobject.h"
 #include "smol/defines.h"
 #include "smol/log.h"
-#include "smol/math_util.h"
+#include "smol/math.h"
 #include "smol/rendering/material.h"
 #include "smol/window.h"
 
@@ -21,7 +22,6 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <iostream>
 #include <tracy/Tracy.hpp>
 #include <vector>
 #include <vulkan/vulkan.h>
@@ -92,15 +92,23 @@ namespace smol::renderer
             descriptor_write.pBufferInfo = &buffer_info;
             vkUpdateDescriptorSets(ctx::device, 1, &descriptor_write, 0, nullptr);
         }
-
-        ctx::sub_id = smol::events::subscribe<smol::window::size_changed_event_t>(
-            []([[maybe_unused]] const smol::window::size_changed_event_t& ctx) { recreate_swapchain(); });
     }
 
-    void render()
+    void render(ecs::registry_t& reg)
     {
         ZoneScoped;
-        if (camera_ct::main_camera == nullptr) { return; }
+
+        camera_t* cam_data = nullptr;
+        transform_t* cam_transform = nullptr;
+
+        for (auto [entity, cam, transform] : reg.view<camera_t, transform_t>())
+        {
+            cam_data = &cam;
+            cam_transform = &transform;
+            break;
+        }
+
+        if (!cam_data || !cam_transform) { return; }
 
         vkWaitForFences(ctx::device, 1, &ctx::in_flight_fences[ctx::cur_frame], VK_TRUE, UINT64_MAX);
 
@@ -122,12 +130,16 @@ namespace smol::renderer
         VkCommandBuffer cmd = ctx::command_buffers[ctx::cur_frame];
         vkResetCommandBuffer(cmd, 0);
 
-        camera_ct* cam = camera_ct::main_camera;
+        vec3 euler_rot;
+        mat4 rot_mat;
+        glm_quat_mat4(cam_transform->local_rotation.data, rot_mat);
+        glm_euler_angles(rot_mat, euler_rot);
+
         global_data_t global_data;
-        glm_mat4_transpose_to(cam->view_matrix.data, global_data.smol_view);
-        glm_mat4_transpose_to(cam->projection_matrix.data, global_data.smol_projection);
-        glm_vec3_copy(cam->transform->get_world_position().data, global_data.smol_camera_position);
-        glm_vec3_copy(cam->transform->get_world_euler_angles().data, global_data.smol_camera_direction);
+        glm_mat4_transpose_to(cam_data->view.data, global_data.smol_view);
+        glm_mat4_transpose_to(cam_data->projection.data, global_data.smol_projection);
+        glm_vec3_copy(cam_transform->local_position.data, global_data.smol_camera_position);
+        glm_vec3_copy(euler_rot, global_data.smol_camera_direction);
 
         std::memcpy(frames[ctx::cur_frame].global_data_mapped_mem, &global_data, sizeof(global_data_t));
 
@@ -165,14 +177,14 @@ namespace smol::renderer
         scissor.extent = ctx::swapchain_extent;
         vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-        for (const renderer_ct* renderer : renderer_ct::all_renderers)
+        for (auto [entity, renderer, transform] : reg.view<mesh_renderer_t, transform_t>())
         {
-            if (!renderer->is_active()) { continue; }
+            if (!renderer.active) { continue; }
 
-            const material_t& mat = renderer->material;
-            const mesh_asset_t& mesh = renderer->mesh;
+            const material_t& mat = renderer.material;
+            const mesh_t* mesh = renderer.mesh.get();
 
-            if (!mat.shader.ready() || !mesh.ready()) { continue; }
+            if (!mat.shader.ready() || !mesh->ready()) { continue; }
 
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, mat.shader.shader_data->pipeline);
 
@@ -186,18 +198,18 @@ namespace smol::renderer
             }
 
             object_push_constants_t push;
-            mat4_t& model_mat = renderer->get_gameobject()->get_transform()->get_world_matrix();
+            mat4_t& model_mat = transform.world_mat;
             glm_mat4_transpose_to(model_mat.data, push.smol_model_matrix);
             vkCmdPushConstants(cmd, mat.shader.shader_data->pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0,
                                sizeof(object_push_constants_t), &push);
 
-            VkBuffer vertex_buffers[] = {mesh.mesh_data->vertex_buffer};
+            VkBuffer vertex_buffers[] = {mesh->mesh_data->vertex_buffer};
             VkDeviceSize offsets[] = {0};
             vkCmdBindVertexBuffers(cmd, 0, 1, vertex_buffers, offsets);
 
-            vkCmdBindIndexBuffer(cmd, mesh.mesh_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
+            vkCmdBindIndexBuffer(cmd, mesh->mesh_data->index_buffer, 0, VK_INDEX_TYPE_UINT32);
 
-            vkCmdDrawIndexed(cmd, mesh.index_count, 1, 0, 0, 0);
+            vkCmdDrawIndexed(cmd, mesh->index_count, 1, 0, 0, 0);
         }
 
         vkCmdEndRenderPass(cmd);

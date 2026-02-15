@@ -1,15 +1,19 @@
 #include "engine.h"
 
 #include "asset.h"
-#include "core/level.h"
 #include "defines.h"
 #include "log.h"
 #include "main_thread.h"
-#include "physics.h"
 #include "rendering/renderer.h"
+#include "smol/asset_registry.h"
+#include "smol/ecs.h"
+#include "smol/jobs.h"
 #include "smol/rendering/shader_compiler.h"
+#include "smol/systems/events.h"
+#include "smol/time.h"
 #include "smol/util.h"
-#include "time_util.h"
+#include "smol/world.h"
+#include "time.h"
 #include "window.h"
 
 #include <SDL3/SDL_events.h>
@@ -20,7 +24,9 @@
 #include <SDL3/SDL_vulkan.h>
 #include <cstddef>
 #include <cstdint>
+#include <memory>
 #include <tracy/Tracy.hpp>
+#include <utility>
 #include <vector>
 #include <vulkan/vk_platform.h>
 #include <vulkan/vulkan.h>
@@ -38,7 +44,10 @@ namespace smol::engine
 {
     namespace
     {
-        std::shared_ptr<smol::core::level_t> current_level;
+        std::unique_ptr<world_t> active_scene;
+        asset_registry_t engine_assets;
+        bool is_running = true;
+
         VkDebugUtilsMessengerEXT debug_messenger;
         PFN_vkCreateDebugUtilsMessengerEXT pfn_vkCreateDebugUtilsMessengerEXT = nullptr;
         PFN_vkDestroyDebugUtilsMessengerEXT pfn_vkDestroyDebugUtilsMessengerEXT = nullptr;
@@ -96,10 +105,10 @@ namespace smol::engine
     {
         smol::log::init();
         smol::log::set_level(smol::log::level_e::LOG_DEBUG);
-        smol::asset_manager_t::init();
-        smol::physics::init();
 
         SMOL_LOG_INFO("ENGINE", "Starting engine.");
+
+        smol::jobs::init();
 
         SDL_SetHintWithPriority(SDL_HINT_SHUTDOWN_DBUS_ON_QUIT, "1", SDL_HintPriority::SDL_HINT_OVERRIDE);
         SDL_Init(SDL_INIT_VIDEO);
@@ -156,7 +165,7 @@ namespace smol::engine
             create_info.pNext = nullptr;
         }
 
-        for (const char* ext : extensions) { SMOL_LOG_INFO("VULKAN EXT", "{}", ext); }
+        for (const char* ext : extensions) { SMOL_LOG_INFO("VULKAN_EXT", "{}", ext); }
 
         VK_CHECK(vkCreateInstance(&create_info, nullptr, &renderer::ctx::instance));
 
@@ -336,34 +345,21 @@ namespace smol::engine
 
     void run()
     {
-        current_level->start();
-
         constexpr f64 fixed_timestep = 1.0 / 60.0; // this should be in a settings file later on
-        f64 current_time = smol::time::get_time_in_seconds();
+        smol::time::fixed_dt = fixed_timestep;
+        f64 current_time = smol::time::time;
         f64 accumulator = 0.0;
-
-        bool is_running = true;
 
         while (is_running)
         {
-            const f64 new_time = smol::time::get_time_in_seconds();
+            smol::time::update();
+            const f64 new_time = smol::time::time;
             f64 frame_time = new_time - current_time;
 
             if (frame_time >= 0.25) { frame_time = 0.25; }
 
             current_time = new_time;
             accumulator += frame_time;
-
-            while (accumulator >= fixed_timestep)
-            {
-                current_level->fixed_update(fixed_timestep);
-                accumulator -= fixed_timestep;
-            }
-            smol::physics::update(frame_time);
-            smol::physics::interpolation_alpha = static_cast<f32>(accumulator / fixed_timestep);
-            current_level->update(frame_time);
-
-            smol::main_thread::execute();
 
             static SDL_Event event;
             while (SDL_PollEvent(&event))
@@ -378,7 +374,21 @@ namespace smol::engine
                 }
             }
 
-            smol::renderer::render();
+            while (accumulator >= fixed_timestep)
+            {
+                active_scene->fixed_update();
+                accumulator -= fixed_timestep;
+            }
+
+            // smol::physics::interpolation_alpha = static_cast<f32>(accumulator / fixed_timestep);
+
+            active_scene->update();
+
+            smol::main_thread::execute();
+
+            smol::event_system::clear_frame_events(active_scene->registry);
+
+            smol::renderer::render(active_scene->registry);
 
             FrameMark;
         }
@@ -388,12 +398,12 @@ namespace smol::engine
     {
         SMOL_LOG_INFO("ENGINE", "Stopping engine.");
 
+        active_scene->shutdown();
+        active_scene.reset();
+
+        engine_assets.shutdown();
+
         vkDeviceWaitIdle(renderer::ctx::device);
-
-        if (current_level != nullptr) { current_level = nullptr; }
-
-        smol::asset_manager_t::clear_all();
-        smol::asset_manager_t::shutdown();
 
         smol::renderer::shutdown();
 
@@ -404,21 +414,25 @@ namespace smol::engine
 
         if (renderer::ctx::instance != VK_NULL_HANDLE) { vkDestroyInstance(renderer::ctx::instance, nullptr); }
 
-        smol::physics::shutdown();
         smol::window::shutdown();
         smol::log::shutdown();
         return 0;
     }
 
-    void exit()
+    void exit() { is_running = false; }
+
+    void set_scene(std::unique_ptr<smol::world_t> new_scene)
     {
-        SDL_Event quit_event = {.type = SDL_EVENT_QUIT};
-        SDL_PushEvent(&quit_event);
+        if (active_scene) { active_scene->shutdown(); }
+
+        active_scene = std::move(new_scene);
+
+        if (active_scene) { active_scene->init(engine_assets); }
+        else
+        {
+            SMOL_LOG_ERROR("ENGINE", "Could not set scene");
+        }
     }
 
-    smol_result_e load_level(std::shared_ptr<smol::core::level_t> level)
-    {
-        current_level = std::move(level);
-        return SMOL_SUCCESS;
-    }
+    world_t& get_active_world() { return *active_scene; }
 } // namespace smol::engine

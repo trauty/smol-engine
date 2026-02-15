@@ -1,6 +1,6 @@
 #pragma once
 #include "smol/asset.h"
-#include "smol/asset/shader.h"
+#include "smol/assets/shader.h"
 #include "smol/defines.h"
 
 #include <memory>
@@ -26,7 +26,7 @@ namespace smol
         ~texture_data_t();
     };
 
-    struct texture_asset_t
+    struct texture_t
     {
         i32 width = 0;
         i32 height = 0;
@@ -38,9 +38,8 @@ namespace smol
     };
 
     template<>
-    struct asset_loader_t<texture_asset_t>
+    struct asset_loader_t<texture_t>
     {
-        static std::optional<texture_asset_t> load(const std::string& path,
-                                                   texture_format_e type = texture_format_e::SRGB);
+        static std::optional<texture_t> load(const std::string& path, texture_format_e type = texture_format_e::SRGB);
     };
 } // namespace smol

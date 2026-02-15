@@ -1,18 +1,14 @@
 #pragma once
 
-#include "smol/asset.h"
-#include "smol/color.h"
+#include "smol/asset_registry.h"
 #include "smol/defines.h"
-#include "smol/math_util.h"
-#include "smol/rendering/renderer.h"
 
-#include <cstddef>
 #include <memory>
 #include <optional>
 #include <string>
 #include <unordered_map>
-#include <variant>
 
+#include <vector>
 #include <vulkan/vulkan_core.h>
 
 namespace smol
@@ -55,7 +51,7 @@ namespace smol
         ~shader_data_t();
     };
 
-    struct shader_asset_t
+    struct shader_t
     {
         std::shared_ptr<shader_data_t> shader_data = std::make_shared<shader_data_t>();
 
@@ -64,8 +60,8 @@ namespace smol
     };
 
     template<>
-    struct asset_loader_t<shader_asset_t>
+    struct asset_loader_t<shader_t>
     {
-        static std::optional<shader_asset_t> load(const std::string& path);
+        static std::optional<shader_t> load(const std::string& path);
     };
 } // namespace smol

@@ -1,6 +1,6 @@
 #include "material.h"
 
-#include "smol/asset/shader.h"
+#include "smol/assets/shader.h"
 #include "smol/defines.h"
 #include "smol/log.h"
 #include "smol/rendering/renderer.h"
@@ -27,7 +27,7 @@ namespace smol
         }
     }
 
-    void material_t::init(const smol::shader_asset_t& s)
+    void material_t::init(const smol::shader_t& s)
     {
         shader = s;
         if (!shader.ready()) { return; }
@@ -118,7 +118,7 @@ namespace smol
     }
 
     void material_t::set_texture(const std::string& tex_name, const std::string& sampler_name,
-                                 const smol::texture_asset_t& texture)
+                                 const smol::texture_t& texture)
     {
         if (descriptor_set == VK_NULL_HANDLE) { return; }
         if (!texture.ready())

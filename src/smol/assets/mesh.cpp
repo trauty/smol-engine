@@ -25,7 +25,7 @@ namespace smol
         }
     }
 
-    std::optional<mesh_asset_t> asset_loader_t<mesh_asset_t>::load(const std::string& path)
+    std::optional<mesh_t> asset_loader_t<mesh_t>::load(const std::string& path)
     {
         tinygltf::TinyGLTF loader;
         tinygltf::Model model;
@@ -47,7 +47,7 @@ namespace smol
             return std::nullopt;
         }
 
-        mesh_asset_t mesh_asset;
+        mesh_t mesh_asset;
 
         const tinygltf::Mesh& mesh = model.meshes[0];
         const tinygltf::Primitive& primitive = mesh.primitives[0];
