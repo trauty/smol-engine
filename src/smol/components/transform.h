@@ -1,13 +1,15 @@
 #pragma once
 
 #include "smol/defines.h"
-#include "smol/ecs.h"
+#include "smol/ecs_types.h"
 #include "smol/math.h"
 
 namespace smol
 {
     struct transform_t
     {
+        SMOL_COMPONENT(transform_t);
+
         vec3_t local_position;
         quat_t local_rotation;
         vec3_t local_scale = {1.0f, 1.0f, 1.0f};
@@ -20,7 +22,7 @@ namespace smol
         ecs::entity_t next_sibling = ecs::NULL_ENTITY;
         ecs::entity_t prev_sibling = ecs::NULL_ENTITY;
 
-        u32_t parent_dense_index = -1;
+        i32_t parent_dense_index = -1;
         bool is_dirty = false;
     };
 } // namespace smol

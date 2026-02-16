@@ -3,6 +3,7 @@
 #include "smol/defines.h"
 #include "smol/engine.h"
 #include "smol/events.h"
+#include "smol/log.h"
 
 #include <SDL3/SDL_init.h>
 #include <SDL3/SDL_video.h>

@@ -22,21 +22,21 @@ namespace smol::transform_system
     void set_local_position(ecs::registry_t& reg, ecs::entity_t entity, vec3_t new_pos)
     {
         transform_t& transform = reg.get<transform_t>(entity);
-        glm_vec3_copy(new_pos.data, transform.local_position.data);
+        glm_vec3_copy(new_pos, transform.local_position);
         transform.is_dirty = true;
     }
 
     void set_local_rotation(ecs::registry_t& reg, ecs::entity_t entity, quat_t new_rot)
     {
         transform_t& transform = reg.get<transform_t>(entity);
-        glm_quat_copy(new_rot.data, transform.local_rotation.data);
+        glm_quat_copy(new_rot, transform.local_rotation);
         transform.is_dirty = true;
     }
 
     void set_local_scale(ecs::registry_t& reg, ecs::entity_t entity, vec3_t new_scale)
     {
         transform_t& transform = reg.get<transform_t>(entity);
-        glm_vec3_copy(new_scale.data, transform.local_scale.data);
+        glm_vec3_copy(new_scale, transform.local_scale);
         transform.is_dirty = true;
     }
 
@@ -45,7 +45,7 @@ namespace smol::transform_system
         transform_t& t = reg.get<transform_t>(entity);
 
         vec3_t pos;
-        glm_vec3_copy(t.world_mat.data[3], pos.data);
+        glm_vec3_copy(t.world_mat[3], pos);
         return pos;
     }
 
@@ -54,9 +54,9 @@ namespace smol::transform_system
         transform_t& t = reg.get<transform_t>(entity);
 
         vec3_t scale;
-        scale.x = glm_vec3_norm(t.world_mat.data[0]);
-        scale.y = glm_vec3_norm(t.world_mat.data[1]);
-        scale.z = glm_vec3_norm(t.world_mat.data[2]);
+        scale.x = glm_vec3_norm(t.world_mat[0]);
+        scale.y = glm_vec3_norm(t.world_mat[1]);
+        scale.z = glm_vec3_norm(t.world_mat[2]);
 
         return scale;
     }
@@ -67,13 +67,13 @@ namespace smol::transform_system
         quat_t rot;
 
         mat4 temp_mat;
-        glm_mat4_copy(t.world_mat.data, temp_mat);
+        glm_mat4_copy(t.world_mat, temp_mat);
 
         glm_vec3_normalize(temp_mat[0]);
         glm_vec3_normalize(temp_mat[1]);
         glm_vec3_normalize(temp_mat[2]);
 
-        glm_mat4_quat(temp_mat, rot.data);
+        glm_mat4_quat(temp_mat, rot);
 
         return rot;
     }
@@ -91,10 +91,10 @@ namespace smol::transform_system
         transform_t& parent_t = reg.get<transform_t>(t.parent);
 
         mat4 parent_inv;
-        glm_mat4_inv(parent_t.world_mat.data, parent_inv);
+        glm_mat4_inv(parent_t.world_mat, parent_inv);
 
         vec3_t new_local_pos;
-        glm_mat4_mulv3(parent_inv, target_world_pos.data, 1.0f, new_local_pos.data);
+        glm_mat4_mulv3(parent_inv, target_world_pos, 1.0f, new_local_pos);
 
         set_local_position(reg, entity, new_local_pos);
     }
@@ -140,7 +140,7 @@ namespace smol::transform_system
 
     static void rebuild_hierarchy(ecs::registry_t& reg)
     {
-        ecs::sparse_set_t<transform_t> pool = reg.get_storage<transform_t>();
+        ecs::sparse_set_t<transform_t>& pool = reg.get_storage<transform_t>();
         const size_t count = pool.size();
         if (count == 0) { return; }
 
@@ -187,7 +187,7 @@ namespace smol::transform_system
             if (parent_id == ecs::NULL_ENTITY) { new_data[i].parent_dense_index = -1; }
             else
             {
-                new_data[i].parent_dense_index = static_cast<u32_t>(pool.get_index(parent_id));
+                new_data[i].parent_dense_index = static_cast<i32_t>(pool.get_index(parent_id));
             }
         }
 
@@ -198,7 +198,7 @@ namespace smol::transform_system
     {
         if (is_hierarchy_dirty) { rebuild_hierarchy(reg); }
 
-        ecs::sparse_set_t<transform_t> pool = reg.get_storage<transform_t>();
+        ecs::sparse_set_t<transform_t>& pool = reg.get_storage<transform_t>();
         const size_t count = pool.size();
         transform_t* transform_data = pool.data();
 
@@ -210,11 +210,11 @@ namespace smol::transform_system
             if (is_local_dirty)
             {
                 mat4_t t, r, s, trs;
-                glm_translate_make(t.data, transform.local_position.data);
-                glm_quat_mat4(transform.local_rotation.data, r.data);
-                glm_scale_make(s.data, transform.local_scale.data);
-                glm_mat4_mul(r.data, s.data, trs.data);
-                glm_mat4_mul(t.data, trs.data, transform.local_mat.data);
+                glm_translate_make(t, transform.local_position);
+                glm_quat_mat4(transform.local_rotation, r);
+                glm_scale_make(s, transform.local_scale);
+                glm_mat4_mul(r, s, trs);
+                glm_mat4_mul(t, trs, transform.local_mat);
             }
 
             bool is_parent_dirty = false;
@@ -224,13 +224,13 @@ namespace smol::transform_system
 
                 if (is_local_dirty || is_parent_dirty)
                 {
-                    const mat4_t& world_mat = transform_data[transform.parent_dense_index].world_mat;
-                    glm_mat4_mul((vec4*)world_mat.data, (vec4*)transform.local_mat.data, transform.world_mat.data);
+                    mat4_t& world_mat = transform_data[transform.parent_dense_index].world_mat;
+                    glm_mat4_mul(world_mat, (vec4*)transform.local_mat, transform.world_mat);
 
                     transform.is_dirty = true;
                 }
             }
-            else if (is_local_dirty) { glm_mat4_copy(transform.local_mat.data, transform.world_mat.data); }
+            else if (is_local_dirty) { glm_mat4_copy(transform.local_mat, transform.world_mat); }
         }
 
         for (size_t i = 0; i < count; i++) { transform_data[i].is_dirty = false; }

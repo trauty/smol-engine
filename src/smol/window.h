@@ -1,7 +1,7 @@
 #pragma once
 
 #include "defines.h"
-#include "events.h"
+#include "smol/ecs_types.h"
 
 struct SDL_Window;
 
@@ -9,6 +9,8 @@ namespace smol::window
 {
     struct window_size_changed_event
     {
+        SMOL_COMPONENT(window_size_changed_event)
+
         i32_t width;
         i32_t height;
     };

@@ -3,7 +3,6 @@
 #include "smol/asset.h"
 #include "smol/defines.h"
 #include "smol/log.h"
-#include "smol/main_thread.h"
 #include "smol/rendering/renderer.h"
 
 #include <cstddef>
@@ -182,7 +181,11 @@ namespace smol
             vkWaitForFences(renderer::ctx::device, 1, &fence, VK_TRUE, UINT64_MAX);
 
             vkDestroyFence(renderer::ctx::device, fence, nullptr);
-            vkFreeCommandBuffers(renderer::ctx::device, renderer::ctx::command_pool, 1, &cmd_buf);
+
+            {
+                std::scoped_lock lock(renderer::ctx::queue_mutex);
+                vkFreeCommandBuffers(renderer::ctx::device, renderer::ctx::command_pool, 1, &cmd_buf);
+            }
         }
 
         vkDestroyBuffer(renderer::ctx::device, staging_buf, nullptr);

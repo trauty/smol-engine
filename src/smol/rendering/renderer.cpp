@@ -27,14 +27,10 @@
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_core.h>
 
-using namespace smol::components;
-
 namespace smol::renderer
 {
     namespace
     {
-        std::vector<GLuint> all_shader_programs;
-
         struct global_data_t
         {
             mat4 smol_view;
@@ -98,6 +94,13 @@ namespace smol::renderer
     {
         ZoneScoped;
 
+        for (auto [entity, event] : reg.view<window::window_size_changed_event>())
+        {
+            SMOL_LOG_INFO("RENDERER", "Window resized, new swapchain size: {} : {}", event.width, event.height);
+
+            recreate_swapchain();
+        }
+
         camera_t* cam_data = nullptr;
         transform_t* cam_transform = nullptr;
 
@@ -132,14 +135,20 @@ namespace smol::renderer
 
         vec3 euler_rot;
         mat4 rot_mat;
-        glm_quat_mat4(cam_transform->local_rotation.data, rot_mat);
+        glm_quat_mat4(cam_transform->local_rotation, rot_mat);
         glm_euler_angles(rot_mat, euler_rot);
 
         global_data_t global_data;
-        glm_mat4_transpose_to(cam_data->view.data, global_data.smol_view);
-        glm_mat4_transpose_to(cam_data->projection.data, global_data.smol_projection);
-        glm_vec3_copy(cam_transform->local_position.data, global_data.smol_camera_position);
+        glm_mat4_transpose_to(cam_data->view, global_data.smol_view);
+        glm_mat4_transpose_to(cam_data->projection, global_data.smol_projection);
+        glm_vec3_copy(cam_transform->local_position, global_data.smol_camera_position);
         glm_vec3_copy(euler_rot, global_data.smol_camera_direction);
+
+        /*SMOL_LOG_DEBUG("CAMERA", "\n{} {} {} {}\n{} {} {} {}\n{} {} {} {}\n{} {} {} {}\n", cam_data->view.m00,
+                       cam_data->view.m01, cam_data->view.m02, cam_data->view.m03, cam_data->view.m10,
+                       cam_data->view.m11, cam_data->view.m12, cam_data->view.m13, cam_data->view.m20,
+                       cam_data->view.m21, cam_data->view.m22, cam_data->view.m23, cam_data->view.m30,
+                       cam_data->view.m31, cam_data->view.m32, cam_data->view.m33);*/
 
         std::memcpy(frames[ctx::cur_frame].global_data_mapped_mem, &global_data, sizeof(global_data_t));
 
@@ -181,26 +190,31 @@ namespace smol::renderer
         {
             if (!renderer.active) { continue; }
 
+            if (renderer.material.descriptor_set == VK_NULL_HANDLE)
+            {
+                if (!renderer.material.try_build_resources()) { continue; }
+            }
+
             const material_t& mat = renderer.material;
             const mesh_t* mesh = renderer.mesh.get();
 
-            if (!mat.shader.ready() || !mesh->ready()) { continue; }
+            if (!mat.shader->ready() || !mesh->ready()) { continue; }
 
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, mat.shader.shader_data->pipeline);
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, mat.shader->shader_data->pipeline);
 
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, mat.shader.shader_data->pipeline_layout, 0, 1,
-                                    &frames[ctx::cur_frame].global_descriptor, 0, nullptr);
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, mat.shader->shader_data->pipeline_layout, 0,
+                                    1, &frames[ctx::cur_frame].global_descriptor, 0, nullptr);
 
             if (mat.descriptor_set != VK_NULL_HANDLE)
             {
-                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, mat.shader.shader_data->pipeline_layout,
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, mat.shader->shader_data->pipeline_layout,
                                         1, 1, &mat.descriptor_set, 0, nullptr);
             }
 
             object_push_constants_t push;
             mat4_t& model_mat = transform.world_mat;
-            glm_mat4_transpose_to(model_mat.data, push.smol_model_matrix);
-            vkCmdPushConstants(cmd, mat.shader.shader_data->pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0,
+            glm_mat4_transpose_to(model_mat, push.smol_model_matrix);
+            vkCmdPushConstants(cmd, mat.shader->shader_data->pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT, 0,
                                sizeof(object_push_constants_t), &push);
 
             VkBuffer vertex_buffers[] = {mesh->mesh_data->vertex_buffer};
@@ -315,7 +329,7 @@ namespace smol::renderer
         vkGetPhysicalDeviceSurfaceCapabilitiesKHR(ctx::physical_device, ctx::surface, &caps);
 
         i32 w, h;
-        SDL_GetWindowSize(smol::window::get_window(), &w, &h);
+        smol::window::get_window_size(&w, &h);
         if (w == 0 || h == 0) return;
 
         VkExtent2D extent;

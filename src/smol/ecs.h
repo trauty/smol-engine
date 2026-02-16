@@ -1,13 +1,14 @@
 #pragma once
 
-#include "smol/defines.h"
+#include "smol/ecs_types.h"
+#include "smol/hash.h"
 #include <algorithm>
 #include <atomic>
 #include <cassert>
 #include <cstddef>
 #include <functional>
-#include <limits>
 #include <memory>
+#include <mutex>
 #include <tuple>
 #include <unordered_map>
 #include <utility>
@@ -15,20 +16,14 @@
 
 namespace smol::ecs
 {
-    using entity_t = u32_t;
     constexpr entity_t MAX_ENTITIES = 200000;
-    constexpr entity_t NULL_ENTITY = std::numeric_limits<entity_t>::max();
-
-    struct component_counter_t
-    {
-        static inline size_t counter = 0;
-    };
 
     template<typename T>
-    inline size_t get_component_id()
+    consteval size_t get_component_id()
     {
-        static const size_t id = component_counter_t::counter++;
-        return id;
+        static_assert(is_component_con<T>,
+                      "One of the components has no id. Register it with SMOL_COMPONENT(Name) inside the component.");
+        return hash::hashString64(T::get_type_name());
     }
 
     struct pool_t
@@ -51,20 +46,33 @@ namespace smol::ecs
 
         registry_t* registry_ref = nullptr;
 
-        sparse_set_t() { sparse.resize(MAX_ENTITIES, NULL_ENTITY); }
+        static constexpr size_t PAGE_SIZE = 4096;
+        static constexpr size_t PAGE_SHIFT = 12;
+        static constexpr size_t OFFSET_MASK = PAGE_SIZE - 1;
 
-        size_t get_index(entity_t entity) const { return sparse[entity]; }
+        sparse_set_t() = default;
+
+        size_t get_index(entity_t entity) const
+        {
+            const size_t* sparse_ptr = try_get_sparse_ptr(entity);
+            return sparse_ptr ? *sparse_ptr : NULL_ENTITY;
+        }
+
+        bool has(entity_t entity) const override
+        {
+            const size_t* sparse_ptr = try_get_sparse_ptr(entity);
+            return sparse_ptr && *sparse_ptr != NULL_ENTITY;
+        }
 
         template<typename... Args>
         T& emplace(entity_t entity, Args&&... args)
         {
-            if (has(entity)) { return dense_data[sparse[entity]]; }
+            if (has(entity)) { return dense_data[get_index(entity)]; }
 
             size_t index = dense_data.size();
 
-            if (entity >= sparse.size()) { sparse.resize(entity + 1, NULL_ENTITY); }
+            *get_sparse_ptr(entity) = index;
 
-            sparse[entity] = index;
             dense_data.emplace_back(std::forward<Args>(args)...);
             dense_entity.push_back(entity);
 
@@ -77,30 +85,28 @@ namespace smol::ecs
 
             if (on_destroy_cb && registry_ref)
             {
-                T& comp = dense_data[sparse[entity]];
+                T& comp = dense_data[get_index(entity)];
                 on_destroy_cb(*registry_ref, entity, comp);
             }
 
-            size_t idx_removed = sparse[entity];
+            size_t idx_removed = *get_sparse_ptr(entity);
             size_t idx_last = dense_data.size() - 1;
             entity_t entity_last = dense_entity[idx_last];
 
             dense_data[idx_removed] = std::move(dense_data[idx_last]);
             dense_entity[idx_removed] = entity_last;
 
-            sparse[entity_last] = idx_removed;
-            sparse[entity] = NULL_ENTITY;
+            *get_sparse_ptr(entity_last) = idx_removed;
+            *get_sparse_ptr(entity) = NULL_ENTITY;
 
             dense_data.pop_back();
             dense_entity.pop_back();
         }
 
-        bool has(entity_t entity) const override { return entity < sparse.size() && sparse[entity] != NULL_ENTITY; }
-
         T& get(entity_t entity)
         {
             assert(has(entity));
-            return dense_data[sparse[entity]];
+            return dense_data[get_index(entity)];
         }
 
         T* data() { return dense_data.data(); }
@@ -119,7 +125,11 @@ namespace smol::ecs
 
             dense_data.clear();
             dense_entity.clear();
-            std::fill(sparse.begin(), sparse.end(), NULL_ENTITY);
+
+            for (std::unique_ptr<size_t[]>& page : sparse_pages)
+            {
+                if (page) { std::fill_n(page.get(), PAGE_SHIFT, NULL_ENTITY); }
+            }
         }
 
         void reorder(const std::vector<entity_t>& ordered_entities) override
@@ -135,7 +145,7 @@ namespace smol::ecs
             {
                 if (has(entity))
                 {
-                    size_t old_index = sparse[entity];
+                    size_t old_index = get_index(entity);
                     new_data.push_back(std::move(dense_data[old_index]));
                     new_entities.push_back(entity);
                 }
@@ -144,7 +154,7 @@ namespace smol::ecs
             dense_data = std::move(new_data);
             dense_entity = std::move(new_entities);
 
-            for (size_t i = 0; i < dense_entity.size(); i++) { sparse[dense_entity[i]] = i; }
+            for (size_t i = 0; i < dense_entity.size(); i++) { *get_sparse_ptr(dense_entity[i]) = i; }
         }
 
         const std::vector<entity_t>& get_entities() const { return dense_entity; }
@@ -152,7 +162,28 @@ namespace smol::ecs
       private:
         std::vector<T> dense_data;
         std::vector<entity_t> dense_entity;
-        std::vector<size_t> sparse;
+        std::vector<std::unique_ptr<size_t[]>> sparse_pages;
+
+        size_t* get_sparse_ptr(entity_t entity)
+        {
+            size_t page = entity >> PAGE_SHIFT;
+            size_t offset = entity & OFFSET_MASK;
+            if (page >= sparse_pages.size()) { sparse_pages.resize(page + 1); }
+            if (!sparse_pages[page])
+            {
+                sparse_pages[page] = std::make_unique<size_t[]>(PAGE_SIZE);
+                std::fill_n(sparse_pages[page].get(), PAGE_SIZE, NULL_ENTITY);
+            }
+
+            return &sparse_pages[page][offset];
+        }
+
+        const size_t* try_get_sparse_ptr(entity_t entity) const
+        {
+            size_t page = entity >> PAGE_SHIFT;
+            if (page >= sparse_pages.size() || !sparse_pages[page]) { return nullptr; }
+            return &sparse_pages[page][entity & OFFSET_MASK];
+        }
     };
 
     class registry_t
@@ -203,19 +234,17 @@ namespace smol::ecs
         template<typename T>
         void set_context(T* instance)
         {
-            size_t id = get_context_id<T>();
-
-            if (id >= contexts.size()) { contexts.resize(id + 1, nullptr); }
-
-            contexts[id] = instance;
+            std::scoped_lock lock(ctx_mutex);
+            contexts[get_component_id<T>()] = instance;
         }
 
         template<typename T>
         T* ctx() const
         {
-            size_t id = get_context_id<T>();
+            size_t id = get_component_id<T>();
 
-            if (id < contexts.size()) { return static_cast<T*>(contexts[id]); }
+            auto it = contexts.find(id);
+            if (it != contexts.end()) { return static_cast<T*>(it->second); }
 
             return nullptr;
         }
@@ -298,42 +327,33 @@ namespace smol::ecs
         }
 
       private:
-        entity_t entity_counter = 0;
+        std::atomic<entity_t> entity_counter{0};
+        std::mutex recycle_mutex;
         std::vector<entity_t> free_entities;
 
-        std::vector<std::unique_ptr<pool_t>> pools;
-
-        std::vector<void*> contexts;
-
-        static inline std::atomic<size_t> context_counter{0};
-
-        template<typename T>
-        static size_t get_context_id()
-        {
-            static size_t id = context_counter++;
-            return id;
-        }
+        std::unordered_map<size_t, std::unique_ptr<pool_t>> pools;
+        std::unordered_map<size_t, void*> contexts;
+        mutable std::mutex ctx_mutex;
 
         template<typename T>
         sparse_set_t<T>& get_pool()
         {
-            size_t id = get_component_id<T>();
-            if (id >= pools.size()) { pools.resize(id + 1); }
-            if (!pools[id])
-            {
-                pools[id] = std::make_unique<sparse_set_t<T>>();
-                static_cast<sparse_set_t<T>*>(pools[id].get())->registry_ref = this;
-            }
+            constexpr size_t id = get_component_id<T>();
+            auto it = pools.find(id);
+            if (it != pools.end()) { return *static_cast<sparse_set_t<T>*>(it->second.get()); }
 
-            return *static_cast<sparse_set_t<T>*>(pools[id].get());
+            std::unique_ptr<sparse_set_t<T>> ptr = std::make_unique<sparse_set_t<T>>();
+            ptr->registry_ref = this;
+            sparse_set_t<T>* raw_ptr = ptr.get();
+            pools[id] = std::move(ptr);
+            return *raw_ptr;
         }
 
         template<typename T>
         sparse_set_t<T>* try_get_pool() const
         {
-            size_t id = get_component_id<T>();
-            if (id < pools.size() && pools[id]) { return static_cast<sparse_set_t<T>*>(pools[id].get()); }
-
+            auto it = pools.find(get_component_id<T>());
+            if (it != pools.end()) return static_cast<sparse_set_t<T>*>(it->second.get());
             return nullptr;
         }
     };

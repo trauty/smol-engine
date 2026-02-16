@@ -27,16 +27,23 @@ namespace smol
         }
     }
 
-    void material_t::init(const smol::shader_t& s)
+    bool material_t::try_build_resources()
     {
-        shader = s;
-        if (!shader.ready()) { return; }
+        if (!shader.valid()) { return false; }
 
-        VkDescriptorSetLayout layout = shader.shader_data->material_set_layout;
+        if (descriptor_set != VK_NULL_HANDLE) { return false; }
+
+        for (auto& [name, handle] : texture_bindings)
+        {
+            if (!handle.valid()) return false;
+        }
+
+        shader_t* s = shader.get();
+        VkDescriptorSetLayout layout = s->shader_data->material_set_layout;
         if (layout == VK_NULL_HANDLE)
         {
             SMOL_LOG_WARN("MATERIAL", "Shader has no material layout; Skipping material init");
-            return;
+            return false;
         }
 
         {
@@ -50,16 +57,18 @@ namespace smol
             if (vkAllocateDescriptorSets(renderer::ctx::device, &alloc_info, &descriptor_set) != VK_SUCCESS)
             {
                 SMOL_LOG_ERROR("MATERIAL", "Failed to allocate descriptor set for material");
-                return;
+                return false;
             }
         }
 
-        for (const auto& [name, bind] : shader.shader_data->reflection.bindings)
+        for (const auto& [name, bind] : s->shader_data->reflection.bindings)
         {
-            if (bind.set == 1 && bind.type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
+            if (bind.set != 1) { continue; }
+
+            if (bind.type == VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER)
             {
                 ubo_resource_t ubo = {};
-                ubo.size = shader.shader_data->reflection.get_ubo_size(1, bind.binding);
+                ubo.size = s->shader_data->reflection.get_ubo_size(1, bind.binding);
                 if (ubo.size == 0) { ubo.size = 256; } // fallback, if size not found, this should be handled better
 
                 renderer::create_buffer(ubo.size, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
@@ -88,13 +97,56 @@ namespace smol
                 SMOL_LOG_INFO("MATERIAL", "Created UBO for '{}' at binding: {} with size: {}", name, bind.binding,
                               ubo.size);
             }
+            else if (bind.type == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE || bind.type == VK_DESCRIPTOR_TYPE_SAMPLER ||
+                     bind.type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
+            {
+                auto it = texture_bindings.find(name);
+
+                if (it == texture_bindings.end())
+                {
+                    SMOL_LOG_WARN("MATERIAL", "No asset assigned for binding '{}'", name);
+                    continue;
+                }
+
+                texture_t* tex = it->second.get();
+
+                VkDescriptorImageInfo image_info = {};
+                image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+
+                if (bind.type == VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE)
+                {
+                    image_info.imageView = tex->tex_data->view;
+                    image_info.sampler = VK_NULL_HANDLE;
+                }
+                else if (bind.type == VK_DESCRIPTOR_TYPE_SAMPLER)
+                {
+                    image_info.imageView = VK_NULL_HANDLE;
+                    image_info.sampler = tex->tex_data->sampler;
+                }
+                else
+                {
+                    image_info.imageView = tex->tex_data->view;
+                    image_info.sampler = tex->tex_data->sampler;
+                }
+
+                VkWriteDescriptorSet write = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+                write.dstSet = descriptor_set;
+                write.dstBinding = bind.binding;
+                write.descriptorType = bind.type;
+                write.descriptorCount = 1;
+                write.pImageInfo = &image_info;
+
+                vkUpdateDescriptorSets(renderer::ctx::device, 1, &write, 0, nullptr);
+            }
         }
+
+        return true;
     }
 
     void material_t::set_data(const std::string& block_name, const void* data, size_t size)
     {
-        auto it = shader.shader_data->reflection.bindings.find(block_name);
-        if (it == shader.shader_data->reflection.bindings.end())
+        auto it = shader->shader_data->reflection.bindings.find(block_name);
+        if (it == shader->shader_data->reflection.bindings.end())
         {
             SMOL_LOG_WARN("MATERIAL", "UBO block '{}' not found in shader", block_name);
             return;
@@ -117,62 +169,8 @@ namespace smol
         std::memcpy(ubo.mapped_data, data, size);
     }
 
-    void material_t::set_texture(const std::string& tex_name, const std::string& sampler_name,
-                                 const smol::texture_t& texture)
+    void material_t::set_texture(const std::string& tex_name, asset_t<texture_t> texture)
     {
-        if (descriptor_set == VK_NULL_HANDLE) { return; }
-        if (!texture.ready())
-        {
-            SMOL_LOG_WARN("MATERIAL", "Texture asset not ready: {}", tex_name);
-            return;
-        }
-
-        VkDescriptorImageInfo image_info = {};
-        image_info.imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
-        image_info.imageView = texture.tex_data->view;
-        image_info.sampler = texture.tex_data->sampler;
-
-        std::vector<VkWriteDescriptorSet> writes;
-
-        auto it_tex = shader.shader_data->reflection.bindings.find(tex_name);
-        if (it_tex != shader.shader_data->reflection.bindings.end())
-        {
-            VkWriteDescriptorSet tex_write = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-            tex_write.pNext = nullptr;
-            tex_write.dstSet = descriptor_set;
-            tex_write.dstBinding = it_tex->second.binding;
-            tex_write.dstArrayElement = 0;
-            tex_write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-            tex_write.descriptorCount = 1;
-            tex_write.pImageInfo = &image_info;
-            writes.push_back(tex_write);
-        }
-        else
-        {
-            SMOL_LOG_WARN("MATERIAL", "Texture not found in shader bindings: {}", tex_name);
-        }
-
-        auto it_sampler = shader.shader_data->reflection.bindings.find(sampler_name);
-        if (it_sampler != shader.shader_data->reflection.bindings.end())
-        {
-            VkWriteDescriptorSet sampler_write = {VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-            sampler_write.pNext = nullptr;
-            sampler_write.dstSet = descriptor_set;
-            sampler_write.dstBinding = it_sampler->second.binding;
-            sampler_write.dstArrayElement = 0;
-            sampler_write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-            sampler_write.descriptorCount = 1;
-            sampler_write.pImageInfo = &image_info;
-            writes.push_back(sampler_write);
-        }
-        else
-        {
-            SMOL_LOG_WARN("MATERIAL", "Sampler not found in shader bindings: {}", sampler_name);
-        }
-
-        if (!writes.empty())
-        {
-            vkUpdateDescriptorSets(renderer::ctx::device, static_cast<u32>(writes.size()), writes.data(), 0, nullptr);
-        }
+        texture_bindings[tex_name] = texture;
     }
 } // namespace smol

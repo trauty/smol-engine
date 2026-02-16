@@ -4,7 +4,6 @@
 #include "smol/assets/mesh.h"
 #include "smol/color.h"
 #include "smol/log.h"
-#include "smol/main_thread.h"
 #include "smol/math.h"
 #include "smol/rendering/renderer.h"
 #include "smol/rendering/shader_compiler.h"

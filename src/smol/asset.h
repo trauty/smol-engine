@@ -1,7 +1,10 @@
 #pragma once
 
 #include "smol/asset_registry.h"
+#include "smol/ecs.h"
+#include "smol/log.h"
 #include <atomic>
+#include <iostream>
 
 namespace smol
 {
@@ -84,4 +87,19 @@ namespace smol
         }
     };
 
+    template<typename T, typename... Args>
+    asset_t<T> load_asset(ecs::registry_t& reg, const std::string& path, Args&&... args)
+    {
+        asset_registry_t* asset_reg = reg.ctx<asset_registry_t>();
+
+        if (!asset_reg)
+        {
+            SMOL_LOG_ERROR("ASSET", "No asset registry found in ECS context");
+            return asset_t<T>();
+        }
+
+        typename asset_pool_t<T>::slot_t* slot = asset_reg->load<T>(path, std::forward<Args>(args)...);
+
+        return asset_t<T>(asset_reg, slot);
+    }
 } // namespace smol

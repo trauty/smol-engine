@@ -7,6 +7,7 @@
 #include "smol/components/camera.h"
 #include "smol/components/transform.h"
 #include "smol/ecs.h"
+#include "smol/log.h"
 #include "smol/math.h"
 #include "smol/window.h"
 #include <tuple>
@@ -49,10 +50,9 @@ namespace smol::camera_system
         {
             if (cam.is_dirty)
             {
-                glm_perspective_lh_zo(glm_rad(cam.fov_deg), cam.aspect, cam.near_plane, cam.far_plane,
-                                      cam.projection.data);
+                glm_perspective_lh_zo(glm_rad(cam.fov_deg), cam.aspect, cam.near_plane, cam.far_plane, cam.projection);
 
-                cam.projection.data[1][1] *= -1.0f;
+                // cam.projection[1][1] *= -1.0f;
 
                 cam.is_dirty = false;
             }
@@ -62,9 +62,9 @@ namespace smol::camera_system
             vec3_t up = {transform.world_mat[1][0], transform.world_mat[1][1], transform.world_mat[1][2]};
 
             vec3_t center;
-            glm_vec3_add(eye.data, forward.data, center.data);
-            glm_lookat_lh(eye.data, center.data, up.data, cam.view.data);
-            glm_mat4_mul(cam.projection.data, cam.view.data, cam.view_proj.data);
+            glm_vec3_add(eye, forward, center);
+            glm_lookat_lh(eye, center, up, cam.view);
+            glm_mat4_mul(cam.projection, cam.view, cam.view_proj);
         }
     }
 } // namespace smol::camera_system

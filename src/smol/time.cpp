@@ -6,6 +6,10 @@
 
 namespace smol::time
 {
+    f64 time;
+    f64 dt;
+    f64 fixed_dt;
+
     void update()
     {
         static u64_t freq = SDL_GetPerformanceFrequency();

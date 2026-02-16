@@ -1,4 +1,5 @@
 #pragma once
+#include "smol/asset.h"
 #include "smol/assets/shader.h"
 #include "smol/assets/texture.h"
 #include "smol/log.h"
@@ -20,10 +21,14 @@ namespace smol
 
     struct material_t
     {
-        smol::shader_t shader;
+        asset_t<shader_t> shader;
         VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
 
         std::unordered_map<u32, ubo_resource_t> ubos;
+
+        std::unordered_map<std::string, asset_t<texture_t>> texture_bindings;
+
+        material_t() = default;
 
         material_t(material_t&& other) noexcept
             : shader(std::move(other.shader)), descriptor_set(other.descriptor_set), ubos(std::move(other.ubos))
@@ -44,17 +49,18 @@ namespace smol
 
         ~material_t();
 
-        void init(const smol::shader_t& shader);
+        void set_shader(asset_t<shader_t> s) { shader = s; }
+        bool try_build_resources();
         void set_data(const std::string& block_name, const void* data, size_t size);
-        void set_texture(const std::string& tex_name, const std::string& sampler_name, const smol::texture_t& texture);
+        void set_texture(const std::string& tex_name, asset_t<texture_t> texture);
 
         template<typename T>
         void set_parameter(const std::string& name, const T& value)
         {
-            if (!shader.ready()) { return; }
+            if (!shader->ready()) { return; }
 
             const std::unordered_map<std::string, shader_uniform_member_t>& members =
-                shader.shader_data->reflection.uniform_members;
+                shader.get()->shader_data->reflection.uniform_members;
 
             auto it = members.find(name);
             if (it == members.end())

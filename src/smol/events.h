@@ -7,6 +7,7 @@ namespace smol::events
 {
     struct frame_event_tag
     {
+        SMOL_COMPONENT(frame_event_tag)
     };
 
     template<typename T, typename... Args>

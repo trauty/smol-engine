@@ -2,6 +2,7 @@
 
 #include "smol/asset_types.h"
 #include "smol/defines.h"
+#include "smol/ecs_types.h"
 #include "smol/jobs.h"
 #include "smol/log.h"
 
@@ -52,6 +53,8 @@ namespace smol
     class asset_registry_t
     {
       public:
+        SMOL_COMPONENT(asset_registry_t)
+
         asset_registry_t() = default;
         ~asset_registry_t() { shutdown(); }
 
@@ -64,7 +67,7 @@ namespace smol
         template<typename T, typename... Args>
         typename asset_pool_t<T>::slot_t* load(const std::string& path, Args&&... args)
         {
-            asset_pool_t<T> pool = get_pool<T>();
+            asset_pool_t<T>& pool = get_pool<T>();
             const size_t type_id = get_asset_type_id<T>();
 
             std::unique_lock map_lock(lookup_mutex);

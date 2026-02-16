@@ -1,6 +1,7 @@
 #include "jolt_job_system_int.h"
 #include "Jolt/Core/Core.h"
-#include "Jolt/Core/JobSystemWithBarrier.h"
+#include "Jolt/Core/JobSystem.h"
+
 #include "smol/jobs.h"
 
 namespace smol
@@ -11,12 +12,20 @@ namespace smol
                                                             const JPH::JobSystem::JobFunction& in_job_func,
                                                             JPH::uint32 in_num_deps)
     {
-        return JPH::JobSystemWithBarrier::CreateJob(in_name, in_color, in_job_func, in_num_deps);
+        JPH::JobSystem::Job* job = new JPH::JobSystem::Job(in_name, in_color, this, in_job_func, in_num_deps);
+        JPH::JobHandle handle(job);
+        return handle;
     }
 
     void jolt_job_system_integration_t::QueueJob(JPH::JobSystem::Job* in_job)
     {
-        smol::jobs::kick([in_job]() { in_job->Execute(); }, nullptr, smol::jobs::priority_e::HIGH);
+        in_job->AddRef();
+        smol::jobs::kick(
+            [in_job]() {
+                in_job->Execute();
+                in_job->Release();
+            },
+            nullptr, smol::jobs::priority_e::HIGH);
     }
 
     void jolt_job_system_integration_t::QueueJobs(JPH::JobSystem::Job** in_jobs, JPH::uint32 in_num_jobs)
@@ -24,8 +33,5 @@ namespace smol
         for (JPH::uint32 i = 0; i < in_num_jobs; i++) { QueueJob(in_jobs[i]); }
     }
 
-    void jolt_job_system_integration_t::FreeJob(JPH::JobSystem::Job* in_job)
-    {
-        JPH::JobSystemWithBarrier::FreeJob(in_job);
-    }
+    void jolt_job_system_integration_t::FreeJob(JPH::JobSystem::Job* in_job) { delete in_job; }
 } // namespace smol

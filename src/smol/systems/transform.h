@@ -3,8 +3,6 @@
 #include "smol/ecs.h"
 #include "smol/math.h"
 
-#include <vector>
-
 namespace smol::transform_system
 {
     void set_local_position(ecs::registry_t& reg, ecs::entity_t entity, vec3_t new_pos);

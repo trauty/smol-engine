@@ -1,108 +1,103 @@
 #pragma once
 
-#include "cglm/quat.h"
+#include "cglm/euler.h"
 #include "defines.h"
 
 #include <cglm/cglm.h>
+#include <cstring>
 
 namespace smol
 {
     struct vec3_t
     {
-        union
-        {
-            struct
-            {
-                float x, y, z;
-            };
-            vec3 data;
-        };
+        float x, y, z;
 
-        constexpr vec3_t() : x(0.0f), y(0.0f), z(0.0f) {}
-        constexpr vec3_t(vec3 new_data) { glm_vec3_copy(new_data, data); }
-        constexpr vec3_t(f32 x, f32 y, f32 z) : x(x), y(y), z(z) {}
+        vec3_t() : x(0.0f), y(0.0f), z(0.0f) {}
+        vec3_t(f32 x, f32 y, f32 z) : x(x), y(y), z(z) {}
+        vec3_t(float* v) : x(v[0]), y(v[1]), z(v[2]) {}
 
-        operator const vec3&() const { return data; }
-        vec3& raw() { return data; }
-        const vec3& raw() const { return data; }
+        operator float*() { return &x; }
+        operator const float*() const { return &x; }
     };
 
-    struct vec4_t
+    struct alignas(16) vec4_t
     {
-        union
-        {
-            struct
-            {
-                float x, y, z, w;
-            };
-            vec4 data;
-        };
+        float x, y, z, w;
 
-        constexpr vec4_t() : x(0.0f), y(0.0f), z(0.0f), w(0.0f) {}
-        constexpr vec4_t(f32 x, f32 y, f32 z, f32 w) : x(x), y(y), z(z), w(w) {}
+        vec4_t() : x(0.0f), y(0.0f), z(0.0f), w(0.0f) {}
+        vec4_t(f32 x, f32 y, f32 z, f32 w) : x(x), y(y), z(z), w(w) {}
+        vec4_t(float* v) : x(v[0]), y(v[1]), z(v[2]), w(v[3]) {}
 
-        operator const vec4&() const { return data; }
-        vec4& raw() { return data; }
-        const vec4& raw() const { return data; }
+        operator float*() { return &x; }
+        operator const float*() const { return &x; }
     };
 
-    struct quat_t
+    struct alignas(16) quat_t
     {
-        union
+        float x, y, z, w;
+
+        quat_t() : x(0.0f), y(0.0f), z(0.0f), w(1.0f) {}
+        quat_t(f32 x, f32 y, f32 z, f32 w) : x(x), y(y), z(z), w(w) {}
+        quat_t(float* v) : x(v[0]), y(v[1]), z(v[2]), w(v[3]) {}
+
+        static quat_t from_euler(vec3_t euler_angles)
         {
-            struct
-            {
-                float x, y, z, w;
-            };
-            versor data;
-        };
+            quat_t dest;
+            glm_euler_zyx_quat(euler_angles, dest);
+            return dest;
+        }
 
-        constexpr quat_t() { glm_quat_identity(data); }
-        constexpr quat_t(f32 x, f32 y, f32 z, f32 w) : x(x), y(y), z(z), w(w) {}
-
-        operator const versor&() const { return data; }
-        versor& raw() { return data; }
-        const versor& raw() const { return data; }
+        operator float*() { return &x; }
+        operator const float*() const { return &x; }
     };
 
     struct mat3_t
     {
-        union
+        float m00, m01, m02;
+        float m10, m11, m12;
+        float m20, m21, m22;
+
+        mat3_t()
         {
-            struct
-            {
-                float m00, m01, m02;
-                float m10, m11, m12;
-                float m20, m21, m22;
-            };
-            mat3 data;
-        };
+            std::memset(this, 0, sizeof(mat3_t));
+            m00 = 1.0f;
+            m11 = 1.0f;
+            m22 = 1.0f;
+        }
 
-        constexpr mat3_t() { glm_mat3_identity(data); }
+        operator float*() { return &m00; }
+        operator const float*() const { return &m00; }
 
-        operator const mat3&() const { return data; }
-        mat3& raw() { return data; }
-        const mat3& raw() const { return data; }
+        operator vec3*() { return (vec3*)&m00; }
+        operator const vec3*() const { return (const vec3*)&m00; }
+
+        float* operator[](int col) { return &m00 + (col * 3); }
+        const float* operator[](int col) const { return &m00 + (col * 3); }
     };
 
-    struct mat4_t
+    struct alignas(32) mat4_t
     {
-        union
+        float m00, m01, m02, m03;
+        float m10, m11, m12, m13;
+        float m20, m21, m22, m23;
+        float m30, m31, m32, m33;
+
+        mat4_t()
         {
-            struct
-            {
-                float m00, m01, m02, m03;
-                float m10, m11, m12, m13;
-                float m20, m21, m22, m23;
-                float m30, m31, m32, m33;
-            };
-            mat4 data;
-        };
+            std::memset(this, 0, sizeof(mat4_t));
+            m00 = 1.0f;
+            m11 = 1.0f;
+            m22 = 1.0f;
+            m33 = 1.0f;
+        }
 
-        constexpr mat4_t() { glm_mat4_identity(data); }
+        operator float*() { return &m00; }
+        operator const float*() const { return &m00; }
 
-        operator const mat4&() const { return data; }
-        float* raw() { return &data[0][0]; }
-        const float* raw() const { return &data[0][0]; }
+        operator vec4*() { return (vec4*)&m00; }
+        operator const vec4*() const { return (const vec4*)&m00; }
+
+        float* operator[](int col) { return &m00 + (col * 4); }
+        const float* operator[](int col) const { return &m00 + (col * 4); }
     };
 } // namespace smol

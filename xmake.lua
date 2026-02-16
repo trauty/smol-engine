@@ -1,11 +1,11 @@
-add_requires("zig 0.15.2", {kind = "toolchain"})
-
 if os.scriptdir() == os.projectdir() then
     set_project("smol-engine")
     set_version("0.0.1")
     
-    set_toolchains("@zig")
     set_languages("cxx20")
+    if is_mode("debug") then
+        set_policy("build.sanitizer.address", true)
+    end 
 
     add_rules("mode.debug", "mode.release")
 end
@@ -36,10 +36,10 @@ target("smol-engine")
     )
 
     if is_mode("release") then
+        set_optimize("fastest")
         set_strip("all")
         set_policy("build.optimization.lto", true)
     end
-
 
     local pkg_root = path.join(os.scriptdir(), ".pkgcache")
 
@@ -70,7 +70,8 @@ target("smol-engine")
     add_files(path.join(root, "lib/tinygltf/tiny_gltf.cpp"), {warnings = "none"})
 
     add_files(path.join(root, pkg_rel, "jolt/Jolt/**.cpp"), {warnings = "none"})
-    add_files(path.join(root, pkg_rel, "fmt/src/*.cc"), {warnings = "none"})
+    add_files(path.join(root, pkg_rel, "fmt/src/format.cc"), {warnings = "none"})
+    add_files(path.join(root, pkg_rel, "fmt/src/os.cc"), {warnings = "none"})
 
     add_defines("JPH_CROSS_PLATFORM_DETERMINISTIC")
     add_defines("JPH_FLOATING_POINT_EXCEPTIONS_ENABLED")

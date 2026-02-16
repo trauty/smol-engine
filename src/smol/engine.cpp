@@ -3,13 +3,14 @@
 #include "asset.h"
 #include "defines.h"
 #include "log.h"
-#include "main_thread.h"
 #include "rendering/renderer.h"
 #include "smol/asset_registry.h"
 #include "smol/ecs.h"
 #include "smol/jobs.h"
 #include "smol/rendering/shader_compiler.h"
+#include "smol/systems/camera.h"
 #include "smol/systems/events.h"
+#include "smol/systems/transform.h"
 #include "smol/time.h"
 #include "smol/util.h"
 #include "smol/world.h"
@@ -384,11 +385,12 @@ namespace smol::engine
 
             active_scene->update();
 
-            smol::main_thread::execute();
-
-            smol::event_system::clear_frame_events(active_scene->registry);
+            smol::transform_system::update(active_scene->registry);
+            smol::camera_system::update(active_scene->registry);
 
             smol::renderer::render(active_scene->registry);
+
+            smol::event_system::clear_frame_events(active_scene->registry);
 
             FrameMark;
         }
@@ -398,12 +400,12 @@ namespace smol::engine
     {
         SMOL_LOG_INFO("ENGINE", "Stopping engine.");
 
+        vkDeviceWaitIdle(renderer::ctx::device);
+
         active_scene->shutdown();
         active_scene.reset();
 
         engine_assets.shutdown();
-
-        vkDeviceWaitIdle(renderer::ctx::device);
 
         smol::renderer::shutdown();
 
@@ -413,6 +415,8 @@ namespace smol::engine
         }
 
         if (renderer::ctx::instance != VK_NULL_HANDLE) { vkDestroyInstance(renderer::ctx::instance, nullptr); }
+
+        smol::jobs::shutdown();
 
         smol::window::shutdown();
         smol::log::shutdown();
