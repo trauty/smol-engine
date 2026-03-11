@@ -3,6 +3,7 @@
 #include "smol/defines.h"
 
 #include <chrono>
+#include <concepts>
 #include <condition_variable>
 #include <filesystem>
 #include <fmt/chrono.h>
@@ -11,14 +12,16 @@
 #include <iomanip>
 #include <iostream>
 #include <mutex>
+#include <ostream>
 #include <queue>
 #include <sstream>
 #include <string>
 #include <thread>
+#include <utility>
 
 #ifdef SMOL_PLATFORM_WIN
-#include <windows.h>
-#include <wtypes.h>
+    #include <windows.h>
+    #include <wtypes.h>
 #endif
 
 namespace smol::log
@@ -142,6 +145,21 @@ namespace smol::log
     {
         if (level < crt_level) return;
 
+        if (level == level_e::LOG_FATAL)
+        {
+            std::string console_msg =
+                ansi_level_colors[(u8)level] + format_line(level, category, msg, false) + ansi_color_reset;
+            std::cout << console_msg << std::endl;
+
+            if (log_file.is_open())
+            {
+                std::string file_msg = format_line(level, category, msg, true);
+                log_file << file_msg << std::endl;
+            }
+
+            return;
+        }
+
         {
             const std::lock_guard<std::mutex> lock(queue_mutex);
             msg_queue.push(
@@ -158,38 +176,48 @@ namespace smol::log
 #if SMOL_PLATFORM_WIN
         setup_ansi_console_colors_windows();
 #endif
-        worker = std::thread([] {
-            while (is_running || !msg_queue.empty())
+        worker = std::thread(
+            []
             {
-                std::unique_lock<std::mutex> lock(queue_mutex);
-                queue_vc.wait(lock, [] { return !msg_queue.empty() || !is_running; });
-
-                while (!msg_queue.empty())
+                while (true)
                 {
-                    log_msg_t msg = msg_queue.front();
-                    msg_queue.pop();
+                    std::queue<log_msg_t> local_queue;
 
-                    if (msg.to_console)
                     {
-                        std::cout << msg.text << "\n";
-                        continue;
+                        std::unique_lock lock(queue_mutex);
+                        queue_vc.wait(lock, [] { return !msg_queue.empty() || !is_running; });
+
+                        if (!is_running && msg_queue.empty()) { break; }
+                        std::swap(local_queue, msg_queue);
                     }
 
-                    if (log_file.is_open())
+                    while (!local_queue.empty())
                     {
-                        log_file << msg.text << "\n";
-                        crt_file_size += msg.text.size() + 1;
-                        log_file.flush();
+                        log_msg_t msg = local_queue.front();
+                        local_queue.pop();
 
-                        if (crt_file_size >= max_file_size)
+                        if (msg.to_console)
                         {
-                            crt_file_index++;
-                            open_new_log_file();
+                            std::cout << msg.text << "\n";
+                            continue;
+                        }
+
+                        if (log_file.is_open())
+                        {
+                            log_file << msg.text << "\n";
+                            crt_file_size += msg.text.size() + 1;
+
+                            log_file.flush();
+
+                            if (crt_file_size >= max_file_size)
+                            {
+                                crt_file_index++;
+                                open_new_log_file();
+                            }
                         }
                     }
                 }
-            }
-        });
+            });
     }
 
     void shutdown()

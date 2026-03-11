@@ -21,6 +21,7 @@
 
 namespace smol
 {
+    /*
     namespace
     {
         struct slang_compilation_res_t
@@ -521,4 +522,5 @@ namespace smol
             vkDestroyDescriptorSetLayout(renderer::ctx::device, material_set_layout, nullptr);
         }
     }
+*/
 } // namespace smol

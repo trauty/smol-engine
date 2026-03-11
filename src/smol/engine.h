@@ -9,9 +9,9 @@
 
 namespace smol::engine
 {
-    SMOL_API int init(const std::string& game_name, i32 init_window_width, i32 init_window_height);
+    SMOL_API bool init(const std::string& game_name, i32 init_window_width, i32 init_window_height);
     SMOL_API void run();
-    SMOL_API int shutdown();
+    SMOL_API bool shutdown();
 
     SMOL_API void exit();
 

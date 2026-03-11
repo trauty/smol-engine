@@ -12,6 +12,7 @@
 
 namespace smol
 {
+    /*
     mesh_data_t::~mesh_data_t()
     {
         // this one too, should actually check if gpu is using them before deleting them
@@ -244,4 +245,5 @@ namespace smol
 
         return mesh_asset;
     }
+        */
 } // namespace smol

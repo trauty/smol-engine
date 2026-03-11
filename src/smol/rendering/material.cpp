@@ -11,6 +11,7 @@
 
 namespace smol
 {
+    /*
     material_t::~material_t()
     {
         if (renderer::ctx::device != VK_NULL_HANDLE)
@@ -172,5 +173,5 @@ namespace smol
     void material_t::set_texture(const std::string& tex_name, asset_t<texture_t> texture)
     {
         texture_bindings[tex_name] = texture;
-    }
+    }*/
 } // namespace smol

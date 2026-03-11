@@ -19,17 +19,18 @@ namespace smol
     texture_data_t::~texture_data_t()
     {
         // this should probably be destroyed after i made sure that the gpu doesnt use the resource, but oh well :)
-        if (renderer::ctx::device != VK_NULL_HANDLE)
+        if (renderer::ctx.device != VK_NULL_HANDLE)
         {
-            if (sampler) { vkDestroySampler(renderer::ctx::device, sampler, nullptr); }
-            if (view) { vkDestroyImageView(renderer::ctx::device, view, nullptr); }
-            if (image) { vkDestroyImage(renderer::ctx::device, image, nullptr); }
-            if (memory) { vkFreeMemory(renderer::ctx::device, memory, nullptr); }
+            if (sampler) { vkDestroySampler(renderer::ctx.device, sampler, nullptr); }
+            if (view) { vkDestroyImageView(renderer::ctx.device, view, nullptr); }
+            if (image) { vkDestroyImage(renderer::ctx.device, image, nullptr); }
+            if (memory) { vkFreeMemory(renderer::ctx.device, memory, nullptr); }
         }
     }
 
     std::optional<texture_t> asset_loader_t<texture_t>::load(const std::string& path, texture_format_e type)
     {
+        /*
         i32 width, height, channels;
         u8* pixels = stbi_load(path.c_str(), &width, &height, &channels, STBI_rgb_alpha);
 
@@ -54,9 +55,9 @@ namespace smol
                                 staging_mem);
 
         void* data;
-        vkMapMemory(renderer::ctx::device, staging_mem, 0, image_size, 0, &data);
+        vkMapMemory(renderer::ctx.device, staging_mem, 0, image_size, 0, &data);
         std::memcpy(data, pixels, static_cast<size_t>(image_size));
-        vkUnmapMemory(renderer::ctx::device, staging_mem);
+        vkUnmapMemory(renderer::ctx.device, staging_mem);
 
         stbi_image_free(pixels);
 
@@ -76,16 +77,16 @@ namespace smol
         image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
         image_info.samples = VK_SAMPLE_COUNT_1_BIT;
 
-        if (vkCreateImage(renderer::ctx::device, &image_info, nullptr, &tex_asset.tex_data->image) != VK_SUCCESS)
+        if (vkCreateImage(renderer::ctx.device, &image_info, nullptr, &tex_asset.tex_data->image) != VK_SUCCESS)
         {
             SMOL_LOG_ERROR("TEXTURE", "Failed to create Vulkan image with image at path: {}", path);
-            vkDestroyBuffer(renderer::ctx::device, staging_buf, nullptr);
-            vkFreeMemory(renderer::ctx::device, staging_mem, nullptr);
+            vkDestroyBuffer(renderer::ctx.device, staging_buf, nullptr);
+            vkFreeMemory(renderer::ctx.device, staging_mem, nullptr);
             return std::nullopt;
         }
 
         VkMemoryRequirements mem_reqs;
-        vkGetImageMemoryRequirements(renderer::ctx::device, tex_asset.tex_data->image, &mem_reqs);
+        vkGetImageMemoryRequirements(renderer::ctx.device, tex_asset.tex_data->image, &mem_reqs);
 
         VkMemoryAllocateInfo alloc_info = {VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO};
         alloc_info.pNext = nullptr;
@@ -93,26 +94,26 @@ namespace smol
         alloc_info.memoryTypeIndex =
             renderer::find_mem_type(mem_reqs.memoryTypeBits, VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT);
 
-        if (vkAllocateMemory(renderer::ctx::device, &alloc_info, nullptr, &tex_asset.tex_data->memory) != VK_SUCCESS)
+        if (vkAllocateMemory(renderer::ctx.device, &alloc_info, nullptr, &tex_asset.tex_data->memory) != VK_SUCCESS)
         {
             SMOL_LOG_ERROR("TEXTURE", "Failed to allocate memory for texture: {}", path);
             return std::nullopt;
         }
 
-        vkBindImageMemory(renderer::ctx::device, tex_asset.tex_data->image, tex_asset.tex_data->memory, 0);
+        vkBindImageMemory(renderer::ctx.device, tex_asset.tex_data->image, tex_asset.tex_data->memory, 0);
 
         {
             VkCommandBufferAllocateInfo cmd_alloc_info = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
             cmd_alloc_info.pNext = nullptr;
             cmd_alloc_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-            cmd_alloc_info.commandPool = renderer::ctx::command_pool;
+            cmd_alloc_info.commandPool = renderer::ctx.command_pool;
             cmd_alloc_info.commandBufferCount = 1;
 
             VkCommandBuffer cmd_buf;
 
             {
-                std::scoped_lock lock(renderer::ctx::queue_mutex);
-                vkAllocateCommandBuffers(renderer::ctx::device, &cmd_alloc_info, &cmd_buf);
+                std::scoped_lock lock(renderer::ctx.queue_mutex);
+                vkAllocateCommandBuffers(renderer::ctx.device, &cmd_alloc_info, &cmd_buf);
             }
 
             VkCommandBufferBeginInfo cmd_buf_begin_info = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
@@ -171,25 +172,25 @@ namespace smol
             VkFence fence;
             VkFenceCreateInfo fence_info = {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
             fence_info.pNext = nullptr;
-            vkCreateFence(renderer::ctx::device, &fence_info, nullptr, &fence);
+            vkCreateFence(renderer::ctx.device, &fence_info, nullptr, &fence);
 
             {
-                std::scoped_lock lock(renderer::ctx::queue_mutex);
-                vkQueueSubmit(renderer::ctx::graphics_queue, 1, &submit_info, fence);
+                std::scoped_lock lock(renderer::ctx.queue_mutex);
+                vkQueueSubmit(renderer::ctx.graphics_queue, 1, &submit_info, fence);
             }
 
-            vkWaitForFences(renderer::ctx::device, 1, &fence, VK_TRUE, UINT64_MAX);
+            vkWaitForFences(renderer::ctx.device, 1, &fence, VK_TRUE, UINT64_MAX);
 
-            vkDestroyFence(renderer::ctx::device, fence, nullptr);
+            vkDestroyFence(renderer::ctx.device, fence, nullptr);
 
             {
-                std::scoped_lock lock(renderer::ctx::queue_mutex);
-                vkFreeCommandBuffers(renderer::ctx::device, renderer::ctx::command_pool, 1, &cmd_buf);
+                std::scoped_lock lock(renderer::ctx.queue_mutex);
+                vkFreeCommandBuffers(renderer::ctx.device, renderer::ctx.command_pool, 1, &cmd_buf);
             }
         }
 
-        vkDestroyBuffer(renderer::ctx::device, staging_buf, nullptr);
-        vkFreeMemory(renderer::ctx::device, staging_mem, nullptr);
+        vkDestroyBuffer(renderer::ctx.device, staging_buf, nullptr);
+        vkFreeMemory(renderer::ctx.device, staging_mem, nullptr);
 
         VkImageViewCreateInfo view_info = {VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO};
         view_info.pNext = nullptr;
@@ -202,7 +203,7 @@ namespace smol
         view_info.subresourceRange.baseArrayLayer = 0;
         view_info.subresourceRange.layerCount = 1;
 
-        if (vkCreateImageView(renderer::ctx::device, &view_info, nullptr, &tex_asset.tex_data->view) != VK_SUCCESS)
+        if (vkCreateImageView(renderer::ctx.device, &view_info, nullptr, &tex_asset.tex_data->view) != VK_SUCCESS)
         {
             SMOL_LOG_ERROR("TEXTURE", "Failed to create texture view: {}", path);
             return std::nullopt;
@@ -227,12 +228,13 @@ namespace smol
         sampler_info.minLod = 0.0f;
         sampler_info.maxLod = 0.0f;
 
-        if (vkCreateSampler(renderer::ctx::device, &sampler_info, nullptr, &tex_asset.tex_data->sampler) != VK_SUCCESS)
+        if (vkCreateSampler(renderer::ctx.device, &sampler_info, nullptr, &tex_asset.tex_data->sampler) != VK_SUCCESS)
         {
             SMOL_LOG_ERROR("TEXTURE", "Failed to create texture sampler: {}", path);
             return std::nullopt;
         }
 
         return tex_asset;
+        */
     }
 } // namespace smol

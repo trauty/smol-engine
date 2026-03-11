@@ -7,7 +7,7 @@
 #include <string_view>
 
 #ifdef ERROR
-#undef ERROR
+    #undef ERROR
 #endif
 
 namespace smol::log
@@ -31,7 +31,7 @@ namespace smol::log
 } // namespace smol::log
 
 #ifndef SMOL_LOG_LEVEL
-#define SMOL_LOG_LEVEL smol::log::level_e::LOG_DEBUG
+    #define SMOL_LOG_LEVEL smol::log::level_e::LOG_DEBUG
 #endif
 
 #define SMOL_LOG_TRACE(cat, fmtstr, ...)                                                                               \

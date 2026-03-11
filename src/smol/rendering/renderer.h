@@ -2,70 +2,33 @@
 
 #include "smol/defines.h"
 #include "smol/ecs.h"
-#include "smol/events.h"
-#include "smol/log.h"
+#include "smol/rendering/renderer_types.h"
+#include "smol/window.h"
 
-#include <mutex>
-#include <vector>
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_core.h>
 
 namespace smol::renderer
 {
-    namespace ctx
-    {
-        constexpr u32 MAX_FRAMES_IN_FLIGHT = 2;
-        inline u32 cur_frame = 0;
-
-        inline VkInstance instance;
-        inline VkPhysicalDevice physical_device = VK_NULL_HANDLE;
-        inline VkDevice device;
-        inline VkQueue graphics_queue;
-        inline VkQueue present_queue;
-        inline VkSurfaceKHR surface;
-        inline VkSwapchainKHR swapchain;
-        inline VkFormat swapchain_format;
-        inline VkExtent2D swapchain_extent;
-        inline std::vector<VkImage> swapchain_images;
-        inline std::vector<VkImageView> swapchain_image_views;
-        inline VkRenderPass render_pass;
-        inline std::vector<VkFramebuffer> framebuffers;
-        inline VkCommandPool command_pool;
-        inline std::vector<VkCommandBuffer> command_buffers;
-
-        inline std::vector<VkSemaphore> image_available_semaphores;
-        inline std::vector<VkSemaphore> render_finished_semaphores;
-        inline std::vector<VkFence> in_flight_fences;
-        inline std::vector<VkFence> images_in_flight;
-
-        inline VkDescriptorSetLayout global_set_layout;
-        inline VkDescriptorPool descriptor_pool;
-
-        inline VkImage depth_image;
-        inline VkDeviceMemory depth_image_mem;
-        inline VkImageView depth_image_view;
-
-        inline std::mutex queue_mutex;
-        inline std::mutex descriptor_mutex;
-    } // namespace ctx
-
-    enum class shader_stage_e
-    {
-        VERTEX,
-        FRAGMENT,
-        GEOMETRY, // <-- not implemented
-        COMPUTE   // <-- not implemented
-    };
-
-    void init();
-    void render(ecs::registry_t& reg);
+    bool init(const context_config_t& config, SDL_Window* window);
     void shutdown();
 
-    void create_swapchain(VkSwapchainKHR old_swapchain = VK_NULL_HANDLE);
-    void recreate_swapchain();
-    VkFormat find_depth_format();
+    extern render_context_t ctx;
 
-    u32 find_mem_type(u32 type_filter, VkMemoryPropertyFlags props);
+    void render(ecs::registry_t& reg);
+
+    void init_per_frame(per_frame_t& frame_data);
+    void shutdown_per_frame(per_frame_t& frame_data);
+
+    bool resize(const u32_t width, const u32_t height);
+    void init_swapchain();
+    VkResult acquire_next_image(u32_t* image);
+    VkResult present_image(u32_t image);
+    VkFormat find_depth_format();
+    VkSurfaceFormatKHR select_surface_format(VkPhysicalDevice physical_device, VkSurfaceKHR surface,
+                                             std::vector<VkFormat> const& preferred_formats = {
+                                                 VK_FORMAT_R8G8B8A8_SRGB, VK_FORMAT_B8G8R8A8_SRGB,
+                                                 VK_FORMAT_A8B8G8R8_SRGB_PACK32});
 
     void create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags mem_props, VkBuffer& buffer,
                        VkDeviceMemory& buffer_memory);

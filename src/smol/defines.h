@@ -43,19 +43,6 @@ enum smol_result_e
     SMOL_FAILURE = -1
 };
 
-// https://vkguide.dev/docs/new_chapter_0/code_walkthrough/
-#define VK_CHECK(x)                                                                                                    \
-    do                                                                                                                 \
-    {                                                                                                                  \
-        VkResult err = x;                                                                                              \
-        if (err)                                                                                                       \
-        {                                                                                                              \
-            SMOL_LOG_ERROR("VULKAN", "Detected Vulkan error: {}", string_VkResult(err));                               \
-            abort();                                                                                                   \
-        }                                                                                                              \
-    }                                                                                                                  \
-    while (0)
-
 #if defined(WIN32) || defined(_WIN32) || defined(__WIN32__)
 #define SMOL_PLATFORM_WIN 1
 #ifndef _WIN64

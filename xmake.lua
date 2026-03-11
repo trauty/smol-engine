@@ -24,16 +24,7 @@ target("smol-engine")
     set_kind("shared")
     set_languages("cxx20")
     
-    add_cxflags(
-        "-mavx",
-        "-mavx2",
-        "-mfma",
-        "-mbmi",
-        "-mbmi2",
-        "-mf16c",
-        "-mlzcnt",
-        "-mpopcnt"
-    )
+    add_cxflags("-march=x86-64-v3")
 
     if is_mode("release") then
         set_optimize("fastest")
@@ -68,6 +59,7 @@ target("smol-engine")
     add_files(path.join(root, "src/smol/**.cpp"))
     add_files(path.join(root, "lib/stb/*.cpp"), {warnings = "none"})
     add_files(path.join(root, "lib/tinygltf/tiny_gltf.cpp"), {warnings = "none"})
+    add_files(path.join(root, "lib/vma/vk_mem_alloc.cpp"), {warnings = "none"})
 
     add_files(path.join(root, pkg_rel, "jolt/Jolt/**.cpp"), {warnings = "none"})
     add_files(path.join(root, pkg_rel, "fmt/src/format.cc"), {warnings = "none"})
