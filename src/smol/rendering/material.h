@@ -2,82 +2,69 @@
 #include "smol/asset.h"
 #include "smol/assets/shader.h"
 #include "smol/assets/texture.h"
+#include "smol/defines.h"
 #include "smol/log.h"
+#include "smol/rendering/renderer_types.h"
 
 #include <cstring>
 #include <unordered_map>
 #include <utility>
+#include <vector>
 #include <vulkan/vulkan_core.h>
 
 namespace smol
 {
-    struct ubo_resource_t
-    {
-        VkBuffer buffer = VK_NULL_HANDLE;
-        VkDeviceMemory memory = VK_NULL_HANDLE;
-        void* mapped_data = nullptr;
-        size_t size = 0;
-    };
-
     struct material_t
     {
         asset_t<shader_t> shader;
-        VkDescriptorSet descriptor_set = VK_NULL_HANDLE;
+        std::vector<u8> data;
 
-        std::unordered_map<u32, ubo_resource_t> ubos;
+        u32_t heap_offset = renderer::NULL_HANDLE;
 
-        std::unordered_map<std::string, asset_t<texture_t>> texture_bindings;
+        bool is_dirty = true;
 
-        material_t() = default;
-
-        material_t(material_t&& other) noexcept
-            : shader(std::move(other.shader)), descriptor_set(other.descriptor_set), ubos(std::move(other.ubos))
+        material_t(asset_t<shader_t> shader_asset) : shader(shader_asset)
         {
-            other.descriptor_set = VK_NULL_HANDLE;
-        }
-
-        material_t& operator=(material_t&& other) noexcept
-        {
-            if (this != &other)
+            if (!shader || !shader->ready())
             {
-                this->~material_t();
-                new (this) material_t(std::move(other));
+                SMOL_LOG_ERROR("MATERIAL", "Shader is not valid, can't create material");
+                return;
             }
 
-            return *this;
+            u32_t total_size = shader->get_data()->reflection.get_ubo_size(0, 0);
+            data.resize(total_size, 0);
         }
 
-        ~material_t();
-
-        void set_shader(asset_t<shader_t> s) { shader = s; }
-        bool try_build_resources();
-        void set_data(const std::string& block_name, const void* data, size_t size);
-        void set_texture(const std::string& tex_name, asset_t<texture_t> texture);
-
-        template<typename T>
-        void set_parameter(const std::string& name, const T& value)
+        template <typename T>
+        void set_property(const std::string& name, const T& value)
         {
-            if (!shader->ready()) { return; }
+            if (!shader) { return; }
 
-            const std::unordered_map<std::string, shader_uniform_member_t>& members =
-                shader.get()->shader_data->reflection.uniform_members;
-
+            const auto& members = shader->get_data()->reflection.uniform_members;
             auto it = members.find(name);
+
             if (it == members.end())
             {
-                SMOL_LOG_WARN("MATERIAL", "Parameter not found in shader bindings: {}", name);
+                SMOL_LOG_WARN("MATERIAL", "Property '{}' not found in shader", name);
                 return;
             }
 
             const shader_uniform_member_t& member = it->second;
-            auto ubo_it = ubos.find(member.binding);
-            if (ubo_it == ubos.end()) { return; }
 
-            ubo_resource_t& ubo = ubo_it->second;
+            if (sizeof(T) != member.size)
+            {
+                SMOL_LOG_ERROR("MATERIAL", "Size mismatch for '{}', Expected {} bytes, but got {} bytes", name,
+                               member.size, sizeof(T));
+                return;
+            }
 
-            if (member.offset + sizeof(T) > ubo.size) { return; } // should probably warn here
+            std::memcpy(data.data() + member.offset, &value, sizeof(T));
+            is_dirty = true;
+        }
 
-            std::memcpy(static_cast<u8*>(ubo.mapped_data) + member.offset, &value, sizeof(T));
+        void set_texture(const std::string& name, const asset_t<texture_t>& tex)
+        {
+            if (tex) { set_property<u32_t>(name, tex->bindless_id); }
         }
     };
 } // namespace smol

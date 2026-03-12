@@ -7,13 +7,14 @@
 #include "smol/log.h"
 
 #include <atomic>
+#include <concepts>
 #include <cstddef>
 #include <deque>
 #include <optional>
 #include <utility>
 #include <vector>
 #ifdef SMOL_ENABLE_PROFILING
-#include <common/TracySystem.hpp>
+    #include <common/TracySystem.hpp>
 #endif
 #include <memory>
 #include <mutex>
@@ -22,10 +23,15 @@
 
 namespace smol
 {
-    template<typename T>
-    struct asset_loader_t
+    template <typename T> struct asset_loader_t
     {
-        // std::optional<T> load(const std::string& path, Args...);
+        // static std::optional<T> load(const std::string& path, Args...);
+        // static void unload(T& asset);
+    };
+
+    template <typename T>
+    concept has_asset_unload = requires(T& asset) {
+        { asset_loader_t<T>::unload(asset) } -> std::same_as<void>;
     };
 
     struct asset_pool_base_t
@@ -33,8 +39,7 @@ namespace smol
         virtual ~asset_pool_base_t() = default;
     };
 
-    template<typename T>
-    struct asset_pool_t : public asset_pool_base_t
+    template <typename T> struct asset_pool_t : public asset_pool_base_t
     {
         struct slot_t
         {
@@ -64,7 +69,7 @@ namespace smol
             lookup.clear();
         }
 
-        template<typename T, typename... Args>
+        template <typename T, typename... Args>
         typename asset_pool_t<T>::slot_t* load(const std::string& path, Args&&... args)
         {
             asset_pool_t<T>& pool = get_pool<T>();
@@ -108,7 +113,8 @@ namespace smol
             map_lock.unlock();
 
             smol::jobs::kick(
-                [slot, path, ... args = std::forward<Args>(args)]() mutable {
+                [slot, path, ... args = std::forward<Args>(args)]() mutable
+                {
                     std::optional<T> res = asset_loader_t<T>::load(path, args...);
 
                     if (res)
@@ -127,8 +133,7 @@ namespace smol
             return slot;
         }
 
-        template<typename T>
-        void release(typename asset_pool_t<T>::slot_t* slot)
+        template <typename T> void release(typename asset_pool_t<T>::slot_t* slot)
         {
             if (!slot) { return; }
 
@@ -139,6 +144,8 @@ namespace smol
                 if (slot->ref_count.load() > 0) { return; }
 
                 lookup.erase(slot->path);
+
+                if constexpr (has_asset_unload<T>) { asset_loader_t<T>::unload(slot->data); }
 
                 slot->data = T();
                 slot->state = asset_state_e::UNLOADED;
@@ -164,15 +171,13 @@ namespace smol
         std::mutex lookup_mutex;
 
         static inline std::atomic<size_t> type_counter{0};
-        template<typename T>
-        static size_t get_asset_type_id()
+        template <typename T> static size_t get_asset_type_id()
         {
             static size_t id = type_counter++;
             return id;
         }
 
-        template<typename T>
-        asset_pool_t<T>& get_pool()
+        template <typename T> asset_pool_t<T>& get_pool()
         {
             size_t id = get_asset_type_id<T>();
 

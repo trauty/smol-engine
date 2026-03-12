@@ -1,5 +1,7 @@
 #pragma once
 
+#include "smol/assets/mesh.h"
+#include "smol/assets/texture.h"
 #include "smol/defines.h"
 #include "smol/log.h"
 #include "smol/math.h"
@@ -27,6 +29,8 @@ namespace smol::renderer
     constexpr u32_t MAX_STORAGE_TEXTURES = 4096;
     constexpr u32_t MAX_SSBOS = 100000;
     constexpr u32_t MAX_SAMPLERS = 32;
+
+    constexpr u32_t NULL_HANDLE = 0xffffffff;
 
     constexpr u32_t MAX_FRAMES_IN_FLIGHT = 2;
 
@@ -89,8 +93,8 @@ namespace smol::renderer
         u32_t transfer_queue_index;
         VkPhysicalDeviceProperties properties;
 
-        // VkCommandPool command_pool = VK_NULL_HANDLE;
-        // std::vector<VkCommandBuffer> command_buffers;
+        VkCommandPool transfer_command_pool = VK_NULL_HANDLE;
+        std::mutex transfer_mutex;
 
         std::vector<std::string> active_instance_exts;
         std::vector<std::string> active_device_exts;
@@ -107,9 +111,16 @@ namespace smol::renderer
 
         std::vector<per_frame_t> per_frame_objects;
         std::vector<VkSemaphore> recycled_semaphores;
-        u32_t cur_frame_index = 0;
 
-        u32_t cur_frame = 0;
+        VkSemaphore timeline_semaphore = VK_NULL_HANDLE;
+        u64_t timeline_value = 0;
+
+        VkSampler test_sampler;
+        VkPipelineLayout test_pipeline_layout;
+        VkPipeline test_pipeline;
+
+        asset_t<mesh_t> active_mesh;
+        asset_t<texture_t> active_tex;
     };
 
     struct context_config_t
@@ -120,42 +131,44 @@ namespace smol::renderer
         std::vector<const char*> required_device_exts;
     };
 
-    struct texture_handle_t
+    struct alignas(16) gpu_mat4_t
     {
-        u32_t index = 0;
-        bool is_valid() const { return index != 0; }
+        f32 data[16];
     };
 
-    struct gpu_object_data_t
+    struct alignas(16) gpu_vec3_t
     {
-        mat4_t model_matrix;
-        mat4_t normal_matrix;
-        u32_t material_idx;
-        u32_t _pad[3];
+        union
+        {
+            f32 x, y, z;
+            f32 raw[3];
+        } data;
     };
 
-    // missing reflection
-    struct gpu_material_data_t
+    struct global_data_t
     {
-        vec4_t color;
-        u32_t albedo_tex_idx;
-        u32_t _pad[3];
-    };
-
-    struct gpu_global_data_t
-    {
-        mat4_t view;
-        mat4_t projection;
-        mat4_t view_proj;
-        vec4_t camera_pos;
+        gpu_mat4_t view;
+        gpu_mat4_t projection;
+        gpu_mat4_t view_proj;
+        gpu_vec3_t camera_pos;
         f32 time;
-        f32 _pad[3];
     };
 
+    struct object_data_t
+    {
+        gpu_mat4_t model_matrix;
+        u32_t material_offset;
+        u32_t vertex_buffer_id;
+        // u32_t bone_buffer_id; for animation later on
+        u32_t _pad[2];
+    };
+
+    /*
     struct gpu_light_t
     {
         vec4_t position_radius;  // xyz position, w radius
         vec4_t color_intensity;  // rgb color, w intensity
         vec4_t direction_cutoff; // xyz direction, w cutoff
     };
+    */
 } // namespace smol::renderer

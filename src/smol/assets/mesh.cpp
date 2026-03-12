@@ -1,30 +1,21 @@
 #include "mesh.h"
 
 #include "smol/asset.h"
+#include "smol/assets/shader.h"
 #include "smol/log.h"
 #include "smol/rendering/renderer.h"
+#include "smol/rendering/renderer_resources.h"
+#include "smol/rendering/renderer_types.h"
 
 #include <cstdint>
 #include <mutex>
 #include <optional>
 #include <tinygltf/tiny_gltf.h>
+#include <vector>
 #include <vulkan/vulkan_core.h>
 
 namespace smol
 {
-    /*
-    mesh_data_t::~mesh_data_t()
-    {
-        // this one too, should actually check if gpu is using them before deleting them
-        if (renderer::ctx::device != VK_NULL_HANDLE)
-        {
-            if (vertex_buffer) { vkDestroyBuffer(renderer::ctx::device, vertex_buffer, nullptr); }
-            if (vertex_memory) { vkFreeMemory(renderer::ctx::device, vertex_memory, nullptr); }
-            if (index_buffer) { vkDestroyBuffer(renderer::ctx::device, index_buffer, nullptr); }
-            if (index_memory) { vkFreeMemory(renderer::ctx::device, index_memory, nullptr); }
-        }
-    }
-
     std::optional<mesh_t> asset_loader_t<mesh_t>::load(const std::string& path)
     {
         tinygltf::TinyGLTF loader;
@@ -81,7 +72,6 @@ namespace smol
             uvs = reinterpret_cast<const f32*>(&uv_buffer.data[uv_view.byteOffset + uv_accessor.byteOffset]);
         }
 
-        // not very efficient => 3 single vbos would be better
         std::vector<vertex_t> vertex_data(mesh_asset.vertex_count);
         for (i32 i = 0; i < mesh_asset.vertex_count; ++i)
         {
@@ -106,23 +96,23 @@ namespace smol
 
             switch (idx_accessor.componentType)
             {
-                case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
-                    {
-                        const u16* src = reinterpret_cast<const u16*>(raw_indices);
-                        for (size_t i = 0; i < indices.size(); ++i) indices[i] = static_cast<u32>(src[i]);
-                        break;
-                    }
-                case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:
-                    {
-                        const u32* src = reinterpret_cast<const u32*>(raw_indices);
-                        std::copy(src, src + idx_accessor.count, indices.begin());
-                        break;
-                    }
-                default:
-                    {
-                        SMOL_LOG_ERROR("MESH", "Unsupported index type in asset: {}", path);
-                        return std::nullopt;
-                    }
+            case TINYGLTF_COMPONENT_TYPE_UNSIGNED_SHORT:
+            {
+                const u16* src = reinterpret_cast<const u16*>(raw_indices);
+                for (size_t i = 0; i < indices.size(); ++i) indices[i] = static_cast<u32>(src[i]);
+                break;
+            }
+            case TINYGLTF_COMPONENT_TYPE_UNSIGNED_INT:
+            {
+                const u32* src = reinterpret_cast<const u32*>(raw_indices);
+                std::copy(src, src + idx_accessor.count, indices.begin());
+                break;
+            }
+            default:
+            {
+                SMOL_LOG_ERROR("MESH", "Unsupported index type in asset: {}", path);
+                return std::nullopt;
+            }
             }
 
             mesh_asset.index_count = static_cast<i32>(indices.size());
@@ -134,116 +124,172 @@ namespace smol
         VkDeviceSize total_staging_size = vertex_size + index_size;
 
         VkBuffer staging_buf;
-        VkDeviceMemory staging_mem;
+        VmaAllocation staging_alloc;
 
-        renderer::create_buffer(total_staging_size, VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
-                                VK_MEMORY_PROPERTY_HOST_VISIBLE_BIT | VK_MEMORY_PROPERTY_HOST_COHERENT_BIT, staging_buf,
-                                staging_mem);
+        VkBufferCreateInfo staging_info = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            .size = total_staging_size,
+            .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        };
+        VmaAllocationCreateInfo alloc_info = {
+            .flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
+            .usage = VMA_MEMORY_USAGE_AUTO,
+        };
+        VmaAllocationInfo staging_alloc_info;
 
-        void* data;
-        vkMapMemory(renderer::ctx::device, staging_mem, 0, total_staging_size, 0, &data);
-        std::memcpy(data, vertex_data.data(), (size_t)vertex_size);
-        if (index_size > 0) { std::memcpy((u8*)data + vertex_size, indices.data(), (size_t)index_size); }
-        vkUnmapMemory(renderer::ctx::device, staging_mem);
+        VK_CHECK(vmaCreateBuffer(renderer::ctx.allocator, &staging_info, &alloc_info, &staging_buf, &staging_alloc,
+                                 &staging_alloc_info));
 
-        renderer::create_buffer(vertex_size, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT,
-                                VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, mesh_asset.mesh_data->vertex_buffer,
-                                mesh_asset.mesh_data->vertex_memory);
+        std::memcpy(staging_alloc_info.pMappedData, vertex_data.data(), static_cast<size_t>(vertex_size));
+        if (index_size > 0)
+        {
+            std::memcpy((u8*)staging_alloc_info.pMappedData + vertex_size, indices.data(),
+                        static_cast<size_t>(index_size));
+        }
+
+        VkBufferCreateInfo mesh_info = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            .size = vertex_size,
+            .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+        };
+        VmaAllocationCreateInfo mesh_alloc_info = {
+            .usage = VMA_MEMORY_USAGE_AUTO,
+        };
+
+        VK_CHECK(vmaCreateBuffer(renderer::ctx.allocator, &mesh_info, &mesh_alloc_info, &mesh_asset.vertex_buffer,
+                                 &mesh_asset.vertex_allocation, nullptr));
 
         if (index_size > 0)
         {
-            renderer::create_buffer(index_size, VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT,
-                                    VK_MEMORY_PROPERTY_DEVICE_LOCAL_BIT, mesh_asset.mesh_data->index_buffer,
-                                    mesh_asset.mesh_data->index_memory);
+            mesh_info.size = index_size;
+            mesh_info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+                              VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+            VK_CHECK(vmaCreateBuffer(renderer::ctx.allocator, &mesh_info, &mesh_alloc_info, &mesh_asset.index_buffer,
+                                     &mesh_asset.index_allocation, nullptr));
         }
 
-        VkCommandBufferAllocateInfo cmd_alloc = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO};
-        cmd_alloc.pNext = nullptr;
-        cmd_alloc.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
-        cmd_alloc.commandPool = renderer::ctx::command_pool;
-        cmd_alloc.commandBufferCount = 1;
+        VkCommandBuffer cmd_buf = renderer::begin_transfer_commands();
 
-        VkCommandBuffer cmd_buf;
-        {
-            std::scoped_lock lock(renderer::ctx::queue_mutex);
-            vkAllocateCommandBuffers(renderer::ctx::device, &cmd_alloc, &cmd_buf);
-        }
-
-        VkCommandBufferBeginInfo cmd_buf_begin_info = {VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO};
-        cmd_buf_begin_info.pNext = nullptr;
-        cmd_buf_begin_info.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
-        vkBeginCommandBuffer(cmd_buf, &cmd_buf_begin_info);
-
-        VkBufferCopy copy_region = {};
-        copy_region.size = vertex_size;
-        vkCmdCopyBuffer(cmd_buf, staging_buf, mesh_asset.mesh_data->vertex_buffer, 1, &copy_region);
+        VkBufferCopy copy_region = {
+            .srcOffset = 0,
+            .dstOffset = 0,
+            .size = vertex_size,
+        };
+        vkCmdCopyBuffer(cmd_buf, staging_buf, mesh_asset.vertex_buffer, 1, &copy_region);
 
         if (index_size > 0)
         {
             copy_region.srcOffset = vertex_size;
-            copy_region.dstOffset = 0;
             copy_region.size = index_size;
-            vkCmdCopyBuffer(cmd_buf, staging_buf, mesh_asset.mesh_data->index_buffer, 1, &copy_region);
+            vkCmdCopyBuffer(cmd_buf, staging_buf, mesh_asset.index_buffer, 1, &copy_region);
         }
 
-        VkBufferMemoryBarrier barriers[2] = {};
-        barriers[0].pNext = nullptr;
-        barriers[0].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-        barriers[0].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-        barriers[0].dstAccessMask = VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
-        barriers[0].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barriers[0].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-        barriers[0].buffer = mesh_asset.mesh_data->vertex_buffer;
-        barriers[0].offset = 0;
-        barriers[0].size = vertex_size;
+        std::vector<VkBufferMemoryBarrier> barriers;
+        VkBufferMemoryBarrier base_barrier = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .dstAccessMask = 0,
+            .srcQueueFamilyIndex = renderer::ctx.queue_fam_indices.transfer_family.value(),
+            .dstQueueFamilyIndex = renderer::ctx.queue_fam_indices.graphics_family.value(),
+        };
 
-        u32 barrier_count = 1;
+        base_barrier.buffer = mesh_asset.vertex_buffer;
+        base_barrier.size = vertex_size;
+        barriers.push_back(base_barrier);
+
         if (index_size > 0)
         {
-            barriers[1].sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
-            barriers[1].srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT;
-            barriers[1].dstAccessMask = VK_ACCESS_INDEX_READ_BIT;
-            barriers[1].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            barriers[1].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
-            barriers[1].buffer = mesh_asset.mesh_data->index_buffer;
-            barriers[1].offset = 0;
-            barriers[1].size = index_size;
-            barrier_count++;
+            base_barrier.buffer = mesh_asset.index_buffer;
+            base_barrier.size = index_size;
+            barriers.push_back(base_barrier);
         }
 
-        vkCmdPipelineBarrier(cmd_buf, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_VERTEX_INPUT_BIT, 0, 0, nullptr,
-                             barrier_count, barriers, 0, nullptr);
+        vkCmdPipelineBarrier(cmd_buf, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0,
+                             nullptr, static_cast<u32_t>(barriers.size()), barriers.data(), 0, nullptr);
 
-        vkEndCommandBuffer(cmd_buf);
-
-        VkSubmitInfo submit = {VK_STRUCTURE_TYPE_SUBMIT_INFO};
-        submit.pNext = nullptr;
-        submit.commandBufferCount = 1;
-        submit.pCommandBuffers = &cmd_buf;
-
-        VkFence fence;
-        VkFenceCreateInfo fence_info = {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-        fence_info.pNext = nullptr;
-        vkCreateFence(renderer::ctx::device, &fence_info, nullptr, &fence);
+        u64_t signal_value = renderer::submit_transfer_commands(cmd_buf);
 
         {
-            std::scoped_lock lock(renderer::ctx::queue_mutex);
-            vkQueueSubmit(renderer::ctx::graphics_queue, 1, &submit, fence);
+            std::scoped_lock lock(renderer::res_system.pending_mutex);
+            for (VkBufferMemoryBarrier& barrier : barriers)
+            {
+                barrier.srcAccessMask = 0;
+                barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
+
+                renderer::res_system.pending_acquires.push_back({
+                    .type = renderer::resource_type_e::BUFFER,
+                    .handle = {.buffer = barrier.buffer},
+                    .barrier = {.buffer_barrier = barrier},
+                });
+            }
         }
 
-        vkWaitForFences(renderer::ctx::device, 1, &fence, VK_TRUE, UINT64_MAX);
+        mesh_asset.vertex_bindless_id = renderer::res_system.buffer_heap.acquire();
+        VkDescriptorBufferInfo vertex_info = {.buffer = mesh_asset.vertex_buffer, .offset = 0, .range = VK_WHOLE_SIZE};
+        VkWriteDescriptorSet vertex_write = {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = renderer::res_system.global_set,
+            .dstBinding = renderer::STORAGE_BUFFERS_BINDING_POINT,
+            .dstArrayElement = mesh_asset.vertex_bindless_id,
+            .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            .pBufferInfo = &vertex_info,
+        };
+        vkUpdateDescriptorSets(renderer::ctx.device, 1, &vertex_write, 0, nullptr);
 
-        vkDestroyFence(renderer::ctx::device, fence, nullptr);
+        if (index_size > 0)
+        {
+            mesh_asset.index_bindless_id = renderer::res_system.buffer_heap.acquire();
+            VkDescriptorBufferInfo index_info = {
+                .buffer = mesh_asset.index_buffer, .offset = 0, .range = VK_WHOLE_SIZE};
+            VkWriteDescriptorSet index_write = {
+                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .dstSet = renderer::res_system.global_set,
+                .dstBinding = renderer::STORAGE_BUFFERS_BINDING_POINT,
+                .dstArrayElement = mesh_asset.index_bindless_id,
+                .descriptorCount = 1,
+                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                .pBufferInfo = &index_info,
+            };
+            vkUpdateDescriptorSets(renderer::ctx.device, 1, &index_write, 0, nullptr);
+        }
 
         {
-            std::scoped_lock lock(renderer::ctx::queue_mutex);
-            vkFreeCommandBuffers(renderer::ctx::device, renderer::ctx::command_pool, 1, &cmd_buf);
+            std::scoped_lock lock(renderer::res_system.deletion_mutex);
+            renderer::res_system.deletion_queue.push_back({
+                .type = renderer::resource_type_e::BUFFER,
+                .handle = {.buffer = {staging_buf, staging_alloc}},
+                .bindless_id = renderer::NULL_HANDLE,
+                .gpu_timeline_value = signal_value,
+            });
         }
-
-        vkDestroyBuffer(renderer::ctx::device, staging_buf, nullptr);
-        vkFreeMemory(renderer::ctx::device, staging_mem, nullptr);
 
         return mesh_asset;
     }
-        */
+
+    void asset_loader_t<mesh_t>::unload(mesh_t& mesh)
+    {
+        std::scoped_lock lock(renderer::res_system.deletion_mutex);
+
+        if (mesh.vertex_buffer != VK_NULL_HANDLE)
+        {
+            renderer::res_system.deletion_queue.push_back({
+                .type = renderer::resource_type_e::BUFFER,
+                .handle = {.buffer = {mesh.vertex_buffer, mesh.vertex_allocation}},
+                .bindless_id = mesh.vertex_bindless_id,
+                .gpu_timeline_value = renderer::res_system.timeline_value,
+            });
+        }
+
+        if (mesh.index_buffer != VK_NULL_HANDLE)
+        {
+            renderer::res_system.deletion_queue.push_back({
+                .type = renderer::resource_type_e::BUFFER,
+                .handle = {.buffer = {mesh.index_buffer, mesh.index_allocation}},
+                .bindless_id = mesh.index_bindless_id,
+                .gpu_timeline_value = renderer::res_system.timeline_value,
+            });
+        }
+    }
 } // namespace smol

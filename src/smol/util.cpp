@@ -2,11 +2,13 @@
 
 #include "log.h"
 
+#include <cstddef>
 #include <fstream>
+#include <vector>
 
 namespace smol::util
 {
-    std::string get_file_content(const std::string& path)
+    std::string read_file(const std::string& path)
     {
         std::ifstream in(path, std::ios::in | std::ios::binary);
         if (in)
@@ -22,5 +24,21 @@ namespace smol::util
 
         SMOL_LOG_ERROR("UTIL", "Could not load file with path: {}", path);
         return "";
+    }
+
+    std::vector<i8> read_file_raw(const std::string& path)
+    {
+        std::ifstream file(path, std::ios::ate | std::ios::binary);
+        if (!file.is_open())
+        {
+            SMOL_LOG_ERROR("UTIL", "Could not read file: {}", path);
+            return {};
+        }
+        size_t size = static_cast<size_t>(file.tellg());
+        std::vector<i8> buffer(size);
+        file.seekg(0);
+        file.read(buffer.data(), size);
+        file.close();
+        return buffer;
     }
 } // namespace smol::util

@@ -5,6 +5,7 @@
 #include "smol/rendering/renderer_types.h"
 #include "smol/window.h"
 
+#include <mutex>
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_core.h>
 
@@ -34,4 +35,7 @@ namespace smol::renderer
                        VkDeviceMemory& buffer_memory);
     void create_image(u32 width, u32 height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage,
                       VkMemoryPropertyFlags props, VkImage& image, VkDeviceMemory& image_mem);
+
+    VkCommandBuffer begin_transfer_commands();
+    u64_t submit_transfer_commands(VkCommandBuffer cmd);
 } // namespace smol::renderer

@@ -1,52 +1,111 @@
 #pragma once
 
+#include "smol/defines.h"
 #include "smol/rendering/renderer_types.h"
 #include "vulkan/vulkan_core.h"
+
+#include <deque>
+#include <mutex>
 #include <span>
 #include <vector>
 
 namespace smol::renderer
 {
-    struct resource_system_t
+    enum class resource_type_e
     {
-        VkDescriptorPool descriptor_pool;
-
-        // scene data
-        VkDescriptorSetLayout scene_layout;
-        VkDescriptorSet scene_set;
-
-        VkBuffer object_buffer;
-        VmaAllocation object_alloc;
-        gpu_object_data_t* object_mapped;
-
-        VkBuffer material_buffer;
-        VmaAllocation material_alloc;
-        gpu_object_data_t* material_mapped;
-
-        VkSampler linear_sampler; // reflection missing, should have global registry of samplers for reuse
-        std::vector<u32_t> free_texture_indices;
-
-        VkDescriptorSetLayout pass_layout;
-        VkDescriptorSet pass_set;
-
-        VkBuffer global_buffer;
-        VmaAllocation global_alloc;
-        gpu_global_data_t* global_mapped;
-
-        VkBuffer light_buffer;
-        VmaAllocation light_alloc;
-        gpu_global_data_t* light_mapped;
+        TEXTURE,
+        BUFFER,
+        STORAGE_IMAGE,
+        COMMAND_BUFFER
     };
 
-    bool init_resources(render_context_t& ctx);
-    void shutdown_resources(render_context_t& ctx);
+    constexpr u32_t SAMPLERS_BINDING_POINT = 0;
+    constexpr u32_t TEXTURES_BINDING_POINT = 1;
+    constexpr u32_t STORAGE_IMAGES_BINDING_POINT = 2;
+    constexpr u32_t STORAGE_BUFFERS_BINDING_POINT = 3;
 
-    texture_handle_t upload_texture(render_context_t& ctx, void* pixels, u32_t w, u32_t h);
+    struct pending_resource_t
+    {
+        resource_type_e type;
 
-    void update_scene_data(std::span<const gpu_object_data_t> objects, std::span<const gpu_material_data_t> materials);
-    void update_pass_data(const gpu_global_data_t& global_data, std::span<const gpu_light_t> lights);
+        union
+        {
+            VkImage image;
+            VkBuffer buffer;
+        } handle;
 
-    void bind_frame_resources(VkCommandBuffer cmd, VkPipelineLayout layout);
+        union
+        {
+            VkImageMemoryBarrier image_barrier;
+            VkBufferMemoryBarrier buffer_barrier;
+        } barrier;
+    };
 
-    const resource_system_t& get_resource_system();
+    struct deferred_delete_t
+    {
+        resource_type_e type;
+
+        union
+        {
+            struct
+            {
+                VkImage image;
+                VmaAllocation allocation;
+                VkImageView view;
+            } texture;
+
+            struct
+            {
+                VkBuffer buffer;
+                VmaAllocation allocation;
+            } buffer;
+
+            struct
+            {
+                VkCommandBuffer cmd;
+                VkCommandPool pool;
+            } cmd_buffer;
+        } handle;
+
+        u32_t bindless_id;
+        u64_t gpu_timeline_value;
+    };
+
+    struct descriptor_heap_t
+    {
+        std::vector<u32_t> free_indices;
+        u32_t capacity;
+        u32_t next_unused;
+
+        void init(u32_t max_indices);
+        u32_t acquire();
+        void release(u32_t index);
+    };
+
+    struct resource_system_t
+    {
+        VkDescriptorSetLayout global_layout;
+        VkDescriptorPool global_pool;
+        VkDescriptorSet global_set;
+
+        descriptor_heap_t buffer_heap;
+        descriptor_heap_t texture_heap;
+        descriptor_heap_t storage_image_heap;
+
+        VkSemaphore timeline_semaphore;
+        u64_t timeline_value;
+
+        std::vector<pending_resource_t> pending_acquires;
+        std::mutex pending_mutex;
+
+        std::deque<deferred_delete_t> deletion_queue;
+        std::mutex deletion_mutex;
+
+        void process_deletions(u64_t cur_timeline_value);
+    };
+
+    extern resource_system_t res_system;
+
+    void init_resources();
+    void shutdown_resources();
 } // namespace smol::renderer

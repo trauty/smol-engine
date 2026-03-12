@@ -13,7 +13,9 @@
 #include "smol/log.h"
 #include "smol/math.h"
 #include "smol/rendering/material.h"
+#include "smol/rendering/renderer_resources.h"
 #include "smol/rendering/renderer_types.h"
+#include "smol/util.h"
 #include "smol/window.h"
 
 #include <SDL3/SDL_video.h>
@@ -25,6 +27,7 @@
 #include <cstdint>
 #include <cstring>
 #include <limits>
+#include <mutex>
 #include <set>
 #include <tracy/Tracy.hpp>
 #include <vector>
@@ -128,6 +131,17 @@ namespace smol::renderer
             return indices;
         }
     } // namespace detail
+
+    // TEMP
+    VkShaderModule create_shader_module(const std::vector<char>& code)
+    {
+        VkShaderModuleCreateInfo create_info = {.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
+        create_info.codeSize = code.size();
+        create_info.pCode = reinterpret_cast<const uint32_t*>(code.data());
+        VkShaderModule module;
+        VK_CHECK(vkCreateShaderModule(ctx.device, &create_info, nullptr, &module));
+        return module;
+    }
 
     bool init(const context_config_t& config, SDL_Window* window)
     {
@@ -248,8 +262,14 @@ namespace smol::renderer
 
         indexing_features.descriptorBindingUpdateUnusedWhilePending = VK_TRUE;
 
+        VkPhysicalDeviceTimelineSemaphoreFeatures timeline_sem_features = {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES,
+            .pNext = &indexing_features,
+            .timelineSemaphore = VK_TRUE,
+        };
+
         VkPhysicalDeviceFeatures2 device_features = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
-        device_features_check.pNext = &indexing_features;
+        device_features_check.pNext = &timeline_sem_features;
         device_features_check.features.samplerAnisotropy = VK_TRUE;
         device_features_check.features.multiDrawIndirect = VK_TRUE;
 
@@ -344,12 +364,178 @@ namespace smol::renderer
 
         init_swapchain();
 
+        VkCommandPoolCreateInfo transfer_pool_info = {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+            .flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT,
+            .queueFamilyIndex = ctx.queue_fam_indices.transfer_family.value(),
+        };
+
+        VK_CHECK(vkCreateCommandPool(ctx.device, &transfer_pool_info, nullptr, &ctx.transfer_command_pool));
+
+        VkSemaphoreTypeCreateInfo timeline_type_info = {
+            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
+            .semaphoreType = VK_SEMAPHORE_TYPE_TIMELINE,
+            .initialValue = 0,
+        };
+
+        VkSemaphoreCreateInfo timeline_sem_info = {
+            .sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO,
+            .pNext = &timeline_type_info,
+        };
+
+        VK_CHECK(vkCreateSemaphore(ctx.device, &timeline_sem_info, nullptr, &ctx.timeline_semaphore));
+        ctx.timeline_value = 0;
+
+        init_resources();
+
+        // TEST PIPELINE -- VERY TEMPORARY
+        VkSamplerCreateInfo sampler_info = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
+        sampler_info.magFilter = VK_FILTER_LINEAR;
+        sampler_info.minFilter = VK_FILTER_LINEAR;
+        sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
+        sampler_info.anisotropyEnable = VK_TRUE;
+        sampler_info.maxAnisotropy = ctx.properties.limits.maxSamplerAnisotropy;
+        sampler_info.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
+        sampler_info.unnormalizedCoordinates = VK_FALSE;
+        sampler_info.compareEnable = VK_FALSE;
+        sampler_info.compareOp = VK_COMPARE_OP_ALWAYS;
+        sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
+        VK_CHECK(vkCreateSampler(ctx.device, &sampler_info, nullptr, &ctx.test_sampler));
+
+        VkDescriptorImageInfo sampler_desc_info = {.sampler = ctx.test_sampler};
+        VkWriteDescriptorSet sampler_write = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
+        sampler_write.dstSet = res_system.global_set;
+        sampler_write.dstBinding = 0;
+        sampler_write.dstArrayElement = 0;
+        sampler_write.descriptorCount = 1;
+        sampler_write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
+        sampler_write.pImageInfo = &sampler_desc_info;
+        vkUpdateDescriptorSets(ctx.device, 1, &sampler_write, 0, nullptr);
+
+        auto vert_code = util::read_file_raw("assets/shaders/test.vert.spv");
+        auto frag_code = util::read_file_raw("assets/shaders/test.frag.spv");
+        VkShaderModule vert_module = create_shader_module(vert_code);
+        VkShaderModule frag_module = create_shader_module(frag_code);
+
+        VkPipelineShaderStageCreateInfo shader_stages[] = {
+            {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+             .stage = VK_SHADER_STAGE_VERTEX_BIT,
+             .module = vert_module,
+             .pName = "main"},
+            {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+             .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
+             .module = frag_module,
+             .pName = "main"}
+        };
+
+        VkVertexInputBindingDescription binding_desc = {0, sizeof(vertex_t), VK_VERTEX_INPUT_RATE_VERTEX};
+        VkVertexInputAttributeDescription attribute_desc[] = {
+            {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(vertex_t, position)},
+            {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(vertex_t, normal)  },
+            {2, 0, VK_FORMAT_R32G32_SFLOAT,    offsetof(vertex_t, uv)      }
+        };
+
+        // bypassing ia
+        VkPipelineVertexInputStateCreateInfo vertex_input_info = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+            .vertexBindingDescriptionCount = 0,
+            .pVertexBindingDescriptions = nullptr,
+            .vertexAttributeDescriptionCount = 0,
+            .pVertexAttributeDescriptions = nullptr};
+
+        VkPipelineInputAssemblyStateCreateInfo input_assembly = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+            .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+            .primitiveRestartEnable = VK_FALSE};
+        VkPipelineViewportStateCreateInfo viewport_state = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO, .viewportCount = 1, .scissorCount = 1};
+        VkPipelineRasterizationStateCreateInfo rasterizer = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+            .depthClampEnable = VK_FALSE,
+            .rasterizerDiscardEnable = VK_FALSE,
+            .polygonMode = VK_POLYGON_MODE_FILL,
+            .cullMode = VK_CULL_MODE_BACK_BIT,
+            .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
+            .depthBiasEnable = VK_FALSE,
+            .lineWidth = 1.0f};
+        VkPipelineMultisampleStateCreateInfo multisampling = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+            .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+            .sampleShadingEnable = VK_FALSE};
+        VkPipelineDepthStencilStateCreateInfo depth_stencil = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+            .depthTestEnable = VK_TRUE,
+            .depthWriteEnable = VK_TRUE,
+            .depthCompareOp = VK_COMPARE_OP_LESS,
+            .depthBoundsTestEnable = VK_FALSE,
+            .stencilTestEnable = VK_FALSE};
+        VkPipelineColorBlendAttachmentState color_blend_attachment = {
+            .blendEnable = VK_FALSE,
+            .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT |
+                              VK_COLOR_COMPONENT_A_BIT};
+        VkPipelineColorBlendStateCreateInfo color_blending = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
+            .logicOpEnable = VK_FALSE,
+            .attachmentCount = 1,
+            .pAttachments = &color_blend_attachment};
+        VkDynamicState dynamic_states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
+        VkPipelineDynamicStateCreateInfo dynamic_state = {.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
+                                                          .dynamicStateCount = 2,
+                                                          .pDynamicStates = dynamic_states};
+
+        VkPushConstantRange push_constant = {
+            .stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS, .offset = 0, .size = sizeof(uint32_t) * 4};
+
+        VkPipelineLayoutCreateInfo pipeline_layout_info = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
+        pipeline_layout_info.setLayoutCount = 1;
+        pipeline_layout_info.pSetLayouts = &res_system.global_layout;
+        pipeline_layout_info.pushConstantRangeCount = 1;
+        pipeline_layout_info.pPushConstantRanges = &push_constant;
+
+        VK_CHECK(vkCreatePipelineLayout(ctx.device, &pipeline_layout_info, nullptr, &ctx.test_pipeline_layout));
+
+        VkGraphicsPipelineCreateInfo pipeline_info = {.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
+        pipeline_info.stageCount = 2;
+        pipeline_info.pStages = shader_stages;
+        pipeline_info.pVertexInputState = &vertex_input_info;
+        pipeline_info.pInputAssemblyState = &input_assembly;
+        pipeline_info.pViewportState = &viewport_state;
+        pipeline_info.pRasterizationState = &rasterizer;
+        pipeline_info.pMultisampleState = &multisampling;
+        pipeline_info.pDepthStencilState = &depth_stencil;
+        pipeline_info.pColorBlendState = &color_blending;
+        pipeline_info.pDynamicState = &dynamic_state;
+        pipeline_info.layout = ctx.test_pipeline_layout;
+        pipeline_info.renderPass = ctx.main_render_pass;
+        pipeline_info.subpass = 0;
+
+        VK_CHECK(vkCreateGraphicsPipelines(ctx.device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &ctx.test_pipeline));
+
+        vkDestroyShaderModule(ctx.device, frag_module, nullptr);
+        vkDestroyShaderModule(ctx.device, vert_module, nullptr);
+
         SMOL_LOG_INFO("VULKAN", "Context initialized for GPU: {}", ctx.properties.deviceName);
         return true;
     }
 
     void shutdown()
     {
+        res_system.process_deletions(UINT64_MAX);
+
+        shutdown_resources();
+
+        if (ctx.timeline_semaphore != VK_NULL_HANDLE)
+        {
+            vkDestroySemaphore(ctx.device, ctx.timeline_semaphore, nullptr);
+        }
+
+        if (ctx.transfer_command_pool != VK_NULL_HANDLE)
+        {
+            vkDestroyCommandPool(ctx.device, ctx.transfer_command_pool, nullptr);
+        }
+
         for (VkFramebuffer fb : ctx.swapchain.framebuffers) { vkDestroyFramebuffer(ctx.device, fb, nullptr); }
 
         for (per_frame_t& frame_data : ctx.per_frame_objects) { shutdown_per_frame(frame_data); }
@@ -395,6 +581,11 @@ namespace smol::renderer
 
     void render(ecs::registry_t& reg)
     {
+        u64_t gpu_timeline_value = 0;
+        vkGetSemaphoreCounterValue(ctx.device, res_system.timeline_semaphore, &gpu_timeline_value);
+
+        res_system.process_deletions(gpu_timeline_value);
+
         u32_t index;
         VkResult res = acquire_next_image(&index);
 
@@ -416,6 +607,30 @@ namespace smol::renderer
         };
 
         vkBeginCommandBuffer(cmd, &cmd_begin_info);
+
+        {
+            std::scoped_lock lock(res_system.pending_mutex);
+            if (!res_system.pending_acquires.empty())
+            {
+                std::vector<VkImageMemoryBarrier> image_barriers;
+                std::vector<VkBufferMemoryBarrier> buffer_barriers;
+
+                for (pending_resource_t& res : res_system.pending_acquires)
+                {
+                    if (res.type == resource_type_e::TEXTURE) { image_barriers.push_back(res.barrier.image_barrier); }
+                    else
+                    {
+                        buffer_barriers.push_back(res.barrier.buffer_barrier);
+                    }
+                }
+
+                vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT, 0, 0,
+                                     nullptr, static_cast<u32_t>(buffer_barriers.size()), buffer_barriers.data(),
+                                     static_cast<u32_t>(image_barriers.size()), image_barriers.data());
+
+                res_system.pending_acquires.clear();
+            }
+        }
 
         VkClearValue clear_values[] = {
             {.color = {{0.2f, 0.2f, 0.2f, 1.0f}}},
@@ -444,6 +659,28 @@ namespace smol::renderer
         VkRect2D scissor = {.extent = ctx.swapchain.extent};
         vkCmdSetScissor(cmd, 0, 1, &scissor);
 
+        // VERY TEMPORARY
+        if (ctx.active_mesh && ctx.active_tex)
+        {
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.test_pipeline);
+
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.test_pipeline_layout, 0, 1,
+                                    &res_system.global_set, 0, nullptr);
+            struct
+            {
+                uint32_t tex_id;
+                uint32_t samp_id;
+                uint32_t vtx_id;
+                uint32_t idx_id;
+            } pc_data = {ctx.active_tex->bindless_id, 0, ctx.active_mesh->vertex_bindless_id,
+                         ctx.active_mesh->index_bindless_id};
+
+            vkCmdPushConstants(cmd, ctx.test_pipeline_layout, VK_SHADER_STAGE_ALL_GRAPHICS, 0, sizeof(pc_data),
+                               &pc_data);
+
+            vkCmdDraw(cmd, ctx.active_mesh->index_count, 1, 0, 0);
+        }
+
         vkCmdEndRenderPass(cmd);
 
         vkEndCommandBuffer(cmd);
@@ -455,16 +692,47 @@ namespace smol::renderer
                                        &ctx.per_frame_objects[index].swapchain_release_semaphore));
         }
 
-        VkPipelineStageFlags wait_stage = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+        VkSemaphore wait_semaphores[] = {
+            ctx.per_frame_objects[index].swapchain_acquire_semaphore,
+            res_system.timeline_semaphore,
+        };
 
-        VkSubmitInfo submit_info = {.sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
-                                    .waitSemaphoreCount = 1,
-                                    .pWaitSemaphores = &ctx.per_frame_objects[index].swapchain_acquire_semaphore,
-                                    .pWaitDstStageMask = &wait_stage,
-                                    .commandBufferCount = 1,
-                                    .pCommandBuffers = &cmd,
-                                    .signalSemaphoreCount = 1,
-                                    .pSignalSemaphores = &ctx.per_frame_objects[index].swapchain_release_semaphore};
+        VkPipelineStageFlags wait_stages[] = {
+            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT,
+            VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT,
+        };
+
+        u64_t wait_values[] = {0, res_system.timeline_value};
+
+        u64_t next_timeline_value = ctx.timeline_value + 1;
+        ctx.timeline_value = next_timeline_value;
+
+        u64_t signal_values[] = {0, next_timeline_value};
+
+        VkTimelineSemaphoreSubmitInfo timeline_sem_info = {
+            .sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
+            .waitSemaphoreValueCount = 2,
+            .pWaitSemaphoreValues = wait_values,
+            .signalSemaphoreValueCount = 2,
+            .pSignalSemaphoreValues = signal_values,
+        };
+
+        VkSemaphore signal_semaphores[] = {
+            ctx.per_frame_objects[index].swapchain_release_semaphore,
+            ctx.timeline_semaphore,
+        };
+
+        VkSubmitInfo submit_info = {
+            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+            .pNext = &timeline_sem_info,
+            .waitSemaphoreCount = 2,
+            .pWaitSemaphores = wait_semaphores,
+            .pWaitDstStageMask = wait_stages,
+            .commandBufferCount = 1,
+            .pCommandBuffers = &cmd,
+            .signalSemaphoreCount = 2,
+            .pSignalSemaphores = signal_semaphores,
+        };
 
         vkQueueSubmit(ctx.graphics_queue, 1, &submit_info, ctx.per_frame_objects[index].queue_submit_fence);
 
@@ -863,5 +1131,73 @@ namespace smol::renderer
         {
             SMOL_LOG_ERROR("VULKAN", "Failed to create image; Width: {}, Height: {}", width, height);
         }
+    }
+
+    VkCommandBuffer begin_transfer_commands()
+    {
+        VkCommandBufferAllocateInfo alloc_info = {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+            .commandPool = ctx.transfer_command_pool,
+            .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+            .commandBufferCount = 1,
+        };
+
+        VkCommandBuffer cmd;
+        {
+            std::scoped_lock lock(ctx.transfer_mutex);
+            VK_CHECK(vkAllocateCommandBuffers(ctx.device, &alloc_info, &cmd));
+        }
+
+        VkCommandBufferBeginInfo begin_info = {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
+            .flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT,
+        };
+
+        VK_CHECK(vkBeginCommandBuffer(cmd, &begin_info));
+
+        return cmd;
+    }
+
+    u64_t submit_transfer_commands(VkCommandBuffer cmd)
+    {
+        VK_CHECK(vkEndCommandBuffer(cmd));
+
+        u64_t signal_value;
+        {
+            // if i add multithread asset loading, this should be locked
+            signal_value = ++res_system.timeline_value;
+        }
+
+        VkTimelineSemaphoreSubmitInfo timeline_sem_info = {
+            .sType = VK_STRUCTURE_TYPE_TIMELINE_SEMAPHORE_SUBMIT_INFO,
+            .signalSemaphoreValueCount = 1,
+            .pSignalSemaphoreValues = &signal_value,
+        };
+
+        VkSubmitInfo submit_info = {
+            .sType = VK_STRUCTURE_TYPE_SUBMIT_INFO,
+            .pNext = &timeline_sem_info,
+            .commandBufferCount = 1,
+            .pCommandBuffers = &cmd,
+            .signalSemaphoreCount = 1,
+            .pSignalSemaphores = &res_system.timeline_semaphore,
+        };
+
+        {
+            std::scoped_lock lock(ctx.transfer_mutex);
+            VK_CHECK(vkQueueSubmit(ctx.transfer_queue, 1, &submit_info, VK_NULL_HANDLE));
+        }
+
+        {
+            std::scoped_lock lock(res_system.deletion_mutex);
+            res_system.deletion_queue.push_back({
+                .type = resource_type_e::COMMAND_BUFFER,
+                .handle = {.cmd_buffer = {cmd, ctx.transfer_command_pool}},
+                .bindless_id = NULL_HANDLE,
+                .gpu_timeline_value = signal_value,
+            });
+        }
+
+        return signal_value;
     }
 } // namespace smol::renderer

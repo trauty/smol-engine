@@ -6,6 +6,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <vma/vk_mem_alloc.h>
 #include <vulkan/vulkan_core.h>
 
 namespace smol
@@ -16,30 +17,21 @@ namespace smol
         LINEAR
     };
 
-    struct texture_data_t
-    {
-        VkImage image = VK_NULL_HANDLE;
-        VkDeviceMemory memory = VK_NULL_HANDLE;
-        VkImageView view = VK_NULL_HANDLE;
-        VkSampler sampler = VK_NULL_HANDLE;
-
-        ~texture_data_t();
-    };
-
     struct texture_t
     {
         i32 width = 0;
         i32 height = 0;
         texture_format_e type = texture_format_e::SRGB;
 
-        std::shared_ptr<texture_data_t> tex_data = std::make_shared<texture_data_t>();
-
-        bool ready() const { return tex_data->image != VK_NULL_HANDLE; }
+        VkImage image = VK_NULL_HANDLE;
+        VkImageView view = VK_NULL_HANDLE;
+        VmaAllocation allocation = VK_NULL_HANDLE;
+        u32_t bindless_id = 0xfffffff;
     };
 
-    template<>
-    struct asset_loader_t<texture_t>
+    template <> struct asset_loader_t<texture_t>
     {
         static std::optional<texture_t> load(const std::string& path, texture_format_e type = texture_format_e::SRGB);
+        static void unload(texture_t& tex);
     };
 } // namespace smol
