@@ -31,6 +31,9 @@ namespace smol::renderer
                                                  VK_FORMAT_R8G8B8A8_SRGB, VK_FORMAT_B8G8R8A8_SRGB,
                                                  VK_FORMAT_A8B8G8R8_SRGB_PACK32});
 
+    void transition_image(VkCommandBuffer cmd, VkImage image, VkImageLayout old_layout, VkImageLayout new_layout,
+                          VkImageAspectFlags aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT);
+
     void create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags mem_props, VkBuffer& buffer,
                        VkDeviceMemory& buffer_memory);
     void create_image(u32 width, u32 height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage,

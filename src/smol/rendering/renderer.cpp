@@ -132,17 +132,6 @@ namespace smol::renderer
         }
     } // namespace detail
 
-    // TEMP
-    VkShaderModule create_shader_module(const std::vector<char>& code)
-    {
-        VkShaderModuleCreateInfo create_info = {.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
-        create_info.codeSize = code.size();
-        create_info.pCode = reinterpret_cast<const uint32_t*>(code.data());
-        VkShaderModule module;
-        VK_CHECK(vkCreateShaderModule(ctx.device, &create_info, nullptr, &module));
-        return module;
-    }
-
     bool init(const context_config_t& config, SDL_Window* window)
     {
         std::vector<const char*> instance_exts = config.required_instance_exts;
@@ -167,7 +156,7 @@ namespace smol::renderer
 
         VkApplicationInfo app_info = {VK_STRUCTURE_TYPE_APPLICATION_INFO};
         app_info.pApplicationName = config.app_name.c_str();
-        app_info.apiVersion = VK_API_VERSION_1_2;
+        app_info.apiVersion = VK_API_VERSION_1_3;
 
         VkInstanceCreateInfo instance_info = {VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO};
         instance_info.pApplicationInfo = &app_info;
@@ -268,8 +257,15 @@ namespace smol::renderer
             .timelineSemaphore = VK_TRUE,
         };
 
+        VkPhysicalDeviceVulkan13Features vk13_features = {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
+            .pNext = &timeline_sem_features,
+            .synchronization2 = VK_TRUE,
+            .dynamicRendering = VK_TRUE,
+        };
+
         VkPhysicalDeviceFeatures2 device_features = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
-        device_features_check.pNext = &timeline_sem_features;
+        device_features_check.pNext = &vk13_features;
         device_features_check.features.samplerAnisotropy = VK_TRUE;
         device_features_check.features.multiDrawIndirect = VK_TRUE;
 
@@ -293,7 +289,7 @@ namespace smol::renderer
 
         VmaAllocatorCreateInfo allocator_info = {};
         // allocator_info.flags = VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT;
-        allocator_info.vulkanApiVersion = VK_API_VERSION_1_2;
+        allocator_info.vulkanApiVersion = VK_API_VERSION_1_3;
         allocator_info.physicalDevice = ctx.physical_device;
         allocator_info.device = ctx.device;
         allocator_info.instance = ctx.instance;
@@ -306,61 +302,6 @@ namespace smol::renderer
         vkGetDeviceQueue(ctx.device, ctx.queue_fam_indices.transfer_family.value(), 0, &ctx.transfer_queue);
 
         // swapchain setup
-
-        VkAttachmentDescription color_attachment = {};
-        color_attachment.format = select_surface_format(ctx.physical_device, ctx.surface).format;
-        color_attachment.samples = VK_SAMPLE_COUNT_1_BIT;
-        color_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        color_attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
-        color_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        color_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        color_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        color_attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
-
-        VkAttachmentDescription depth_attachment = {};
-        depth_attachment.format = find_depth_format();
-        depth_attachment.samples = VK_SAMPLE_COUNT_1_BIT;
-        depth_attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
-        depth_attachment.storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        depth_attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
-        depth_attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
-        depth_attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
-        depth_attachment.finalLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL;
-
-        // TEMP: till render graph works, i still need to implement bindless
-        // descriptors...
-        VkAttachmentReference attachment_refs[] = {
-            {0, VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL        },
-            {1, VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL}
-        };
-
-        VkSubpassDescription subpass_desc = {};
-        subpass_desc.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
-        subpass_desc.colorAttachmentCount = 1;
-        subpass_desc.pColorAttachments = &attachment_refs[0];
-        subpass_desc.pDepthStencilAttachment = &attachment_refs[1];
-
-        VkSubpassDependency subpass_dep = {};
-        subpass_dep.srcSubpass = VK_SUBPASS_EXTERNAL;
-        subpass_dep.dstSubpass = 0;
-        subpass_dep.srcStageMask =
-            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-        subpass_dep.srcAccessMask = 0;
-        subpass_dep.dstStageMask =
-            VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT;
-        subpass_dep.dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT | VK_ACCESS_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
-
-        VkAttachmentDescription attachments[] = {color_attachment, depth_attachment};
-
-        VkRenderPassCreateInfo render_pass_info = {VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO};
-        render_pass_info.attachmentCount = 2;
-        render_pass_info.pAttachments = attachments;
-        render_pass_info.subpassCount = 1;
-        render_pass_info.pSubpasses = &subpass_desc;
-        render_pass_info.dependencyCount = 1;
-        render_pass_info.pDependencies = &subpass_dep;
-
-        VK_CHECK(vkCreateRenderPass(ctx.device, &render_pass_info, nullptr, &ctx.main_render_pass));
 
         init_swapchain();
 
@@ -388,7 +329,7 @@ namespace smol::renderer
 
         init_resources();
 
-        // TEST PIPELINE -- VERY TEMPORARY
+        // TEST SAMPLER -- VERY TEMPORARY
         VkSamplerCreateInfo sampler_info = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
         sampler_info.magFilter = VK_FILTER_LINEAR;
         sampler_info.minFilter = VK_FILTER_LINEAR;
@@ -414,108 +355,6 @@ namespace smol::renderer
         sampler_write.pImageInfo = &sampler_desc_info;
         vkUpdateDescriptorSets(ctx.device, 1, &sampler_write, 0, nullptr);
 
-        auto vert_code = util::read_file_raw("assets/shaders/test.vert.spv");
-        auto frag_code = util::read_file_raw("assets/shaders/test.frag.spv");
-        VkShaderModule vert_module = create_shader_module(vert_code);
-        VkShaderModule frag_module = create_shader_module(frag_code);
-
-        VkPipelineShaderStageCreateInfo shader_stages[] = {
-            {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-             .stage = VK_SHADER_STAGE_VERTEX_BIT,
-             .module = vert_module,
-             .pName = "main"},
-            {.sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
-             .stage = VK_SHADER_STAGE_FRAGMENT_BIT,
-             .module = frag_module,
-             .pName = "main"}
-        };
-
-        VkVertexInputBindingDescription binding_desc = {0, sizeof(vertex_t), VK_VERTEX_INPUT_RATE_VERTEX};
-        VkVertexInputAttributeDescription attribute_desc[] = {
-            {0, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(vertex_t, position)},
-            {1, 0, VK_FORMAT_R32G32B32_SFLOAT, offsetof(vertex_t, normal)  },
-            {2, 0, VK_FORMAT_R32G32_SFLOAT,    offsetof(vertex_t, uv)      }
-        };
-
-        // bypassing ia
-        VkPipelineVertexInputStateCreateInfo vertex_input_info = {
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-            .vertexBindingDescriptionCount = 0,
-            .pVertexBindingDescriptions = nullptr,
-            .vertexAttributeDescriptionCount = 0,
-            .pVertexAttributeDescriptions = nullptr};
-
-        VkPipelineInputAssemblyStateCreateInfo input_assembly = {
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-            .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-            .primitiveRestartEnable = VK_FALSE};
-        VkPipelineViewportStateCreateInfo viewport_state = {
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO, .viewportCount = 1, .scissorCount = 1};
-        VkPipelineRasterizationStateCreateInfo rasterizer = {
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-            .depthClampEnable = VK_FALSE,
-            .rasterizerDiscardEnable = VK_FALSE,
-            .polygonMode = VK_POLYGON_MODE_FILL,
-            .cullMode = VK_CULL_MODE_BACK_BIT,
-            .frontFace = VK_FRONT_FACE_COUNTER_CLOCKWISE,
-            .depthBiasEnable = VK_FALSE,
-            .lineWidth = 1.0f};
-        VkPipelineMultisampleStateCreateInfo multisampling = {
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-            .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
-            .sampleShadingEnable = VK_FALSE};
-        VkPipelineDepthStencilStateCreateInfo depth_stencil = {
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-            .depthTestEnable = VK_TRUE,
-            .depthWriteEnable = VK_TRUE,
-            .depthCompareOp = VK_COMPARE_OP_LESS,
-            .depthBoundsTestEnable = VK_FALSE,
-            .stencilTestEnable = VK_FALSE};
-        VkPipelineColorBlendAttachmentState color_blend_attachment = {
-            .blendEnable = VK_FALSE,
-            .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT |
-                              VK_COLOR_COMPONENT_A_BIT};
-        VkPipelineColorBlendStateCreateInfo color_blending = {
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
-            .logicOpEnable = VK_FALSE,
-            .attachmentCount = 1,
-            .pAttachments = &color_blend_attachment};
-        VkDynamicState dynamic_states[] = {VK_DYNAMIC_STATE_VIEWPORT, VK_DYNAMIC_STATE_SCISSOR};
-        VkPipelineDynamicStateCreateInfo dynamic_state = {.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
-                                                          .dynamicStateCount = 2,
-                                                          .pDynamicStates = dynamic_states};
-
-        VkPushConstantRange push_constant = {
-            .stageFlags = VK_SHADER_STAGE_ALL_GRAPHICS, .offset = 0, .size = sizeof(uint32_t) * 4};
-
-        VkPipelineLayoutCreateInfo pipeline_layout_info = {.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO};
-        pipeline_layout_info.setLayoutCount = 1;
-        pipeline_layout_info.pSetLayouts = &res_system.global_layout;
-        pipeline_layout_info.pushConstantRangeCount = 1;
-        pipeline_layout_info.pPushConstantRanges = &push_constant;
-
-        VK_CHECK(vkCreatePipelineLayout(ctx.device, &pipeline_layout_info, nullptr, &ctx.test_pipeline_layout));
-
-        VkGraphicsPipelineCreateInfo pipeline_info = {.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO};
-        pipeline_info.stageCount = 2;
-        pipeline_info.pStages = shader_stages;
-        pipeline_info.pVertexInputState = &vertex_input_info;
-        pipeline_info.pInputAssemblyState = &input_assembly;
-        pipeline_info.pViewportState = &viewport_state;
-        pipeline_info.pRasterizationState = &rasterizer;
-        pipeline_info.pMultisampleState = &multisampling;
-        pipeline_info.pDepthStencilState = &depth_stencil;
-        pipeline_info.pColorBlendState = &color_blending;
-        pipeline_info.pDynamicState = &dynamic_state;
-        pipeline_info.layout = ctx.test_pipeline_layout;
-        pipeline_info.renderPass = ctx.main_render_pass;
-        pipeline_info.subpass = 0;
-
-        VK_CHECK(vkCreateGraphicsPipelines(ctx.device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr, &ctx.test_pipeline));
-
-        vkDestroyShaderModule(ctx.device, frag_module, nullptr);
-        vkDestroyShaderModule(ctx.device, vert_module, nullptr);
-
         SMOL_LOG_INFO("VULKAN", "Context initialized for GPU: {}", ctx.properties.deviceName);
         return true;
     }
@@ -536,15 +375,11 @@ namespace smol::renderer
             vkDestroyCommandPool(ctx.device, ctx.transfer_command_pool, nullptr);
         }
 
-        for (VkFramebuffer fb : ctx.swapchain.framebuffers) { vkDestroyFramebuffer(ctx.device, fb, nullptr); }
-
         for (per_frame_t& frame_data : ctx.per_frame_objects) { shutdown_per_frame(frame_data); }
 
         ctx.per_frame_objects.clear();
 
         for (VkSemaphore sem : ctx.recycled_semaphores) { vkDestroySemaphore(ctx.device, sem, nullptr); }
-
-        if (ctx.main_render_pass != VK_NULL_HANDLE) { vkDestroyRenderPass(ctx.device, ctx.main_render_pass, nullptr); }
 
         for (VkImageView image_view : ctx.swapchain.views) { vkDestroyImageView(ctx.device, image_view, nullptr); }
 
@@ -598,7 +433,6 @@ namespace smol::renderer
         if (res != VK_SUCCESS) { vkQueueWaitIdle(ctx.present_queue); }
 
         // render here
-        VkFramebuffer fb = ctx.swapchain.framebuffers[index];
         VkCommandBuffer cmd = ctx.per_frame_objects[index].main_command_buffer;
 
         VkCommandBufferBeginInfo cmd_begin_info = {
@@ -633,20 +467,51 @@ namespace smol::renderer
         }
 
         VkClearValue clear_values[] = {
-            {.color = {{0.2f, 0.2f, 0.2f, 1.0f}}},
+            {.color = {{0.01f, 0.01f, 0.01f, 1.0f}}},
             {.depthStencil = {1.0f, 0}},
         };
 
-        VkRenderPassBeginInfo rp_begin_info = {
-            .sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO,
-            .renderPass = ctx.main_render_pass,
-            .framebuffer = fb,
-            .renderArea = {.extent = ctx.swapchain.extent},
-            .clearValueCount = 2,
-            .pClearValues = clear_values,
+        transition_image(cmd, ctx.swapchain.images[index], VK_IMAGE_LAYOUT_UNDEFINED,
+                         VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+
+        VkImageAspectFlags depth_aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
+        if (ctx.swapchain.depth_format == VK_FORMAT_D32_SFLOAT_S8_UINT ||
+            ctx.swapchain.depth_format == VK_FORMAT_D24_UNORM_S8_UINT)
+        {
+            depth_aspect |= VK_IMAGE_ASPECT_STENCIL_BIT;
+        }
+
+        transition_image(cmd, ctx.swapchain.depth_image, VK_IMAGE_LAYOUT_UNDEFINED,
+                         VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, depth_aspect);
+
+        VkRenderingAttachmentInfo color_attachment = {
+            .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+            .imageView = ctx.swapchain.views[index],
+            .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+            .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+            .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
+            .clearValue = clear_values[0],
         };
 
-        vkCmdBeginRenderPass(cmd, &rp_begin_info, VK_SUBPASS_CONTENTS_INLINE);
+        VkRenderingAttachmentInfo depth_attachment = {
+            .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
+            .imageView = ctx.swapchain.depth_view,
+            .imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
+            .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+            .storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
+            .clearValue = clear_values[1],
+        };
+
+        VkRenderingInfo rendering_info = {
+            .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
+            .renderArea = {.extent = ctx.swapchain.extent},
+            .layerCount = 1,
+            .colorAttachmentCount = 1,
+            .pColorAttachments = &color_attachment,
+            .pDepthAttachment = &depth_attachment,
+        };
+
+        vkCmdBeginRendering(cmd, &rendering_info);
 
         VkViewport vp = {
             .width = static_cast<f32>(ctx.swapchain.extent.width),
@@ -659,29 +524,10 @@ namespace smol::renderer
         VkRect2D scissor = {.extent = ctx.swapchain.extent};
         vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-        // VERY TEMPORARY
-        if (ctx.active_mesh && ctx.active_tex)
-        {
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.test_pipeline);
+        vkCmdEndRendering(cmd);
 
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.test_pipeline_layout, 0, 1,
-                                    &res_system.global_set, 0, nullptr);
-            struct
-            {
-                uint32_t tex_id;
-                uint32_t samp_id;
-                uint32_t vtx_id;
-                uint32_t idx_id;
-            } pc_data = {ctx.active_tex->bindless_id, 0, ctx.active_mesh->vertex_bindless_id,
-                         ctx.active_mesh->index_bindless_id};
-
-            vkCmdPushConstants(cmd, ctx.test_pipeline_layout, VK_SHADER_STAGE_ALL_GRAPHICS, 0, sizeof(pc_data),
-                               &pc_data);
-
-            vkCmdDraw(cmd, ctx.active_mesh->index_count, 1, 0, 0);
-        }
-
-        vkCmdEndRenderPass(cmd);
+        transition_image(cmd, ctx.swapchain.images[index], VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
+                         VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
         vkEndCommandBuffer(cmd);
 
@@ -777,6 +623,65 @@ namespace smol::renderer
         return it != supported_surface_formats.end() ? *it : supported_surface_formats[0];
     }
 
+    void transition_image(VkCommandBuffer cmd, VkImage image, VkImageLayout old_layout, VkImageLayout new_layout,
+                          VkImageAspectFlags aspect_mask)
+    {
+        VkImageMemoryBarrier2 barrier = {
+            .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER_2,
+            .srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+            .srcAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT,
+            .dstStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT,
+            .dstAccessMask = VK_ACCESS_2_MEMORY_WRITE_BIT | VK_ACCESS_2_MEMORY_READ_BIT,
+            .oldLayout = old_layout,
+            .newLayout = new_layout,
+            .image = image,
+            .subresourceRange = {.aspectMask = aspect_mask,
+                                 .baseMipLevel = 0,
+                                 .levelCount = VK_REMAINING_MIP_LEVELS,
+                                 .baseArrayLayer = 0,
+                                 .layerCount = VK_REMAINING_ARRAY_LAYERS},
+        };
+
+        if (old_layout == VK_IMAGE_LAYOUT_UNDEFINED && new_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
+        {
+            barrier.srcStageMask = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+            barrier.srcAccessMask = 0;
+            barrier.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+            barrier.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+        }
+        else if (old_layout == VK_IMAGE_LAYOUT_UNDEFINED &&
+                 new_layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+        {
+            barrier.srcStageMask =
+                VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+            barrier.srcAccessMask = 0;
+            barrier.dstStageMask =
+                VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+            barrier.dstAccessMask =
+                VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+        }
+        else if (old_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL &&
+                 new_layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)
+        {
+            barrier.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+            barrier.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+            barrier.dstStageMask = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
+            barrier.dstAccessMask = 0;
+        }
+        else
+        {
+            SMOL_LOG_WARN("VULKAN", "transition_image: using fallback barrier for image transition");
+        }
+
+        VkDependencyInfo dep_info = {
+            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+            .imageMemoryBarrierCount = 1,
+            .pImageMemoryBarriers = &barrier,
+        };
+
+        vkCmdPipelineBarrier2(cmd, &dep_info);
+    }
+
     bool resize(const u32_t width, const u32_t height)
     {
         VkSurfaceCapabilitiesKHR surface_caps;
@@ -789,8 +694,6 @@ namespace smol::renderer
         }
 
         vkDeviceWaitIdle(ctx.device);
-
-        for (VkFramebuffer& fb : ctx.swapchain.framebuffers) { vkDestroyFramebuffer(ctx.device, fb, nullptr); }
 
         init_swapchain();
 
@@ -936,6 +839,7 @@ namespace smol::renderer
         VK_CHECK(vkGetSwapchainImagesKHR(ctx.device, ctx.swapchain.handle, &image_count, nullptr));
         std::vector<VkImage> swapchain_images(image_count);
         VK_CHECK(vkGetSwapchainImagesKHR(ctx.device, ctx.swapchain.handle, &image_count, swapchain_images.data()));
+        ctx.swapchain.images = swapchain_images;
 
         ctx.per_frame_objects.clear();
         ctx.per_frame_objects.resize(image_count);
@@ -960,28 +864,6 @@ namespace smol::renderer
             VK_CHECK(vkCreateImageView(ctx.device, &view_info, nullptr, &image_view));
 
             ctx.swapchain.views.push_back(image_view);
-        }
-
-        ctx.swapchain.framebuffers.clear();
-
-        for (VkImageView& image_view : ctx.swapchain.views)
-        {
-            VkImageView attachments[] = {image_view, ctx.swapchain.depth_view};
-
-            VkFramebufferCreateInfo fb_info = {
-                .sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO,
-                .renderPass = ctx.main_render_pass,
-                .attachmentCount = 2,
-                .pAttachments = attachments,
-                .width = ctx.swapchain.extent.width,
-                .height = ctx.swapchain.extent.height,
-                .layers = 1,
-            };
-
-            VkFramebuffer fb;
-            VK_CHECK(vkCreateFramebuffer(ctx.device, &fb_info, nullptr, &fb));
-
-            ctx.swapchain.framebuffers.push_back(fb);
         }
     }
 

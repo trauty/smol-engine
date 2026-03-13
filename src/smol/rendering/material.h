@@ -31,7 +31,7 @@ namespace smol
                 return;
             }
 
-            u32_t total_size = shader->get_data()->reflection.get_ubo_size(0, 0);
+            u32_t total_size = shader->reflection.material_size;
             data.resize(total_size, 0);
         }
 
@@ -40,7 +40,7 @@ namespace smol
         {
             if (!shader) { return; }
 
-            const auto& members = shader->get_data()->reflection.uniform_members;
+            const std::unordered_map<std::string, shader_member_t>& members = shader->reflection.members;
             auto it = members.find(name);
 
             if (it == members.end())
@@ -49,7 +49,7 @@ namespace smol
                 return;
             }
 
-            const shader_uniform_member_t& member = it->second;
+            const shader_member_t& member = it->second;
 
             if (sizeof(T) != member.size)
             {

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "smol/assets/mesh.h"
 #include "smol/defines.h"
 #include "smol/rendering/renderer_types.h"
 #include "vulkan/vulkan_core.h"
@@ -16,7 +17,8 @@ namespace smol::renderer
         TEXTURE,
         BUFFER,
         STORAGE_IMAGE,
-        COMMAND_BUFFER
+        COMMAND_BUFFER,
+        PIPELINE
     };
 
     constexpr u32_t SAMPLERS_BINDING_POINT = 0;
@@ -65,6 +67,12 @@ namespace smol::renderer
                 VkCommandBuffer cmd;
                 VkCommandPool pool;
             } cmd_buffer;
+
+            struct
+            {
+                VkPipeline pipeline;
+                VkPipelineLayout layout;
+            } pipeline;
         } handle;
 
         u32_t bindless_id;
@@ -82,6 +90,27 @@ namespace smol::renderer
         void release(u32_t index);
     };
 
+    constexpr u32_t MATERIAL_HEAP_SIZE = 24 * 1024 * 1024;
+
+    struct material_heap_t
+    {
+        u32_t capacity;
+        u32_t allocated_size = 0;
+
+        VkBuffer buffer = VK_NULL_HANDLE;
+        VmaAllocation allocation = VK_NULL_HANDLE;
+        void* mapped_mem = nullptr;
+
+        u32_t bindless_id = NULL_HANDLE;
+
+        void init(u32_t max_size);
+        void shutdown();
+
+        u32_t allocate(u32_t size);
+
+        void update(u32_t offset, const void* data, u32_t size);
+    };
+
     struct resource_system_t
     {
         VkDescriptorSetLayout global_layout;
@@ -91,6 +120,8 @@ namespace smol::renderer
         descriptor_heap_t buffer_heap;
         descriptor_heap_t texture_heap;
         descriptor_heap_t storage_image_heap;
+
+        material_heap_t material_heap;
 
         VkSemaphore timeline_semaphore;
         u64_t timeline_value;

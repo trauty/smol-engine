@@ -55,7 +55,6 @@ namespace smol::renderer
 
         std::vector<VkImage> images;
         std::vector<VkImageView> views;
-        std::vector<VkFramebuffer> framebuffers;
 
         VkImage depth_image = VK_NULL_HANDLE;
         VkImageView depth_view = VK_NULL_HANDLE;
@@ -100,13 +99,6 @@ namespace smol::renderer
         std::vector<std::string> active_device_exts;
         std::vector<std::string> active_layers;
 
-        // temporary
-        VkDescriptorSetLayout global_set_layout = VK_NULL_HANDLE;
-        VkDescriptorPool descriptor_pool = VK_NULL_HANDLE;
-
-        // VERY temporary
-        VkRenderPass main_render_pass = VK_NULL_HANDLE;
-
         std::mutex descriptor_mutex;
 
         std::vector<per_frame_t> per_frame_objects;
@@ -116,8 +108,6 @@ namespace smol::renderer
         u64_t timeline_value = 0;
 
         VkSampler test_sampler;
-        VkPipelineLayout test_pipeline_layout;
-        VkPipeline test_pipeline;
 
         asset_t<mesh_t> active_mesh;
         asset_t<texture_t> active_tex;
