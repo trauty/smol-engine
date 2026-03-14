@@ -1,10 +1,12 @@
 #pragma once
 
-#include "smol/ecs.h"
+#include "smol/ecs_fwd.h"
 #include "smol/math.h"
 
 namespace smol::transform_system
 {
+    extern bool is_hierarchy_dirty;
+
     void set_local_position(ecs::registry_t& reg, ecs::entity_t entity, vec3_t new_pos);
     void set_local_rotation(ecs::registry_t& reg, ecs::entity_t entity, quat_t new_rot);
     void set_local_scale(ecs::registry_t& reg, ecs::entity_t entity, vec3_t new_scale);

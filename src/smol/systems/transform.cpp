@@ -1,12 +1,15 @@
 #include "transform.h"
+
 #include "cglm/affine.h"
 #include "cglm/mat4.h"
 #include "cglm/vec3.h"
 #include "smol/components/transform.h"
 #include "smol/defines.h"
 #include "smol/ecs.h"
+#include "smol/ecs_fwd.h"
+#include "smol/log.h"
 #include "smol/math.h"
-#include <cstddef>
+
 #include <vector>
 
 namespace smol::transform_system
@@ -15,9 +18,9 @@ namespace smol::transform_system
     {
         std::vector<ecs::entity_t> sort_stack;
         std::vector<ecs::entity_t> sort_res;
-
-        bool is_hierarchy_dirty = false;
     } // namespace
+
+    bool is_hierarchy_dirty = true;
 
     void set_local_position(ecs::registry_t& reg, ecs::entity_t entity, vec3_t new_pos)
     {
@@ -140,21 +143,15 @@ namespace smol::transform_system
 
     static void rebuild_hierarchy(ecs::registry_t& reg)
     {
-        ecs::sparse_set_t<transform_t>& pool = reg.get_storage<transform_t>();
-        const size_t count = pool.size();
-        if (count == 0) { return; }
+        auto view = reg.view<transform_t>();
+        if (view.empty()) { return; }
 
         sort_stack.clear();
-        if (sort_stack.capacity() < count) { sort_stack.reserve(count); }
         sort_res.clear();
-        if (sort_res.capacity() < count) { sort_res.reserve(count); }
 
-        transform_t* transform_data = pool.data();
-        const ecs::entity_t* entities = pool.entities();
-
-        for (size_t i = count - 1; i > 0; i--)
+        for (ecs::entity_t entity : view)
         {
-            if (transform_data[i].parent == ecs::NULL_ENTITY) { sort_stack.push_back(entities[i]); }
+            if (view.get<transform_t>(entity).parent == ecs::NULL_ENTITY) { sort_stack.push_back(entity); }
         }
 
         // iterative dfs flatten
@@ -165,29 +162,11 @@ namespace smol::transform_system
 
             sort_res.push_back(entity);
 
-            size_t index = pool.get_index(entity);
-            transform_t& transform = transform_data[index];
-
-            ecs::entity_t child = transform.first_child;
+            ecs::entity_t child = view.get<transform_t>(entity).first_child;
             while (child != ecs::NULL_ENTITY)
             {
                 sort_stack.push_back(child);
-                size_t child_index = pool.get_index(child);
-                child = transform_data[child_index].next_sibling;
-            }
-        }
-
-        pool.reorder(sort_res);
-
-        transform_t* new_data = pool.data();
-
-        for (size_t i = 0; i < count; i++)
-        {
-            ecs::entity_t parent_id = new_data[i].parent;
-            if (parent_id == ecs::NULL_ENTITY) { new_data[i].parent_dense_index = -1; }
-            else
-            {
-                new_data[i].parent_dense_index = static_cast<i32_t>(pool.get_index(parent_id));
+                child = view.get<transform_t>(child).next_sibling;
             }
         }
 
@@ -198,13 +177,11 @@ namespace smol::transform_system
     {
         if (is_hierarchy_dirty) { rebuild_hierarchy(reg); }
 
-        ecs::sparse_set_t<transform_t>& pool = reg.get_storage<transform_t>();
-        const size_t count = pool.size();
-        transform_t* transform_data = pool.data();
+        auto view = reg.view<transform_t>();
 
-        for (size_t i = 0; i < count; i++)
+        for (ecs::entity_t entity : sort_res)
         {
-            transform_t& transform = transform_data[i];
+            transform_t& transform = view.get<transform_t>(entity);
 
             bool is_local_dirty = transform.is_dirty;
             if (is_local_dirty)
@@ -217,22 +194,19 @@ namespace smol::transform_system
                 glm_mat4_mul(t, trs, transform.local_mat);
             }
 
-            bool is_parent_dirty = false;
-            if (transform.parent_dense_index >= 0)
+            if (transform.parent != ecs::NULL_ENTITY)
             {
-                is_parent_dirty = transform_data[transform.parent_dense_index].is_dirty;
+                transform_t& parent_transform = view.get<transform_t>(transform.parent);
 
-                if (is_local_dirty || is_parent_dirty)
+                if (is_local_dirty || parent_transform.is_dirty)
                 {
-                    mat4_t& world_mat = transform_data[transform.parent_dense_index].world_mat;
-                    glm_mat4_mul(world_mat, (vec4*)transform.local_mat, transform.world_mat);
-
+                    glm_mat4_mul(parent_transform.world_mat, (vec4*)transform.local_mat, transform.world_mat);
                     transform.is_dirty = true;
                 }
             }
             else if (is_local_dirty) { glm_mat4_copy(transform.local_mat, transform.world_mat); }
         }
 
-        for (size_t i = 0; i < count; i++) { transform_data[i].is_dirty = false; }
+        for (ecs::entity_t entity : sort_res) { view.get<transform_t>(entity).is_dirty = false; }
     }
 } // namespace smol::transform_system

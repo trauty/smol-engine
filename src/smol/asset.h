@@ -3,12 +3,13 @@
 #include "smol/asset_registry.h"
 #include "smol/ecs.h"
 #include "smol/log.h"
+
 #include <atomic>
 #include <iostream>
 
 namespace smol
 {
-    template<typename T>
+    template <typename T>
     struct asset_t
     {
         using slot_ptr = typename asset_pool_t<T>::slot_t*;
@@ -87,10 +88,10 @@ namespace smol
         }
     };
 
-    template<typename T, typename... Args>
+    template <typename T, typename... Args>
     asset_t<T> load_asset(ecs::registry_t& reg, const std::string& path, Args&&... args)
     {
-        asset_registry_t* asset_reg = reg.ctx<asset_registry_t>();
+        asset_registry_t* asset_reg = reg.ctx().get<asset_registry_t*>();
 
         if (!asset_reg)
         {

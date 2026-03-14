@@ -20,7 +20,7 @@ namespace smol::physics
     {
         JPH::BodyInterface& body_interface = physics_world.system.GetBodyInterface();
 
-        for (auto [entity, rb, transform] : reg.view<rigidbody_t, transform_t>())
+        for (auto [entity, rb, transform] : reg.view<rigidbody_t, transform_t>().each())
         {
             if (rb.type == body_type_e::KINEMATIC)
             {
@@ -37,7 +37,7 @@ namespace smol::physics
     {
         JPH::BodyInterface& body_interface = physics_world.system.GetBodyInterface();
 
-        for (auto [entity, rb, transform] : reg.view<rigidbody_t, transform_t>())
+        for (auto [entity, rb, transform] : reg.view<rigidbody_t, transform_t>().each())
         {
             if (rb.type != body_type_e::KINEMATIC)
             {

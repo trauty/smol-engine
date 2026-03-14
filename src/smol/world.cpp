@@ -1,16 +1,28 @@
 #include "world.h"
+
 #include "smol/asset_registry.h"
+#include "smol/components/transform.h"
+#include "smol/ecs_fwd.h"
 #include "smol/physics/physics_sync.h"
 #include "smol/physics/physics_world.h"
+#include "smol/systems/transform.h"
 
 namespace smol
 {
+    void on_transform_changed(ecs::registry_t& reg, ecs::entity_t entity)
+    {
+        smol::transform_system::is_hierarchy_dirty = true;
+    }
+
     void world_t::init(asset_registry_t& engine_assets_reg)
     {
         this->assets_reg = &engine_assets_reg;
 
-        registry.set_context<asset_registry_t>(&engine_assets_reg);
-        registry.set_context<physics_world_t>(&physics);
+        registry.ctx().emplace<asset_registry_t*>(&engine_assets_reg);
+        registry.ctx().emplace<physics_world_t*>(&physics);
+
+        registry.on_construct<transform_t>().connect<&on_transform_changed>();
+        registry.on_destroy<transform_t>().connect<&on_transform_changed>();
 
         physics.init(registry);
 

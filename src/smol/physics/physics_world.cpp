@@ -1,4 +1,5 @@
 #include "physics_world.h"
+
 #include "Jolt/Core/Factory.h"
 #include "Jolt/Core/Memory.h"
 #include "Jolt/Core/Reference.h"
@@ -17,8 +18,10 @@
 #include "smol/components/physics.h"
 #include "smol/components/transform.h"
 #include "smol/ecs.h"
+#include "smol/ecs_fwd.h"
 #include "smol/physics/jolt_job_system_int.h"
 #include "smol/time.h"
+
 #include <vector>
 
 namespace smol
@@ -58,6 +61,19 @@ namespace smol
         }
     };
 
+    void on_rigidbody_destroyed(ecs::registry_t& reg, ecs::entity_t entity)
+    {
+        rigidbody_t& rb = reg.get<rigidbody_t>(entity);
+        if (rb.is_initiaklized && !rb.body_id.IsInvalid())
+        {
+            physics_world_t* physics = reg.ctx().get<physics_world_t*>();
+            JPH::BodyInterface& body_interface = physics->system.GetBodyInterface();
+            body_interface.RemoveBody(rb.body_id);
+            body_interface.DestroyBody(rb.body_id);
+            rb.is_initiaklized = false;
+        }
+    }
+
     void physics_world_t::init(ecs::registry_t& reg)
     {
         JPH::RegisterDefaultAllocator();
@@ -73,16 +89,7 @@ namespace smol
 
         system.Init(1024, 0, 1024, 1024, *bp_interface, *object_vs_bp_filter, *object_vs_object_filter);
 
-        reg.on_destroy<rigidbody_t>([this](ecs::registry_t& r, ecs::entity_t entity, rigidbody_t& rb) {
-            if (rb.is_initiaklized && rb.body_id.IsInvalid())
-            {
-                JPH::BodyInterface& body_interface = system.GetBodyInterface();
-                body_interface.RemoveBody(rb.body_id);
-                body_interface.DestroyBody(rb.body_id);
-
-                rb.is_initiaklized = false;
-            }
-        });
+        reg.on_destroy<rigidbody_t>().connect<&on_rigidbody_destroyed>();
     }
 
     void physics_world_t::update() { system.Update(time::fixed_dt, 1, temp_allocator, job_integration); }
@@ -102,21 +109,19 @@ namespace smol
     {
         JPH::BodyInterface& body_interface = system.GetBodyInterface();
 
-        for (auto [entity, rb, transform] : reg.view<rigidbody_t, transform_t>())
+        for (auto [entity, rb, transform] : reg.view<rigidbody_t, transform_t>().each())
         {
             if (rb.is_initiaklized) { continue; }
 
             JPH::RefConst<JPH::Shape> shape;
 
-            if (reg.has<box_collider_t>(entity))
+            if (box_collider_t* col = reg.try_get<box_collider_t>(entity))
             {
-                box_collider_t& col = reg.get<box_collider_t>(entity);
-                shape = new JPH::BoxShape(JPH::Vec3(col.extents.x, col.extents.y, col.extents.z));
+                shape = new JPH::BoxShape(JPH::Vec3(col->extents.x, col->extents.y, col->extents.z));
             }
-            else if (reg.has<sphere_collider_t>(entity))
+            else if (sphere_collider_t* col = reg.try_get<sphere_collider_t>(entity))
             {
-                sphere_collider_t& col = reg.get<sphere_collider_t>(entity);
-                shape = new JPH::SphereShape(col.radius);
+                shape = new JPH::SphereShape(col->radius);
             }
             else
             {
@@ -142,7 +147,7 @@ namespace smol
         std::vector<JPH::BodyID> batch;
         batch.reserve(1024);
 
-        for (auto [entity, rb] : reg.view<rigidbody_t>())
+        for (auto [entity, rb] : reg.view<rigidbody_t>().each())
         {
             if (rb.is_initiaklized && !rb.body_id.IsInvalid())
             {

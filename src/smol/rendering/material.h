@@ -5,10 +5,10 @@
 #include "smol/defines.h"
 #include "smol/log.h"
 #include "smol/rendering/renderer_types.h"
+#include "smol/rendering/samplers.h"
 
 #include <cstring>
 #include <unordered_map>
-#include <utility>
 #include <vector>
 #include <vulkan/vulkan_core.h>
 
@@ -19,9 +19,13 @@ namespace smol
         asset_t<shader_t> shader;
         std::vector<u8> data;
 
-        u32_t heap_offset = renderer::NULL_HANDLE;
+        u32_t heap_offset = renderer::BINDLESS_NULL_HANDLE;
 
         bool is_dirty = true;
+
+        material_t() = default;
+        material_t(material_t&&) noexcept = default;
+        material_t& operator=(material_t&&) noexcept = default;
 
         material_t(asset_t<shader_t> shader_asset) : shader(shader_asset)
         {
@@ -65,6 +69,11 @@ namespace smol
         void set_texture(const std::string& name, const asset_t<texture_t>& tex)
         {
             if (tex) { set_property<u32_t>(name, tex->bindless_id); }
+        }
+
+        void set_sampler(const std::string& name, sampler_type_e sampler)
+        {
+            set_property<u32_t>(name, static_cast<u32_t>(sampler));
         }
     };
 } // namespace smol

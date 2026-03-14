@@ -10,11 +10,16 @@
 #include "smol/components/renderer.h"
 #include "smol/components/transform.h"
 #include "smol/defines.h"
+#include "smol/ecs.h"
+#include "smol/ecs_fwd.h"
 #include "smol/log.h"
 #include "smol/math.h"
 #include "smol/rendering/material.h"
 #include "smol/rendering/renderer_resources.h"
 #include "smol/rendering/renderer_types.h"
+#include "smol/rendering/samplers.h"
+#include "smol/systems/camera.h"
+#include "smol/time.h"
 #include "smol/util.h"
 #include "smol/window.h"
 
@@ -26,6 +31,8 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
+#include <functional>
+#include <immintrin.h>
 #include <limits>
 #include <mutex>
 #include <set>
@@ -257,9 +264,15 @@ namespace smol::renderer
             .timelineSemaphore = VK_TRUE,
         };
 
+        VkPhysicalDeviceVulkan11Features vk11_features = {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
+            .pNext = &timeline_sem_features,
+            .shaderDrawParameters = VK_TRUE,
+        };
+
         VkPhysicalDeviceVulkan13Features vk13_features = {
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
-            .pNext = &timeline_sem_features,
+            .pNext = &vk11_features,
             .synchronization2 = VK_TRUE,
             .dynamicRendering = VK_TRUE,
         };
@@ -301,7 +314,7 @@ namespace smol::renderer
         vkGetDeviceQueue(ctx.device, ctx.queue_fam_indices.present_family.value(), 0, &ctx.present_queue);
         vkGetDeviceQueue(ctx.device, ctx.queue_fam_indices.transfer_family.value(), 0, &ctx.transfer_queue);
 
-        // swapchain setup
+        init_resources();
 
         init_swapchain();
 
@@ -327,33 +340,33 @@ namespace smol::renderer
         VK_CHECK(vkCreateSemaphore(ctx.device, &timeline_sem_info, nullptr, &ctx.timeline_semaphore));
         ctx.timeline_value = 0;
 
-        init_resources();
+        VkSampler linear_repeat = create_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_REPEAT);
+        VkSampler linear_clamp = create_sampler(VK_FILTER_LINEAR, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
+        VkSampler nearest_repeat = create_sampler(VK_FILTER_NEAREST, VK_SAMPLER_ADDRESS_MODE_REPEAT);
+        VkSampler nearest_clamp = create_sampler(VK_FILTER_NEAREST, VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE);
 
-        // TEST SAMPLER -- VERY TEMPORARY
-        VkSamplerCreateInfo sampler_info = {.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO};
-        sampler_info.magFilter = VK_FILTER_LINEAR;
-        sampler_info.minFilter = VK_FILTER_LINEAR;
-        sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-        sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-        sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_REPEAT;
-        sampler_info.anisotropyEnable = VK_TRUE;
-        sampler_info.maxAnisotropy = ctx.properties.limits.maxSamplerAnisotropy;
-        sampler_info.borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK;
-        sampler_info.unnormalizedCoordinates = VK_FALSE;
-        sampler_info.compareEnable = VK_FALSE;
-        sampler_info.compareOp = VK_COMPARE_OP_ALWAYS;
-        sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR;
-        VK_CHECK(vkCreateSampler(ctx.device, &sampler_info, nullptr, &ctx.test_sampler));
+        ctx.samplers.push_back(linear_repeat);
+        ctx.samplers.push_back(linear_clamp);
+        ctx.samplers.push_back(nearest_repeat);
+        ctx.samplers.push_back(nearest_clamp);
 
-        VkDescriptorImageInfo sampler_desc_info = {.sampler = ctx.test_sampler};
-        VkWriteDescriptorSet sampler_write = {.sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET};
-        sampler_write.dstSet = res_system.global_set;
-        sampler_write.dstBinding = 0;
-        sampler_write.dstArrayElement = 0;
-        sampler_write.descriptorCount = 1;
-        sampler_write.descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER;
-        sampler_write.pImageInfo = &sampler_desc_info;
-        vkUpdateDescriptorSets(ctx.device, 1, &sampler_write, 0, nullptr);
+        VkDescriptorImageInfo sampler_infos[4] = {};
+        sampler_infos[(u32_t)sampler_type_e::LINEAR_REPEAT].sampler = linear_repeat;
+        sampler_infos[(u32_t)sampler_type_e::LINEAR_CLAMP].sampler = linear_clamp;
+        sampler_infos[(u32_t)sampler_type_e::NEAREST_REPEAT].sampler = nearest_repeat;
+        sampler_infos[(u32_t)sampler_type_e::NEAREST_CLAMP].sampler = nearest_clamp;
+
+        VkWriteDescriptorSet samplers_write_desc = {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = res_system.global_set,
+            .dstBinding = SAMPLERS_BINDING_POINT,
+            .dstArrayElement = 0,
+            .descriptorCount = 4,
+            .descriptorType = VK_DESCRIPTOR_TYPE_SAMPLER,
+            .pImageInfo = sampler_infos,
+        };
+
+        vkUpdateDescriptorSets(ctx.device, 1, &samplers_write_desc, 0, nullptr);
 
         SMOL_LOG_INFO("VULKAN", "Context initialized for GPU: {}", ctx.properties.deviceName);
         return true;
@@ -361,6 +374,11 @@ namespace smol::renderer
 
     void shutdown()
     {
+        if (!ctx.samplers.empty())
+        {
+            for (VkSampler sampler : ctx.samplers) { vkDestroySampler(ctx.device, sampler, nullptr); }
+        }
+
         res_system.process_deletions(UINT64_MAX);
 
         shutdown_resources();
@@ -471,6 +489,25 @@ namespace smol::renderer
             {.depthStencil = {1.0f, 0}},
         };
 
+        per_frame_t& frame_data = ctx.per_frame_objects[index];
+
+        ecs::entity_t active_cam = camera_system::get_active_camera(reg);
+        if (active_cam != ecs::NULL_ENTITY)
+        {
+            camera_t& cam = reg.get<camera_t>(active_cam);
+            transform_t& cam_transform = reg.get<transform_t>(active_cam);
+
+            std::memcpy(frame_data.mapped_global_data->view.data, &cam.view, sizeof(mat4_t));
+            std::memcpy(frame_data.mapped_global_data->projection.data, &cam.projection, sizeof(mat4_t));
+            std::memcpy(frame_data.mapped_global_data->view_proj.data, &cam.view_proj, sizeof(mat4_t));
+
+            frame_data.mapped_global_data->camera_pos.data.x = cam_transform.world_mat[3][0];
+            frame_data.mapped_global_data->camera_pos.data.y = cam_transform.world_mat[3][1];
+            frame_data.mapped_global_data->camera_pos.data.z = cam_transform.world_mat[3][2];
+        }
+
+        frame_data.mapped_global_data->time = time::time;
+
         transition_image(cmd, ctx.swapchain.images[index], VK_IMAGE_LAYOUT_UNDEFINED,
                          VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
 
@@ -523,6 +560,85 @@ namespace smol::renderer
 
         VkRect2D scissor = {.extent = ctx.swapchain.extent};
         vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+        reg.sort<mesh_renderer_t>(
+            [](const mesh_renderer_t& lhs, const mesh_renderer_t& rhs)
+            {
+                if (!lhs.material.shader || !rhs.material.shader) { return lhs.material.shader > rhs.material.shader; }
+                return lhs.material.shader->pipeline < rhs.material.shader->pipeline;
+            });
+
+        std::vector<render_batch_t> batches;
+        u32_t cur_object_id = 0;
+        u32_t cur_material_offset = 0;
+        u8* gpu_material_ptr = frame_data.mapped_material_data;
+
+        auto view = reg.view<transform_t, mesh_renderer_t>();
+
+        for (auto [entity, transform, renderer] : view.each())
+        {
+            if (!renderer.active || !renderer.mesh || !renderer.material.shader) { continue; }
+
+            if (!renderer.material.data.empty())
+            {
+                renderer.material.heap_offset = cur_material_offset;
+
+                std::memcpy(gpu_material_ptr + cur_material_offset, renderer.material.data.data(),
+                            renderer.material.data.size());
+
+                cur_material_offset += renderer.material.data.size();
+            }
+
+            object_data_t& obj_data = frame_data.mapped_object_data[cur_object_id];
+            std::memcpy(obj_data.model_matrix.data, &transform.world_mat, sizeof(mat4_t));
+            obj_data.material_offset = renderer.material.heap_offset;
+            obj_data.vertex_buffer_id = renderer.mesh->vertex_bindless_id;
+            obj_data.index_buffer_id = renderer.mesh->index_bindless_id;
+
+            VkDrawIndirectCommand& draw_cmd = frame_data.mapped_indirect_data[cur_object_id];
+            draw_cmd.vertexCount =
+                renderer.mesh->uses_indices ? renderer.mesh->index_count : renderer.mesh->vertex_count;
+            draw_cmd.instanceCount = 1;
+            draw_cmd.firstVertex = 0;
+            draw_cmd.firstInstance = 0;
+
+            VkPipeline cur_pipeline = renderer.material.shader->pipeline;
+            VkPipelineLayout cur_layout = renderer.material.shader->pipeline_layout;
+
+            if (batches.empty() || batches.back().pipeline != cur_pipeline)
+            {
+                batches.push_back({cur_pipeline, cur_layout, cur_object_id, 1});
+            }
+            else
+            {
+                batches.back().count++;
+            }
+
+            cur_object_id++;
+        }
+
+        struct
+        {
+            u32_t global_buffer_id;
+            u32_t object_buffer_id;
+            u32_t material_buffer_id;
+        } pc_data = {
+            frame_data.global_bindless_id,
+            frame_data.object_bindless_id,
+            frame_data.material_bindless_id,
+        };
+
+        for (const render_batch_t& batch : batches)
+        {
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, batch.pipeline);
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, batch.layout, 0, 1, &res_system.global_set, 0,
+                                    nullptr);
+            vkCmdPushConstants(cmd, batch.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                               sizeof(pc_data), &pc_data);
+
+            vkCmdDrawIndirect(cmd, frame_data.indirect_buffer, batch.start_idx * sizeof(VkDrawIndirectCommand),
+                              batch.count, sizeof(VkDrawIndirectCommand));
+        }
 
         vkCmdEndRendering(cmd);
 
@@ -940,6 +1056,63 @@ namespace smol::renderer
         cmd_buf_info.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
         cmd_buf_info.commandBufferCount = 1;
         VK_CHECK(vkAllocateCommandBuffers(ctx.device, &cmd_buf_info, &frame_data.main_command_buffer));
+
+        auto create_mapped_buffer =
+            [](VkDeviceSize size, VkBufferUsageFlags usage, VkBuffer& buffer, VmaAllocation& alloc, void*& mapped_mem)
+        {
+            VkBufferCreateInfo buf_info = {
+                .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                .size = size,
+                .usage = usage,
+            };
+            VmaAllocationCreateInfo alloc_info = {
+                .flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
+                .usage = VMA_MEMORY_USAGE_AUTO,
+            };
+
+            VmaAllocationInfo vma_alloc_info;
+            VK_CHECK(vmaCreateBuffer(ctx.allocator, &buf_info, &alloc_info, &buffer, &alloc, &vma_alloc_info));
+            mapped_mem = vma_alloc_info.pMappedData;
+        };
+
+        auto make_bindless = [](VkBuffer buffer, u32_t& bindless_id)
+        {
+            bindless_id = res_system.buffer_heap.acquire();
+            VkDescriptorBufferInfo desc_info = {
+                .buffer = buffer,
+                .offset = 0,
+                .range = VK_WHOLE_SIZE,
+            };
+            VkWriteDescriptorSet write_desc = {
+                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+                .dstSet = res_system.global_set,
+                .dstBinding = STORAGE_BUFFERS_BINDING_POINT,
+                .dstArrayElement = bindless_id,
+                .descriptorCount = 1,
+                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+                .pBufferInfo = &desc_info,
+            };
+
+            vkUpdateDescriptorSets(ctx.device, 1, &write_desc, 0, nullptr);
+        };
+
+        create_mapped_buffer(sizeof(global_data_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, frame_data.global_buffer,
+                             frame_data.global_allocation, (void*&)frame_data.mapped_global_data);
+        make_bindless(frame_data.global_buffer, frame_data.global_bindless_id);
+
+        create_mapped_buffer(sizeof(object_data_t) * ecs::MAX_ENTITIES, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                             frame_data.object_buffer, frame_data.object_allocation,
+                             (void*&)frame_data.mapped_object_data);
+        make_bindless(frame_data.object_buffer, frame_data.object_bindless_id);
+
+        create_mapped_buffer(sizeof(VkDrawIndirectCommand) * ecs::MAX_ENTITIES,
+                             VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                             frame_data.indirect_buffer, frame_data.indirect_allocation,
+                             (void*&)frame_data.mapped_indirect_data);
+
+        create_mapped_buffer(MAX_MATERIAL_BUFFER_SIZE, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, frame_data.material_buffer,
+                             frame_data.material_allocation, (void*&)frame_data.mapped_material_data);
+        make_bindless(frame_data.material_buffer, frame_data.material_bindless_id);
     }
 
     void shutdown_per_frame(per_frame_t& frame_data)
@@ -972,6 +1145,23 @@ namespace smol::renderer
         {
             vkDestroySemaphore(ctx.device, frame_data.swapchain_release_semaphore, nullptr);
             frame_data.swapchain_release_semaphore = VK_NULL_HANDLE;
+        }
+
+        if (frame_data.global_buffer != VK_NULL_HANDLE)
+        {
+            vmaDestroyBuffer(ctx.allocator, frame_data.global_buffer, frame_data.global_allocation);
+            res_system.buffer_heap.release(frame_data.global_bindless_id);
+        }
+
+        if (frame_data.object_buffer != VK_NULL_HANDLE)
+        {
+            vmaDestroyBuffer(ctx.allocator, frame_data.object_buffer, frame_data.object_allocation);
+            res_system.buffer_heap.release(frame_data.object_bindless_id);
+        }
+
+        if (frame_data.indirect_buffer != VK_NULL_HANDLE)
+        {
+            vmaDestroyBuffer(ctx.allocator, frame_data.indirect_buffer, frame_data.indirect_allocation);
         }
     }
 
@@ -1075,11 +1265,39 @@ namespace smol::renderer
             res_system.deletion_queue.push_back({
                 .type = resource_type_e::COMMAND_BUFFER,
                 .handle = {.cmd_buffer = {cmd, ctx.transfer_command_pool}},
-                .bindless_id = NULL_HANDLE,
+                .bindless_id = BINDLESS_NULL_HANDLE,
                 .gpu_timeline_value = signal_value,
             });
         }
 
         return signal_value;
+    }
+
+    VkSampler create_sampler(VkFilter filter, VkSamplerAddressMode address_mode)
+    {
+        VkSamplerCreateInfo sampler_info = {
+            .sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO,
+            .flags = 0,
+            .magFilter = filter,
+            .minFilter = filter,
+            .mipmapMode = VK_SAMPLER_MIPMAP_MODE_LINEAR,
+            .addressModeU = address_mode,
+            .addressModeV = address_mode,
+            .addressModeW = address_mode,
+            .mipLodBias = 0.0f,
+            .anisotropyEnable = VK_TRUE,
+            .maxAnisotropy = ctx.properties.limits.maxSamplerAnisotropy,
+            .compareEnable = VK_FALSE,
+            .compareOp = VK_COMPARE_OP_ALWAYS,
+            .minLod = 0.0f,
+            .maxLod = VK_LOD_CLAMP_NONE,
+            .borderColor = VK_BORDER_COLOR_INT_OPAQUE_BLACK,
+            .unnormalizedCoordinates = VK_FALSE,
+        };
+
+        VkSampler sampler = VK_NULL_HANDLE;
+        VK_CHECK(vkCreateSampler(ctx.device, &sampler_info, nullptr, &sampler));
+
+        return sampler;
     }
 } // namespace smol::renderer

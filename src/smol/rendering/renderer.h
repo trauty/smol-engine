@@ -1,16 +1,22 @@
 #pragma once
 
 #include "smol/defines.h"
-#include "smol/ecs.h"
 #include "smol/rendering/renderer_types.h"
 #include "smol/window.h"
 
-#include <mutex>
 #include <vulkan/vulkan.h>
 #include <vulkan/vulkan_core.h>
 
 namespace smol::renderer
 {
+    struct render_batch_t
+    {
+        VkPipeline pipeline;
+        VkPipelineLayout layout;
+        u32_t start_idx;
+        u32_t count;
+    };
+
     bool init(const context_config_t& config, SDL_Window* window);
     void shutdown();
 
@@ -41,4 +47,6 @@ namespace smol::renderer
 
     VkCommandBuffer begin_transfer_commands();
     u64_t submit_transfer_commands(VkCommandBuffer cmd);
+
+    VkSampler create_sampler(VkFilter filter, VkSamplerAddressMode address_mode);
 } // namespace smol::renderer

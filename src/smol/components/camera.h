@@ -1,20 +1,16 @@
 #pragma once
 
 #include "smol/defines.h"
-#include "smol/ecs_types.h"
 #include "smol/math.h"
 
 namespace smol
 {
     struct active_camera_tag
     {
-        SMOL_COMPONENT(active_camera_tag)
     };
 
     struct camera_t
     {
-        SMOL_COMPONENT(camera_t)
-
         f32 fov_deg = 45.0f;
         f32 near_plane = 0.1f;
         f32 far_plane = 1000.0f;

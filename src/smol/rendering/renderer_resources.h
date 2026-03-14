@@ -101,7 +101,7 @@ namespace smol::renderer
         VmaAllocation allocation = VK_NULL_HANDLE;
         void* mapped_mem = nullptr;
 
-        u32_t bindless_id = NULL_HANDLE;
+        u32_t bindless_id = BINDLESS_NULL_HANDLE;
 
         void init(u32_t max_size);
         void shutdown();

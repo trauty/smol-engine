@@ -1,15 +1,14 @@
 #pragma once
 
 #include "smol/defines.h"
-#include "smol/ecs_types.h"
+#include "smol/ecs.h"
+#include "smol/ecs_fwd.h"
 #include "smol/math.h"
 
 namespace smol
 {
     struct transform_t
     {
-        SMOL_COMPONENT(transform_t);
-
         vec3_t local_position;
         quat_t local_rotation;
         vec3_t local_scale = {1.0f, 1.0f, 1.0f};

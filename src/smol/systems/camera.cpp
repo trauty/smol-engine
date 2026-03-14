@@ -1,4 +1,5 @@
 #include "camera.h"
+
 #include "cglm/cam.h"
 #include "cglm/clipspace/persp_lh_zo.h"
 #include "cglm/clipspace/view_lh.h"
@@ -10,50 +11,46 @@
 #include "smol/log.h"
 #include "smol/math.h"
 #include "smol/window.h"
+
 #include <tuple>
 
 namespace smol::camera_system
 {
     void set_fov(ecs::registry_t& reg, ecs::entity_t entity, f32 fov_deg)
     {
-        if (reg.has<camera_t>(entity))
+        if (camera_t* cam = reg.try_get<camera_t>(entity))
         {
-            camera_t& cam = reg.get<camera_t>(entity);
-            cam.fov_deg = fov_deg;
-            cam.is_dirty = true;
+            cam->fov_deg = fov_deg;
+            cam->is_dirty = true;
         }
     }
 
     ecs::entity_t get_active_camera(ecs::registry_t& reg)
     {
         auto view = reg.view<active_camera_tag>();
-        if (view.begin() == view.end()) { return ecs::NULL_ENTITY; }
-
-        auto [entity, tag] = *view.begin();
-        return entity;
+        return view.empty() ? ecs::NULL_ENTITY : view.front();
     }
 
     void update(ecs::registry_t& reg)
     {
-        for (auto [entity, event] : reg.view<window::window_size_changed_event>())
+        for (auto [entity, event] : reg.view<window::window_size_changed_event>().each())
         {
             f32 new_aspect = static_cast<f32>(event.width) / static_cast<f32>(event.height);
 
-            for (auto [entity, cam] : reg.view<camera_t>())
+            for (auto [entity, cam] : reg.view<camera_t>().each())
             {
                 cam.aspect = new_aspect;
                 cam.is_dirty = true;
             }
         }
 
-        for (auto [entity, cam, transform] : reg.view<camera_t, transform_t>())
+        for (auto [entity, cam, transform] : reg.view<camera_t, transform_t>().each())
         {
             if (cam.is_dirty)
             {
                 glm_perspective_lh_zo(glm_rad(cam.fov_deg), cam.aspect, cam.near_plane, cam.far_plane, cam.projection);
 
-                // cam.projection[1][1] *= -1.0f;
-
+                cam.projection[1][1] *= -1.0f;
                 cam.is_dirty = false;
             }
 

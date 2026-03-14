@@ -2,7 +2,6 @@
 
 #include "smol/asset_types.h"
 #include "smol/defines.h"
-#include "smol/ecs_types.h"
 #include "smol/jobs.h"
 #include "smol/log.h"
 
@@ -23,7 +22,8 @@
 
 namespace smol
 {
-    template <typename T> struct asset_loader_t
+    template <typename T>
+    struct asset_loader_t
     {
         // static std::optional<T> load(const std::string& path, Args...);
         // static void unload(T& asset);
@@ -39,7 +39,8 @@ namespace smol
         virtual ~asset_pool_base_t() = default;
     };
 
-    template <typename T> struct asset_pool_t : public asset_pool_base_t
+    template <typename T>
+    struct asset_pool_t : public asset_pool_base_t
     {
         struct slot_t
         {
@@ -58,8 +59,6 @@ namespace smol
     class asset_registry_t
     {
       public:
-        SMOL_COMPONENT(asset_registry_t)
-
         asset_registry_t() = default;
         ~asset_registry_t() { shutdown(); }
 
@@ -133,7 +132,8 @@ namespace smol
             return slot;
         }
 
-        template <typename T> void release(typename asset_pool_t<T>::slot_t* slot)
+        template <typename T>
+        void release(typename asset_pool_t<T>::slot_t* slot)
         {
             if (!slot) { return; }
 
@@ -171,13 +171,15 @@ namespace smol
         std::mutex lookup_mutex;
 
         static inline std::atomic<size_t> type_counter{0};
-        template <typename T> static size_t get_asset_type_id()
+        template <typename T>
+        static size_t get_asset_type_id()
         {
             static size_t id = type_counter++;
             return id;
         }
 
-        template <typename T> asset_pool_t<T>& get_pool()
+        template <typename T>
+        asset_pool_t<T>& get_pool()
         {
             size_t id = get_asset_type_id<T>();
 

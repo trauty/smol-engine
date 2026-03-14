@@ -111,7 +111,7 @@ namespace smol
 
                 SMOL_LOG_INFO("SHADER", "Type name: {}", var_name);
 
-                if (var_name != "smol" && !var_name.empty())
+                if (var_name != "pc" && !var_name.empty())
                 {
                     slang::TypeReflection::Kind kind = type->getKind();
 
@@ -305,7 +305,7 @@ namespace smol
 
         std::vector<VkDynamicState> dynamic_states = {
             VK_DYNAMIC_STATE_VIEWPORT,
-            VK_DYNAMIC_STATE_VIEWPORT,
+            VK_DYNAMIC_STATE_SCISSOR,
         };
         VkPipelineDynamicStateCreateInfo dynamic_state_info = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO,
@@ -314,9 +314,9 @@ namespace smol
         };
 
         VkPushConstantRange push_constant = {
-            .stageFlags = VK_SHADER_STAGE_VERTEX_BIT,
+            .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
             .offset = 0,
-            .size = sizeof(u32_t),
+            .size = sizeof(u32_t) * 3,
         };
 
         VkDescriptorSetLayout set_layouts[] = {renderer::res_system.global_layout};
@@ -387,7 +387,7 @@ namespace smol
         renderer::res_system.deletion_queue.push_back({
             .type = renderer::resource_type_e::PIPELINE,
             .handle = {.pipeline = {shader.pipeline, shader.pipeline_layout}},
-            .bindless_id = renderer::NULL_HANDLE,
+            .bindless_id = renderer::BINDLESS_NULL_HANDLE,
             .gpu_timeline_value = renderer::res_system.timeline_value,
         });
 

@@ -30,7 +30,7 @@ namespace smol::renderer
             return idx;
         }
 
-        return (next_unused < capacity) ? next_unused++ : NULL_HANDLE;
+        return (next_unused < capacity) ? next_unused++ : BINDLESS_NULL_HANDLE;
     }
 
     void descriptor_heap_t::release(u32_t index) { free_indices.push_back(index); }
@@ -93,7 +93,7 @@ namespace smol::renderer
         if (allocated_size + aligned_size > capacity)
         {
             SMOL_LOG_FATAL("MATERIAL", "Material heap out of memory");
-            return NULL_HANDLE;
+            return BINDLESS_NULL_HANDLE;
         }
 
         u32_t offset = allocated_size;
@@ -103,7 +103,10 @@ namespace smol::renderer
 
     void material_heap_t::update(u32_t offset, const void* data, u32_t size)
     {
-        if (offset != NULL_HANDLE && mapped_mem) { std::memcpy(static_cast<u8*>(mapped_mem) + offset, data, size); }
+        if (offset != BINDLESS_NULL_HANDLE && mapped_mem)
+        {
+            std::memcpy(static_cast<u8*>(mapped_mem) + offset, data, size);
+        }
     }
 
     void init_resources()
@@ -219,7 +222,7 @@ namespace smol::renderer
             case smol::renderer::resource_type_e::BUFFER:
             {
                 vmaDestroyBuffer(ctx.allocator, del.handle.buffer.buffer, del.handle.buffer.allocation);
-                if (del.bindless_id != NULL_HANDLE) { buffer_heap.release(del.bindless_id); }
+                if (del.bindless_id != BINDLESS_NULL_HANDLE) { buffer_heap.release(del.bindless_id); }
                 break;
             }
 
@@ -229,7 +232,7 @@ namespace smol::renderer
 
                 vmaDestroyImage(ctx.allocator, del.handle.texture.image, del.handle.texture.allocation);
 
-                if (del.bindless_id != NULL_HANDLE) { storage_image_heap.release(del.bindless_id); }
+                if (del.bindless_id != BINDLESS_NULL_HANDLE) { storage_image_heap.release(del.bindless_id); }
                 break;
             }
 

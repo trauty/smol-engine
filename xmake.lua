@@ -21,7 +21,7 @@ option_end()
 add_requires("vulkansdk")
 
 target("smol-engine")
-    set_kind("shared")
+    set_kind("static")
     set_languages("cxx20")
     
     add_cxflags("-march=x86-64-v3")
@@ -49,6 +49,7 @@ target("smol-engine")
         git_clone("cglm",  "https://github.com/recp/cglm.git",          "v0.9.6")
         git_clone("fmt",   "https://github.com/fmtlib/fmt.git",         "12.1.0")
         git_clone("tracy", "https://github.com/wolfpld/tracy.git",      "v0.13.1")
+        git_clone("entt", "https://github.com/skypjack/entt.git",      "v3.16.0")
     end)
 
     local root = os.scriptdir()
@@ -85,6 +86,7 @@ target("smol-engine")
     add_includedirs(path.join(root, pkg_rel, "jolt"), {public = true})
     add_includedirs(path.join(root, pkg_rel, "cglm/include"), {public = true})
     add_includedirs(path.join(root, pkg_rel, "fmt/include"), {public = true})
+    add_includedirs(path.join(root, pkg_rel, "entt/src"), {public = true})
 
     add_packages("vulkansdk", {public = true})
 

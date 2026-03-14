@@ -260,7 +260,7 @@ namespace smol
             renderer::res_system.deletion_queue.push_back({
                 .type = renderer::resource_type_e::BUFFER,
                 .handle = {.buffer = {staging_buf, staging_alloc}},
-                .bindless_id = renderer::NULL_HANDLE,
+                .bindless_id = renderer::BINDLESS_NULL_HANDLE,
                 .gpu_timeline_value = signal_value,
             });
         }

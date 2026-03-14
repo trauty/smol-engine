@@ -22,8 +22,6 @@ namespace smol
 
     struct physics_world_t
     {
-        SMOL_COMPONENT(physics_world_t)
-
         JPH::PhysicsSystem system;
         JPH::TempAllocatorImpl* temp_allocator = nullptr;
 
