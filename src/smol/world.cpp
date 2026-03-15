@@ -1,6 +1,5 @@
 #include "world.h"
 
-#include "smol/asset_registry.h"
 #include "smol/components/transform.h"
 #include "smol/ecs_fwd.h"
 #include "smol/physics/physics_sync.h"
@@ -14,11 +13,8 @@ namespace smol
         smol::transform_system::is_hierarchy_dirty = true;
     }
 
-    void world_t::init(asset_registry_t& engine_assets_reg)
+    void world_t::init()
     {
-        this->assets_reg = &engine_assets_reg;
-
-        registry.ctx().emplace<asset_registry_t*>(&engine_assets_reg);
         registry.ctx().emplace<physics_world_t*>(&physics);
 
         registry.on_construct<transform_t>().connect<&on_transform_changed>();

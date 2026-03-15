@@ -4,6 +4,7 @@
 #include "SDL_vulkan.h"
 #include "cglm/euler.h"
 #include "cglm/quat.h"
+#include "smol/assets/material.h"
 #include "smol/assets/mesh.h"
 #include "smol/assets/shader.h"
 #include "smol/components/camera.h"
@@ -14,7 +15,6 @@
 #include "smol/ecs_fwd.h"
 #include "smol/log.h"
 #include "smol/math.h"
-#include "smol/rendering/material.h"
 #include "smol/rendering/renderer_resources.h"
 #include "smol/rendering/renderer_types.h"
 #include "smol/rendering/samplers.h"
@@ -564,8 +564,17 @@ namespace smol::renderer
         reg.sort<mesh_renderer_t>(
             [](const mesh_renderer_t& lhs, const mesh_renderer_t& rhs)
             {
-                if (!lhs.material.shader || !rhs.material.shader) { return lhs.material.shader > rhs.material.shader; }
-                return lhs.material.shader->pipeline < rhs.material.shader->pipeline;
+                if (!lhs.material->shader || !rhs.material->shader)
+                {
+                    return lhs.material->shader > rhs.material->shader;
+                }
+
+                if (lhs.material->shader->pipeline != rhs.material->shader->pipeline)
+                {
+                    return lhs.material->shader->pipeline < rhs.material->shader->pipeline;
+                }
+
+                return lhs.material.get() < rhs.material.get();
             });
 
         std::vector<render_batch_t> batches;
@@ -573,25 +582,33 @@ namespace smol::renderer
         u32_t cur_material_offset = 0;
         u8* gpu_material_ptr = frame_data.mapped_material_data;
 
+        material_t* last_processed_mat = nullptr;
+
         auto view = reg.view<transform_t, mesh_renderer_t>();
 
         for (auto [entity, transform, renderer] : view.each())
         {
-            if (!renderer.active || !renderer.mesh || !renderer.material.shader) { continue; }
+            if (!renderer.active || !renderer.mesh || !renderer.material->shader) { continue; }
 
-            if (!renderer.material.data.empty())
+            material_t* cur_mat = renderer.material.get();
+
+            if (cur_mat != last_processed_mat)
             {
-                renderer.material.heap_offset = cur_material_offset;
+                if (!cur_mat->data.empty())
+                {
+                    cur_mat->heap_offset = cur_material_offset;
 
-                std::memcpy(gpu_material_ptr + cur_material_offset, renderer.material.data.data(),
-                            renderer.material.data.size());
+                    std::memcpy(gpu_material_ptr + cur_material_offset, cur_mat->data.data(), cur_mat->data.size());
 
-                cur_material_offset += renderer.material.data.size();
+                    cur_material_offset += cur_mat->data.size();
+                }
+
+                last_processed_mat = cur_mat;
             }
 
             object_data_t& obj_data = frame_data.mapped_object_data[cur_object_id];
             std::memcpy(obj_data.model_matrix.data, &transform.world_mat, sizeof(mat4_t));
-            obj_data.material_offset = renderer.material.heap_offset;
+            obj_data.material_offset = cur_mat->heap_offset;
             obj_data.vertex_buffer_id = renderer.mesh->vertex_bindless_id;
             obj_data.index_buffer_id = renderer.mesh->index_bindless_id;
 
@@ -602,8 +619,8 @@ namespace smol::renderer
             draw_cmd.firstVertex = 0;
             draw_cmd.firstInstance = 0;
 
-            VkPipeline cur_pipeline = renderer.material.shader->pipeline;
-            VkPipelineLayout cur_layout = renderer.material.shader->pipeline_layout;
+            VkPipeline cur_pipeline = renderer.material->shader->pipeline;
+            VkPipelineLayout cur_layout = renderer.material->shader->pipeline_layout;
 
             if (batches.empty() || batches.back().pipeline != cur_pipeline)
             {
@@ -1162,6 +1179,11 @@ namespace smol::renderer
         if (frame_data.indirect_buffer != VK_NULL_HANDLE)
         {
             vmaDestroyBuffer(ctx.allocator, frame_data.indirect_buffer, frame_data.indirect_allocation);
+        }
+
+        if (frame_data.material_buffer != VK_NULL_HANDLE)
+        {
+            vmaDestroyBuffer(ctx.allocator, frame_data.material_buffer, frame_data.material_allocation);
         }
     }
 

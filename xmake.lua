@@ -21,7 +21,7 @@ option_end()
 add_requires("vulkansdk")
 
 target("smol-engine")
-    set_kind("static")
+    set_kind("binary")
     set_languages("cxx20")
     
     add_cxflags("-march=x86-64-v3")
@@ -106,8 +106,9 @@ target("smol-engine")
         add_linkdirs(path.join(lib_dir, "slang/linux"))
         add_links("SDL3", "slang")
 
-        add_shflags("-Xlinker -soname -Xlinker libsmol-engine.so", {force = true})
+        -- add_shflags("-Xlinker -soname -Xlinker libsmol-engine.so", {force = true})
         add_syslinks("dl", "pthread")
+        add_ldflags("-rdynamic", {force = true})
     end
 
     after_build(function (target)

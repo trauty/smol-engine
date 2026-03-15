@@ -2,10 +2,12 @@
 
 #include "smol/asset_registry.h"
 #include "smol/ecs.h"
+#include "smol/engine.h"
 #include "smol/log.h"
 
 #include <atomic>
 #include <iostream>
+#include <thread>
 
 namespace smol
 {
@@ -86,21 +88,28 @@ namespace smol
             asset_state_e state = slot->state.load(std::memory_order_relaxed);
             return state == asset_state_e::LOADING || state == asset_state_e::QUEUED;
         }
+
+        void wait() const
+        {
+            while (is_loading()) { std::this_thread::yield(); }
+        }
     };
 
     template <typename T, typename... Args>
-    asset_t<T> load_asset(ecs::registry_t& reg, const std::string& path, Args&&... args)
+    asset_t<T> load_asset(const std::string& path, Args&&... args)
     {
-        asset_registry_t* asset_reg = reg.ctx().get<asset_registry_t*>();
+        asset_registry_t& asset_reg = engine::get_asset_registry();
+        typename asset_pool_t<T>::slot_t* slot = asset_reg.load_async<T>(path, std::forward<Args>(args)...);
 
-        if (!asset_reg)
-        {
-            SMOL_LOG_ERROR("ASSET", "No asset registry found in ECS context");
-            return asset_t<T>();
-        }
+        return asset_t<T>(&asset_reg, slot);
+    }
 
-        typename asset_pool_t<T>::slot_t* slot = asset_reg->load<T>(path, std::forward<Args>(args)...);
+    template <typename T, typename... Args>
+    asset_t<T> load_asset_sync(const std::string& path, Args&&... args)
+    {
+        asset_registry_t& asset_reg = engine::get_asset_registry();
+        typename asset_pool_t<T>::slot_t* slot = asset_reg.load_sync<T>(path, std::forward<Args>(args)...);
 
-        return asset_t<T>(asset_reg, slot);
+        return asset_t<T>(&asset_reg, slot);
     }
 } // namespace smol

@@ -5,7 +5,7 @@
 namespace smol::hash
 {
     // http://www.isthe.com/chongo/tech/comp/fnv/index.html
-    constexpr u32_t hashString(std::string_view str)
+    constexpr u32_t hash_string(std::string_view str)
     {
         u32_t hash = 2166136261u;
         for (char c : str)
@@ -16,7 +16,7 @@ namespace smol::hash
         return hash;
     }
 
-    constexpr u64_t hashString64(std::string_view str)
+    constexpr u64_t hash_string64(std::string_view str)
     {
         u64_t hash = 14695981039346656037ull;
         for (char c : str)

@@ -19,6 +19,8 @@ namespace smol
         asset_t<shader_t> shader;
         std::vector<u8> data;
 
+        std::vector<asset_t<texture_t>> bound_textures;
+
         u32_t heap_offset = renderer::BINDLESS_NULL_HANDLE;
 
         bool is_dirty = true;
@@ -68,12 +70,23 @@ namespace smol
 
         void set_texture(const std::string& name, const asset_t<texture_t>& tex)
         {
-            if (tex) { set_property<u32_t>(name, tex->bindless_id); }
+            if (tex)
+            {
+                set_property<u32_t>(name, tex->bindless_id);
+                bound_textures.push_back(tex);
+            }
         }
 
         void set_sampler(const std::string& name, sampler_type_e sampler)
         {
             set_property<u32_t>(name, static_cast<u32_t>(sampler));
         }
+    };
+
+    template <>
+    struct asset_loader_t<material_t>
+    {
+        static std::optional<material_t> load(const std::string& path, asset_t<shader_t> shader);
+        static void unload(material_t& mat);
     };
 } // namespace smol

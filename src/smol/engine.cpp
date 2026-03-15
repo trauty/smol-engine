@@ -1,21 +1,18 @@
 #include "engine.h"
 
-#include "asset.h"
-#include "defines.h"
-#include "log.h"
-#include "rendering/renderer.h"
 #include "smol/asset_registry.h"
-#include "smol/ecs.h"
+#include "smol/defines.h"
 #include "smol/jobs.h"
+#include "smol/log.h"
+#include "smol/rendering/renderer.h"
 #include "smol/rendering/renderer_types.h"
 #include "smol/rendering/shader_compiler.h"
 #include "smol/systems/camera.h"
 #include "smol/systems/events.h"
 #include "smol/systems/transform.h"
 #include "smol/time.h"
+#include "smol/window.h"
 #include "smol/world.h"
-#include "time.h"
-#include "window.h"
 
 #include <SDL3/SDL_events.h>
 #include <SDL3/SDL_hints.h>
@@ -54,7 +51,7 @@ namespace smol::engine
 
         smol::jobs::init();
 
-        SDL_SetHintWithPriority(SDL_HINT_SHUTDOWN_DBUS_ON_QUIT, "1", SDL_HintPriority::SDL_HINT_OVERRIDE);
+        // SDL_SetHintWithPriority(SDL_HINT_SHUTDOWN_DBUS_ON_QUIT, "1", SDL_HintPriority::SDL_HINT_OVERRIDE);
         SDL_Init(SDL_INIT_VIDEO);
 
         SDL_Window* window = SDL_CreateWindow(game_name.c_str(), init_window_width, init_window_height,
@@ -139,8 +136,11 @@ namespace smol::engine
 
         vkDeviceWaitIdle(renderer::ctx.device);
 
-        active_scene->shutdown();
-        active_scene.reset();
+        if (active_scene)
+        {
+            active_scene->shutdown();
+            active_scene.reset();
+        }
 
         engine_assets.shutdown();
 
@@ -161,7 +161,7 @@ namespace smol::engine
 
         active_scene = std::move(new_scene);
 
-        if (active_scene) { active_scene->init(engine_assets); }
+        if (active_scene) { active_scene->init(); }
         else
         {
             SMOL_LOG_ERROR("ENGINE", "Could not set scene");
@@ -169,4 +169,6 @@ namespace smol::engine
     }
 
     world_t& get_active_world() { return *active_scene; }
+
+    asset_registry_t& get_asset_registry() { return engine_assets; }
 } // namespace smol::engine

@@ -1,7 +1,7 @@
 #pragma once
 
 #include "defines.h"
-#include "smol/ecs.h"
+#include "smol/asset_fwd.h"
 #include "smol/world.h"
 
 #include <memory>
@@ -17,4 +17,5 @@ namespace smol::engine
 
     SMOL_API void set_scene(std::unique_ptr<smol::world_t> scene);
     SMOL_API world_t& get_active_world();
+    SMOL_API asset_registry_t& get_asset_registry();
 } // namespace smol::engine
