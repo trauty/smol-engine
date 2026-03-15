@@ -1,4 +1,5 @@
 #include "smol/defines.h"
+#include "smol/ecs_fwd.h"
 #include "smol/engine.h"
 #include "smol/game.h"
 #include "smol/log.h"
@@ -12,6 +13,8 @@
 #elif SMOL_PLATFORM_LINUX || SMOL_PLATFORM_ANDROID
     #include <dlfcn.h>
 #endif
+
+game_update_func game_update = nullptr;
 
 int main()
 {
@@ -36,13 +39,16 @@ int main()
     }
 
     game_init_func game_init = (game_init_func)smol::os::get_proc_address(game_lib, "smol_game_init");
-    game_update_func game_update = (game_update_func)smol::os::get_proc_address(game_lib, "smol_game_update");
+    game_update = (game_update_func)smol::os::get_proc_address(game_lib, "smol_game_update");
     game_shutdown_func game_shutdown = (game_shutdown_func)smol::os::get_proc_address(game_lib, "smol_game_shutdown");
 
     std::unique_ptr<smol::world_t> world = std::make_unique<smol::world_t>();
     smol::engine::set_scene(std::move(world));
 
     game_init(&smol::engine::get_active_world());
+
+    smol::engine::get_active_world().register_update_system([](smol::ecs::registry_t& reg)
+                                                            { game_update(&smol::engine::get_active_world()); });
 
     smol::engine::run();
 
