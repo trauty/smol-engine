@@ -1,9 +1,5 @@
 #include "renderer.h"
 
-#include "SDL_error.h"
-#include "SDL_vulkan.h"
-#include "cglm/euler.h"
-#include "cglm/quat.h"
 #include "smol/assets/material.h"
 #include "smol/assets/mesh.h"
 #include "smol/assets/shader.h"
@@ -11,19 +7,21 @@
 #include "smol/components/renderer.h"
 #include "smol/components/transform.h"
 #include "smol/defines.h"
-#include "smol/ecs.h"
 #include "smol/ecs_fwd.h"
 #include "smol/log.h"
 #include "smol/math.h"
 #include "smol/rendering/renderer_resources.h"
 #include "smol/rendering/renderer_types.h"
 #include "smol/rendering/samplers.h"
+#include "smol/rendering/vulkan.h"
 #include "smol/systems/camera.h"
 #include "smol/time.h"
-#include "smol/util.h"
 #include "smol/window.h"
 
+#include <SDL3/SDL_error.h>
 #include <SDL3/SDL_video.h>
+#include <SDL3/SDL_vulkan.h>
+#include <Tracy/tracy/Tracy.hpp>
 #include <algorithm>
 #include <cglm/mat4.h>
 #include <cglm/types.h>
@@ -31,15 +29,10 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <functional>
 #include <immintrin.h>
-#include <limits>
 #include <mutex>
 #include <set>
-#include <tracy/Tracy.hpp>
 #include <vector>
-#include <vulkan/vulkan.h>
-#include <vulkan/vulkan_core.h>
 
 namespace smol::renderer
 {
@@ -175,6 +168,8 @@ namespace smol::renderer
 
         VK_CHECK(vkCreateInstance(&instance_info, nullptr, &ctx.instance));
 
+        volkLoadInstance(ctx.instance);
+
         for (const char* extension : instance_exts) { ctx.active_instance_exts.push_back(extension); }
 
         if (enable_validation)
@@ -294,11 +289,9 @@ namespace smol::renderer
 
         VK_CHECK(vkCreateDevice(ctx.physical_device, &device_info, nullptr, &ctx.device));
 
-        for (const char* extension : device_exts) { ctx.active_device_exts.push_back(extension); }
+        volkLoadDevice(ctx.device);
 
-        VmaVulkanFunctions vulkan_funcs = {};
-        vulkan_funcs.vkGetInstanceProcAddr = &vkGetInstanceProcAddr;
-        vulkan_funcs.vkGetDeviceProcAddr = &vkGetDeviceProcAddr;
+        for (const char* extension : device_exts) { ctx.active_device_exts.push_back(extension); }
 
         VmaAllocatorCreateInfo allocator_info = {};
         // allocator_info.flags = VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT;
@@ -306,6 +299,10 @@ namespace smol::renderer
         allocator_info.physicalDevice = ctx.physical_device;
         allocator_info.device = ctx.device;
         allocator_info.instance = ctx.instance;
+
+        VmaVulkanFunctions vulkan_funcs = {};
+        vmaImportVulkanFunctionsFromVolk(&allocator_info, &vulkan_funcs);
+
         allocator_info.pVulkanFunctions = &vulkan_funcs;
 
         VK_CHECK(vmaCreateAllocator(&allocator_info, &ctx.allocator));

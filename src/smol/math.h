@@ -8,7 +8,7 @@
 
 namespace smol
 {
-    struct vec3_t
+    struct SMOL_API vec3_t
     {
         float x, y, z;
 
@@ -20,7 +20,7 @@ namespace smol
         operator const float*() const { return &x; }
     };
 
-    struct alignas(16) vec4_t
+    struct alignas(16) SMOL_API vec4_t
     {
         float x, y, z, w;
 
@@ -32,7 +32,7 @@ namespace smol
         operator const float*() const { return &x; }
     };
 
-    struct alignas(16) quat_t
+    struct alignas(16) SMOL_API quat_t
     {
         float x, y, z, w;
 
@@ -51,7 +51,7 @@ namespace smol
         operator const float*() const { return &x; }
     };
 
-    struct mat3_t
+    struct SMOL_API mat3_t
     {
         float m00, m01, m02;
         float m10, m11, m12;
@@ -75,7 +75,7 @@ namespace smol
         const float* operator[](int col) const { return &m00 + (col * 3); }
     };
 
-    struct alignas(32) mat4_t
+    struct alignas(32) SMOL_API mat4_t
     {
         float m00, m01, m02, m03;
         float m10, m11, m12, m13;

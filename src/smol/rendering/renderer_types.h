@@ -5,12 +5,11 @@
 #include "smol/defines.h"
 #include "smol/log.h"
 #include "smol/math.h"
-#include "vulkan/vulkan_core.h"
+#include "smol/rendering/vulkan.h"
 
 #include <mutex>
 #include <optional>
 #include <vector>
-#include <vma/vk_mem_alloc.h>
 
 #define VK_CHECK(x)                                                                                                    \
     do                                                                                                                 \

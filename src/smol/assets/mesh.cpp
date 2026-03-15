@@ -6,13 +6,13 @@
 #include "smol/rendering/renderer.h"
 #include "smol/rendering/renderer_resources.h"
 #include "smol/rendering/renderer_types.h"
+#include "smol/rendering/vulkan.h"
 
 #include <cstdint>
 #include <mutex>
 #include <optional>
 #include <tinygltf/tiny_gltf.h>
 #include <vector>
-#include <vulkan/vulkan_core.h>
 
 namespace smol
 {

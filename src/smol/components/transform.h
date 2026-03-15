@@ -7,7 +7,7 @@
 
 namespace smol
 {
-    struct transform_t
+    struct SMOL_API transform_t
     {
         vec3_t local_position;
         quat_t local_rotation;

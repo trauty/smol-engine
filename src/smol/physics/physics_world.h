@@ -20,7 +20,7 @@ namespace smol
         inline constexpr JPH::ObjectLayer NUM_LAYERS = 2;
     } // namespace physics::layers
 
-    struct physics_world_t
+    struct SMOL_API physics_world_t
     {
         JPH::PhysicsSystem system;
         JPH::TempAllocatorImpl* temp_allocator = nullptr;

@@ -8,14 +8,14 @@
 
 namespace smol
 {
-    enum class body_type_e : u8_t
+    enum class SMOL_API body_type_e : u8_t
     {
         STATIC,
         KINEMATIC,
         DYNAMIC
     };
 
-    struct rigidbody_t
+    struct SMOL_API rigidbody_t
     {
         JPH::BodyID body_id;
 
@@ -24,13 +24,13 @@ namespace smol
         bool is_initiaklized = false;
     };
 
-    struct box_collider_t
+    struct SMOL_API box_collider_t
     {
         vec3_t extents = {0.5f, 0.5f, 0.5f};
         vec3_t offset = {0.0f, 0.0f, 0.0f};
     };
 
-    struct sphere_collider_t
+    struct SMOL_API sphere_collider_t
     {
         f32 radius = 0.5f;
     };

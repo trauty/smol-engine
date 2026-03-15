@@ -2,6 +2,8 @@
 
 #include "smol/defines.h"
 
+#include <string_view>
+
 namespace smol::hash
 {
     // http://www.isthe.com/chongo/tech/comp/fnv/index.html

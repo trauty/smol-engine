@@ -3,7 +3,7 @@
 #include "smol/defines.h"
 namespace smol
 {
-    enum class sampler_type_e : u32_t
+    enum class SMOL_API sampler_type_e : u32_t
     {
         LINEAR_REPEAT = 0,
         LINEAR_CLAMP,

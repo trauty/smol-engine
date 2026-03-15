@@ -6,15 +6,15 @@
 #include "smol/log.h"
 #include "smol/rendering/renderer_types.h"
 #include "smol/rendering/samplers.h"
+#include "smol/rendering/vulkan.h"
 
 #include <cstring>
 #include <unordered_map>
 #include <vector>
-#include <vulkan/vulkan_core.h>
 
 namespace smol
 {
-    struct material_t
+    struct SMOL_API material_t
     {
         asset_t<shader_t> shader;
         std::vector<u8> data;

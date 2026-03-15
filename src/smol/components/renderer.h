@@ -6,7 +6,7 @@
 
 namespace smol
 {
-    struct mesh_renderer_t
+    struct SMOL_API mesh_renderer_t
     {
         asset_t<mesh_t> mesh;
         asset_t<material_t> material;

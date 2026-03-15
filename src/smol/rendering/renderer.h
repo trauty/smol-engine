@@ -2,10 +2,8 @@
 
 #include "smol/defines.h"
 #include "smol/rendering/renderer_types.h"
+#include "smol/rendering/vulkan.h"
 #include "smol/window.h"
-
-#include <vulkan/vulkan.h>
-#include <vulkan/vulkan_core.h>
 
 namespace smol::renderer
 {

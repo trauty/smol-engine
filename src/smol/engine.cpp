@@ -14,18 +14,18 @@
 #include "smol/window.h"
 #include "smol/world.h"
 
+// clang-format off
+#include "smol/rendering/vulkan.h"
 #include <SDL3/SDL_events.h>
 #include <SDL3/SDL_hints.h>
 #include <SDL3/SDL_init.h>
 #include <SDL3/SDL_video.h>
 #include <SDL3/SDL_vulkan.h>
+#include <Tracy/tracy/Tracy.hpp>
 #include <memory>
-#include <tracy/Tracy.hpp>
 #include <utility>
 #include <vector>
-#include <vulkan/vk_platform.h>
-#include <vulkan/vulkan.h>
-#include <vulkan/vulkan_core.h>
+// clang-format on
 
 #ifdef NDEBUG
 const bool enable_validation_layers = false;
@@ -53,6 +53,8 @@ namespace smol::engine
 
         // SDL_SetHintWithPriority(SDL_HINT_SHUTDOWN_DBUS_ON_QUIT, "1", SDL_HintPriority::SDL_HINT_OVERRIDE);
         SDL_Init(SDL_INIT_VIDEO);
+
+        if (volkInitialize() != VK_SUCCESS) {}
 
         SDL_Window* window = SDL_CreateWindow(game_name.c_str(), init_window_width, init_window_height,
                                               SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);

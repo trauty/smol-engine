@@ -4,7 +4,7 @@
 
 namespace smol
 {
-    struct color_t
+    struct SMOL_API color_t
     {
         union
         {

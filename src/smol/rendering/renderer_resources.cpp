@@ -5,7 +5,7 @@
 #include "smol/log.h"
 #include "smol/rendering/renderer.h"
 #include "smol/rendering/renderer_types.h"
-#include "vulkan/vulkan_core.h"
+#include "smol/rendering/vulkan.h"
 
 #include <cstring>
 #include <mutex>

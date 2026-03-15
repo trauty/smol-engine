@@ -1,13 +1,28 @@
-if os.scriptdir() == os.projectdir() then
+local is_standalone = (os.scriptdir() == os.projectdir())
+
+local game_name = get_config("game_name") or "smol-engine"
+local game_lib_name = get_config("game_lib_name") or "smol-game"
+
+if is_standalone then 
     set_project("smol-engine")
     set_version("0.0.1")
-    
     set_languages("cxx20")
-    if is_mode("debug") then
-        set_policy("build.sanitizer.address", true)
-    end 
+    set_policy("build.c++.rtti", false)
+    add_rules("mode.debug", "mode.release", "mode.releasedbg")
 
-    add_rules("mode.debug", "mode.release")
+    if is_plat("linux") then
+        set_toolchains("clang")
+        add_ldflags("-static-libstdc++", "-static-libgcc")
+        add_cxflags("-fno-rtti", {force = true})
+    elseif is_plat("windows") then 
+        set_toolchains("clang-cl")
+        set_runtimes("MT")
+        add_cxflags("/GR-", {force = true})
+    end
+
+    if is_mode("debug") then 
+        set_policy("build.sanitizer.address", true)
+    end
 end
 
 option("profiling")
@@ -17,111 +32,114 @@ option("profiling")
     add_defines("SMOL_ENABLE_PROFILING", "TRACY_ENABLE")
 option_end()
 
+package("slang")
+    set_homepage("https://github.com/shader-slang/slang")
+    set_description("Slang Shader Language Compiler")
 
-add_requires("vulkansdk")
+    add_links("slang-compiler")
+
+    local slang_version = "2026.4.2"
+
+    if is_plat("windows") then
+        set_urls("https://github.com/shader-slang/slang/releases/download/v$(version)/slang-$(version)-windows-x86_64.zip")
+        add_versions(slang_version, "99ac35f3f3843650a8e912f759ee0e0cd691d560b003022beef2620a35af55d4") 
+    elseif is_plat("linux") then
+        set_urls("https://github.com/shader-slang/slang/releases/download/v$(version)/slang-$(version)-linux-x86_64.tar.gz")
+        add_versions(slang_version, "c5346e743cd96a496e24d990a3f62146dccdcec48f4c3f042c097125c59b3ddd")
+    end
+
+    on_install(function (package)
+        os.cp("include/*", package:installdir("include"))
+        os.cp("bin/*", package:installdir("bin"))
+        os.cp("lib/*", package:installdir("lib"))
+    end)
+package_end()
+
+add_requires("volk", {system = false, configs = {shared = false}})
+add_requires("vulkan-headers")
+add_requires("libsdl3", {system = false, configs = {shared = false}})
+add_requires("joltphysics", {system = false, configs = {shared = false}})
+add_requires("cglm", {system = false, configs = {shared = false}})
+add_requires("fmt", {system = false, configs = {shared = false}})
+add_requires("entt")
+add_requires("slang " .. slang_version)
+
+if has_config("profiling") then 
+    add_requires("tracy", {configs = {shared = false}})
+end
+
+target("smol-interface")
+    set_kind("headeronly")
+    
+    add_includedirs("include", {public = true})
+    add_includedirs("src", {public = true})
+    
+    add_defines("CGLM_FORCE_LEFT_HANDED", {public = true})
+    
+    add_packages("volk", "libsdl3", "joltphysics", "cglm", "fmt", "entt", {public = true})
+target_end()
 
 target("smol-engine")
-    set_kind("binary")
-    set_languages("cxx20")
-    
+    set_kind("static")
     add_cxflags("-march=x86-64-v3")
 
-    if is_mode("release") then
+    if is_mode("release") then 
         set_optimize("fastest")
         set_strip("all")
         set_policy("build.optimization.lto", true)
     end
 
-    local pkg_root = path.join(os.scriptdir(), ".pkgcache")
-
-    on_load(function (target)
-        if not os.isdir(pkg_root) then os.mkdir(pkg_root) end
-
-        local function git_clone(name, url, tag)
-            local dir = path.join(pkg_root, name)
-            if not os.isdir(dir) then
-                print("Downloading " .. name .. "...")
-                os.execv("git", {"clone", "--depth", "1", "-b", tag, url, dir})
-            end
-        end
-
-        git_clone("jolt",  "https://github.com/jrouwe/JoltPhysics.git", "v5.5.0")
-        git_clone("cglm",  "https://github.com/recp/cglm.git",          "v0.9.6")
-        git_clone("fmt",   "https://github.com/fmtlib/fmt.git",         "12.1.0")
-        git_clone("tracy", "https://github.com/wolfpld/tracy.git",      "v0.13.1")
-        git_clone("entt", "https://github.com/skypjack/entt.git",      "v3.16.0")
-    end)
-
-    local root = os.scriptdir()
-    local pkg_rel = ".pkgcache"
-
     add_defines("SMOL_EXPORT", "CGLM_FORCE_LEFT_HANDED")
 
-    add_files(path.join(root, "src/smol/**.cpp"))
-    add_files(path.join(root, "lib/stb/*.cpp"), {warnings = "none"})
-    add_files(path.join(root, "lib/tinygltf/tiny_gltf.cpp"), {warnings = "none"})
-    add_files(path.join(root, "lib/vma/vk_mem_alloc.cpp"), {warnings = "none"})
+    add_deps("smol-interface")
 
-    add_files(path.join(root, pkg_rel, "jolt/Jolt/**.cpp"), {warnings = "none"})
-    add_files(path.join(root, pkg_rel, "fmt/src/format.cc"), {warnings = "none"})
-    add_files(path.join(root, pkg_rel, "fmt/src/os.cc"), {warnings = "none"})
+    add_packages("slang", {public = true})
 
-    add_defines("JPH_CROSS_PLATFORM_DETERMINISTIC")
-    add_defines("JPH_FLOATING_POINT_EXCEPTIONS_ENABLED")
-    
     if has_config("profiling") then 
-        add_defines("JPH_PROFILE_ENABLED")
-        add_files(path.join(root, pkg_rel, "tracy/public/common/*.cpp"), {warnings = "none"})
-        add_files(path.join(root, pkg_rel, "tracy/public/TracyClient.cpp"), {warnings = "none"})
-        if is_plat("windows") then 
-            add_syslinks("dbghelp", "ws2_32")
-        end
-    else 
-        add_defines("JPH_PROFILE_ENABLED=0")
-    end 
-
-    add_includedirs(path.join(root, "include"), {public = true})
-    add_includedirs(path.join(root, "src"), {public = true})
-    add_includedirs(path.join(root, pkg_rel, "tracy/public"), {public = true})
-    add_includedirs(path.join(root, pkg_rel, "jolt"), {public = true})
-    add_includedirs(path.join(root, pkg_rel, "cglm/include"), {public = true})
-    add_includedirs(path.join(root, pkg_rel, "fmt/include"), {public = true})
-    add_includedirs(path.join(root, pkg_rel, "entt/src"), {public = true})
-
-    add_packages("vulkansdk", {public = true})
-
-    local lib_dir = path.join(root, "lib")
-
-    add_includedirs(path.join(root, "include/SDL3"))
-    add_includedirs(path.join(root, "include/slang"))
-
-    if is_plat("windows") then
-        add_linkdirs(path.join(lib_dir, "SDL3/windows"))
-        add_linkdirs(path.join(lib_dir, "slang/windows"))
-        add_links("SDL3", "slang")
-        add_syslinks("imm32", "version", "setupapi", "winmm", "user32")
-
-    elseif is_plat("linux") then
-        add_linkdirs(path.join(lib_dir, "SDL3/linux"))
-        add_linkdirs(path.join(lib_dir, "slang/linux"))
-        add_links("SDL3", "slang")
-
-        -- add_shflags("-Xlinker -soname -Xlinker libsmol-engine.so", {force = true})
-        add_syslinks("dl", "pthread")
-        add_ldflags("-rdynamic", {force = true})
+        add_packages("tracy", {public = true})
     end
 
-    after_build(function (target)
-        local dest_dir = target:targetdir()
-        local engine_root = target:scriptdir()
+    add_files("src/smol/**.cpp")
+    add_files("lib/stb/*.cpp", {warnings = "none"})
+    add_files("lib/tinygltf/tiny_gltf.cpp", {warnings = "none"})
+    add_files("lib/vma/vk_mem_alloc.cpp", {warnings = "none"})
 
-        local lib_path = path.join(engine_root, "lib")
-        if is_plat("windows") then
-            os.trycp(path.join(lib_path, "slang/windows/*.dll"), dest_dir)
-            os.trycp(path.join(lib_path, "vulkan/windows/*.dll"), dest_dir)
-        elseif is_plat("linux") then
-            os.trycp(path.join(lib_path, "slang/linux/*.so"), dest_dir)
-            os.trycp(path.join(lib_path, "vulkan/linux/libvulkan.so.1"), dest_dir)
-        end
+    add_includedirs("include", {public = true})
+    add_includedirs("src", {public = true})
+
+    after_build(function (target) 
+        local dest_dir = target:targetdir()
+
+        local slang_dir = target:pkg("slang")
+        if slang_dir then
+            if is_plat("linux") then 
+                os.trycp(path.join(slang_dir:installdir(), "lib", "libslang-compiler.so.0.*"), dest_dir)
+            elseif is_plat("windows") then 
+                os.trycp(path.join(slang_dir:installdir(), "bin", "slang-compiler.dll"), dest_dir)
+            end
+        end 
     end)
+target_end()
+
+target("smol-bin")
+    set_kind("binary")
+    set_basename(game_name)
+    add_cxflags("-march=x86-64-v3")
+
+    add_defines(format('SMOL_GAME_NAME="%s"', game_name))
+    add_defines(format('SMOL_LIB_NAME="%s"', game_lib_name))
+
+    add_deps("smol-engine", {wholearchive = true})
+
+    add_files("src/smol-bin/**.cpp")
+
+    if is_plat("windows") then
+        if is_mode("release") then
+            add_ldflags("/subsystem:windows", "/entry:mainCRTStartup", {force = true})
+        end
+        set_policy("windows.export.all_symbols", true)
+    elseif is_plat("linux") then 
+        add_rpathdirs("@loader_path")
+        add_ldflags("-rdynamic", {force = true})
+    end
 target_end()

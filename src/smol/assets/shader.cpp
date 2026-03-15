@@ -5,6 +5,7 @@
 #include "smol/rendering/renderer_resources.h"
 #include "smol/rendering/renderer_types.h"
 #include "smol/rendering/shader_compiler.h"
+#include "smol/rendering/vulkan.h"
 
 #include <mutex>
 #include <optional>
@@ -13,7 +14,6 @@
 #include <stack>
 #include <string>
 #include <vector>
-#include <vulkan/vulkan_core.h>
 
 namespace smol
 {

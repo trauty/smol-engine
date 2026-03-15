@@ -23,7 +23,7 @@
 namespace smol
 {
     template <typename T>
-    struct asset_loader_t
+    struct SMOL_API asset_loader_t
     {
         // static std::optional<T> load(const std::string& path, Args...);
         // static void unload(T& asset);
@@ -34,13 +34,13 @@ namespace smol
         { asset_loader_t<T>::unload(asset) } -> std::same_as<void>;
     };
 
-    struct asset_pool_base_t
+    struct SMOL_API asset_pool_base_t
     {
         virtual ~asset_pool_base_t() = default;
     };
 
     template <typename T>
-    struct asset_pool_t : public asset_pool_base_t
+    struct SMOL_API asset_pool_t : public asset_pool_base_t
     {
         struct slot_t
         {
@@ -56,7 +56,7 @@ namespace smol
         std::mutex pool_mutex;
     };
 
-    class asset_registry_t
+    class SMOL_API asset_registry_t
     {
       public:
         asset_registry_t() = default;

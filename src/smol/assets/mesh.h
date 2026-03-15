@@ -2,23 +2,22 @@
 
 #include "smol/asset.h"
 #include "smol/defines.h"
+#include "smol/rendering/vulkan.h"
 
 #include <memory>
 #include <optional>
 #include <string>
-#include <vma/vk_mem_alloc.h>
-#include <vulkan/vulkan_core.h>
 
 namespace smol
 {
-    struct vertex_t
+    struct SMOL_API vertex_t
     {
         f32 position[3];
         f32 normal[3];
         f32 uv[2];
     };
 
-    struct mesh_t
+    struct SMOL_API mesh_t
     {
         i32 vertex_count = 0;
         i32 index_count = 0;
@@ -34,7 +33,8 @@ namespace smol
         u32_t index_bindless_id = 0xffffffff;
     };
 
-    template <> struct asset_loader_t<mesh_t>
+    template <>
+    struct asset_loader_t<mesh_t>
     {
         static std::optional<mesh_t> load(const std::string& path);
         static void unload(mesh_t& mesh);
