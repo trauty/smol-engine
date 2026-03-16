@@ -12,15 +12,18 @@ if is_standalone then
 
     if is_plat("linux") then
         set_toolchains("clang")
-        add_ldflags("-static-libstdc++", "-static-libgcc")
         add_cxflags("-fno-rtti", {force = true})
-    elseif is_plat("windows") then 
+    elseif is_plat("windows") then
         set_toolchains("clang-cl")
-        set_runtimes("MT")
+        set_toolset("ld", "lld-link") 
+        set_toolset("sh", "lld-link")
+        set_toolset("ar", "llvm-ar")
+
         add_cxflags("/GR-", {force = true})
+        set_runtimes("MD")
     end
 
-    if is_mode("debug") then 
+    if is_mode("debug") then
         set_policy("build.sanitizer.address", true)
     end
 end
@@ -58,15 +61,23 @@ package_end()
 add_requires("volk", {system = false, configs = {shared = false}})
 add_requires("vulkan-headers")
 add_requires("libsdl3", {system = false, configs = {shared = false}})
-add_requires("joltphysics", {system = false, configs = {shared = false}})
+
+add_requires("joltphysics", 
+    {
+        system = false, 
+        configs = {
+            shared = false,
+            cxflags = "-march=x86-64-v3",
+            rtti = false
+        }
+    }
+)
+
 add_requires("cglm", {system = false, configs = {shared = false}})
 add_requires("fmt", {system = false, configs = {shared = false}})
 add_requires("entt")
+add_requires("tracy", {configs = {shared = false}})
 add_requires("slang " .. slang_version)
-
-if has_config("profiling") then 
-    add_requires("tracy", {configs = {shared = false}})
-end
 
 target("smol-interface")
     set_kind("headeronly")
@@ -76,11 +87,11 @@ target("smol-interface")
     
     add_defines("CGLM_FORCE_LEFT_HANDED", {public = true})
     
-    add_packages("volk", "libsdl3", "joltphysics", "cglm", "fmt", "entt", {public = true})
+    add_packages("volk", "libsdl3", "cglm", "fmt", "entt", {public = true})
 target_end()
 
 target("smol-engine")
-    set_kind("static")
+    set_kind("shared")
     add_cxflags("-march=x86-64-v3")
 
     if is_mode("release") then 
@@ -93,11 +104,12 @@ target("smol-engine")
 
     add_deps("smol-interface")
 
-    add_packages("slang", {public = true})
+    add_packages("joltphysics", {public = true})
 
-    if has_config("profiling") then 
-        add_packages("tracy", {public = true})
-    end
+    add_undefines("JPH_FLOATING_POINT_EXCEPTIONS_ENABLED")
+
+    add_packages("slang", {public = true})
+    add_packages("tracy", {public = true})
 
     add_files("src/smol/**.cpp")
     add_files("lib/stb/*.cpp", {warnings = "none"})
@@ -129,7 +141,7 @@ target("smol-bin")
     add_defines(format('SMOL_GAME_NAME="%s"', game_name))
     add_defines(format('SMOL_LIB_NAME="%s"', game_lib_name))
 
-    add_deps("smol-engine", {wholearchive = true})
+    add_deps("smol-engine")
 
     add_files("src/smol-bin/**.cpp")
 
@@ -137,9 +149,37 @@ target("smol-bin")
         if is_mode("release") then
             add_ldflags("/subsystem:windows", "/entry:mainCRTStartup", {force = true})
         end
-        set_policy("windows.export.all_symbols", true)
     elseif is_plat("linux") then 
         add_rpathdirs("@loader_path")
         add_ldflags("-rdynamic", {force = true})
+    end
+
+    if is_plat("windows") and is_mode("debug") then
+        after_build(function (target)
+            import("lib.detect.find_tool")
+        
+            local dest_dir = target:targetdir()
+            local dll_name = "clang_rt.asan_dynamic-x86_64.dll"
+            local asan_dll = nil
+        
+            local clang = find_tool("clang-cl")
+            if clang and clang.program then
+                local llvm_root = path.directory(path.directory(clang.program))
+            
+                local search_pattern = path.join(llvm_root, "lib", "clang", "*", "lib", "windows", dll_name)
+                local files = os.files(search_pattern)
+            
+                if files and #files > 0 then
+                    asan_dll = files[1]
+                end
+            end
+
+            if asan_dll then
+                os.trycp(asan_dll, dest_dir)
+                print("Successfully copied Asan from: " .. asan_dll)
+            else
+                print("Could not find " .. dll_name)
+            end
+        end)
     end
 target_end()

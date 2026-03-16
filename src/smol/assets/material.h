@@ -6,7 +6,6 @@
 #include "smol/log.h"
 #include "smol/rendering/renderer_types.h"
 #include "smol/rendering/samplers.h"
-#include "smol/rendering/vulkan.h"
 
 #include <cstring>
 #include <unordered_map>
@@ -78,13 +77,11 @@ namespace smol
         }
 
         void set_sampler(const std::string& name, sampler_type_e sampler)
-        {
-            set_property<u32_t>(name, static_cast<u32_t>(sampler));
-        }
+        { set_property<u32_t>(name, static_cast<u32_t>(sampler)); }
     };
 
     template <>
-    struct asset_loader_t<material_t>
+    struct SMOL_API asset_loader_t<material_t>
     {
         static std::optional<material_t> load(const std::string& path, asset_t<shader_t> shader);
         static void unload(material_t& mat);

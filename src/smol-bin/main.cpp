@@ -30,7 +30,7 @@ int main()
 
     if (!game_lib)
     {
-#if SMOL_PLATFORM_WINDOWS
+#if SMOL_PLATFORM_WIN
         SMOL_LOG_FATAL("ENGINE", "Failed to load library with name: {}; Error: {}", lib_name, GetLastError());
 #elif SMOL_PLATFORM_LINUX || SMOL_PLATFORM_ANDROID
         SMOL_LOG_FATAL("ENGINE", "Failed to load library with name: {}; Error: {}", lib_name, dlerror());
@@ -42,13 +42,21 @@ int main()
     game_update = (game_update_func)smol::os::get_proc_address(game_lib, "smol_game_update");
     game_shutdown_func game_shutdown = (game_shutdown_func)smol::os::get_proc_address(game_lib, "smol_game_shutdown");
 
-    std::unique_ptr<smol::world_t> world = std::make_unique<smol::world_t>();
-    smol::engine::set_scene(std::move(world));
+    if (!game_init || !game_update || !game_shutdown)
+    {
+        SMOL_LOG_FATAL("ENGINE", "Could not find one or more game logic functions inside game dll");
+        return -1;
+    }
 
-    game_init(&smol::engine::get_active_world());
+    smol::engine::create_scene();
+    smol::world_t& cur_world = smol::engine::get_active_world();
+
+    game_init(&cur_world);
 
     smol::engine::get_active_world().register_update_system([](smol::ecs::registry_t& reg)
                                                             { game_update(&smol::engine::get_active_world()); });
+
+    cur_world.init();
 
     smol::engine::run();
 

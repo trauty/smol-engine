@@ -1,6 +1,9 @@
 #include "jobs.h"
+
 #include "smol/defines.h"
+
 #include <algorithm>
+#include <array>
 #include <atomic>
 #include <condition_variable>
 #include <functional>

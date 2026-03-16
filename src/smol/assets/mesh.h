@@ -34,7 +34,7 @@ namespace smol
     };
 
     template <>
-    struct asset_loader_t<mesh_t>
+    struct SMOL_API asset_loader_t<mesh_t>
     {
         static std::optional<mesh_t> load(const std::string& path);
         static void unload(mesh_t& mesh);

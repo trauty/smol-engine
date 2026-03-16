@@ -23,7 +23,7 @@
 namespace smol
 {
     template <typename T>
-    struct SMOL_API asset_loader_t
+    struct asset_loader_t
     {
         // static std::optional<T> load(const std::string& path, Args...);
         // static void unload(T& asset);
@@ -40,7 +40,7 @@ namespace smol
     };
 
     template <typename T>
-    struct SMOL_API asset_pool_t : public asset_pool_base_t
+    struct asset_pool_t : public asset_pool_base_t
     {
         struct slot_t
         {
@@ -56,7 +56,9 @@ namespace smol
         std::mutex pool_mutex;
     };
 
-    class SMOL_API asset_registry_t
+    SMOL_API size_t get_next_asset_type_id();
+
+    class asset_registry_t
     {
       public:
         asset_registry_t() = default;
@@ -70,15 +72,11 @@ namespace smol
 
         template <typename T, typename... Args>
         typename asset_pool_t<T>::slot_t* load_async(const std::string& path, Args&&... args)
-        {
-            return internal_load<T>(path, false, std::forward<Args>(args)...);
-        }
+        { return internal_load<T>(path, false, std::forward<Args>(args)...); }
 
         template <typename T, typename... Args>
         typename asset_pool_t<T>::slot_t* load_sync(const std::string& path, Args&&... args)
-        {
-            return internal_load<T>(path, true, std::forward<Args>(args)...);
-        }
+        { return internal_load<T>(path, true, std::forward<Args>(args)...); }
 
         template <typename T>
         void release(typename asset_pool_t<T>::slot_t* slot)
@@ -120,11 +118,10 @@ namespace smol
         std::unordered_map<std::string, lookup_entry_t> lookup;
         std::mutex lookup_mutex;
 
-        static inline std::atomic<size_t> type_counter{0};
         template <typename T>
         static size_t get_asset_type_id()
         {
-            static size_t id = type_counter++;
+            static size_t id = get_next_asset_type_id();
             return id;
         }
 

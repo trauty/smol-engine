@@ -21,7 +21,6 @@
 #include <SDL3/SDL_error.h>
 #include <SDL3/SDL_video.h>
 #include <SDL3/SDL_vulkan.h>
-#include <Tracy/tracy/Tracy.hpp>
 #include <algorithm>
 #include <cglm/mat4.h>
 #include <cglm/types.h>
@@ -32,6 +31,7 @@
 #include <immintrin.h>
 #include <mutex>
 #include <set>
+#include <tracy/Tracy.hpp>
 #include <vector>
 
 namespace smol::renderer
@@ -445,7 +445,11 @@ namespace smol::renderer
             res = acquire_next_image(&index);
         }
 
-        if (res != VK_SUCCESS) { vkQueueWaitIdle(ctx.present_queue); }
+        if (res != VK_SUCCESS)
+        {
+            vkQueueWaitIdle(ctx.present_queue);
+            return;
+        }
 
         // render here
         VkCommandBuffer cmd = ctx.per_frame_objects[index].main_command_buffer;
@@ -817,11 +821,7 @@ namespace smol::renderer
         VkSurfaceCapabilitiesKHR surface_caps;
         vkGetPhysicalDeviceSurfaceCapabilitiesKHR(ctx.physical_device, ctx.surface, &surface_caps);
 
-        if (surface_caps.currentExtent.width == ctx.swapchain.extent.width &&
-            surface_caps.currentExtent.height == ctx.swapchain.extent.height)
-        {
-            return false;
-        }
+        if (surface_caps.currentExtent.width == 0 && surface_caps.currentExtent.height == 0) { return false; }
 
         vkDeviceWaitIdle(ctx.device);
 
@@ -835,19 +835,21 @@ namespace smol::renderer
         VkSurfaceCapabilitiesKHR surface_caps;
         vkGetPhysicalDeviceSurfaceCapabilitiesKHR(ctx.physical_device, ctx.surface, &surface_caps);
 
-        i32 w, h;
-        smol::window::get_window_size(&w, &h);
-        if (w == 0 || h == 0) return;
+        if (surface_caps.currentExtent.width == 0 || surface_caps.currentExtent.height == 0) { return; }
 
         VkExtent2D swapchain_extent;
         if (surface_caps.currentExtent.width != UINT32_MAX) { swapchain_extent = surface_caps.currentExtent; }
         else
         {
+            i32 w, h;
+            smol::window::get_window_size(&w, &h);
+
             swapchain_extent.width =
                 std::clamp(static_cast<u32>(w), surface_caps.minImageExtent.width, surface_caps.maxImageExtent.width);
             swapchain_extent.height =
                 std::clamp(static_cast<u32>(h), surface_caps.minImageExtent.height, surface_caps.maxImageExtent.height);
         }
+
         ctx.swapchain.extent = swapchain_extent;
         VkSurfaceFormatKHR surface_format = select_surface_format(ctx.physical_device, ctx.surface);
 

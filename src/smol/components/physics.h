@@ -8,7 +8,7 @@
 
 namespace smol
 {
-    enum class SMOL_API body_type_e : u8_t
+    enum class body_type_e : u8_t
     {
         STATIC,
         KINEMATIC,

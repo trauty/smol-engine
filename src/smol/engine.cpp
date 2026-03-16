@@ -21,7 +21,7 @@
 #include <SDL3/SDL_init.h>
 #include <SDL3/SDL_video.h>
 #include <SDL3/SDL_vulkan.h>
-#include <Tracy/tracy/Tracy.hpp>
+#include <tracy/Tracy.hpp>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -156,6 +156,15 @@ namespace smol::engine
     }
 
     void exit() { is_running = false; }
+
+    void create_scene()
+    {
+        if (active_scene) { active_scene->shutdown(); }
+
+        active_scene = std::make_unique<smol::world_t>();
+
+        if (!active_scene) { SMOL_LOG_ERROR("ENGINE", "Could not create scene"); }
+    }
 
     void set_scene(std::unique_ptr<smol::world_t> new_scene)
     {

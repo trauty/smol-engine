@@ -1,6 +1,7 @@
 #include "physics_world.h"
 
 #include "Jolt/Core/Factory.h"
+#include "Jolt/Core/IssueReporting.h"
 #include "Jolt/Core/Memory.h"
 #include "Jolt/Core/Reference.h"
 #include "Jolt/Core/TempAllocator.h"
@@ -19,9 +20,12 @@
 #include "smol/components/transform.h"
 #include "smol/ecs.h"
 #include "smol/ecs_fwd.h"
+#include "smol/log.h"
 #include "smol/physics/jolt_job_system_int.h"
 #include "smol/time.h"
 
+#include <cstdarg>
+#include <cstdio>
 #include <vector>
 
 namespace smol
@@ -31,14 +35,10 @@ namespace smol
       public:
         virtual JPH::uint GetNumBroadPhaseLayers() const override { return 2; }
         virtual JPH::BroadPhaseLayer GetBroadPhaseLayer(JPH::ObjectLayer inLayer) const override
-        {
-            return (inLayer == physics::layers::NON_MOVING) ? JPH::BroadPhaseLayer(0) : JPH::BroadPhaseLayer(1);
-        }
+        { return (inLayer == physics::layers::NON_MOVING) ? JPH::BroadPhaseLayer(0) : JPH::BroadPhaseLayer(1); }
 #if defined(JPH_EXTERNAL_PROFILE) || defined(JPH_PROFILE_ENABLED)
         virtual const char* GetBroadPhaseLayerName(JPH::BroadPhaseLayer inLayer) const override
-        {
-            return (inLayer.GetValue() == 0) ? "NON_MOVING" : "MOVING";
-        }
+        { return (inLayer.GetValue() == 0) ? "NON_MOVING" : "MOVING"; }
 #endif
     };
 
@@ -56,9 +56,7 @@ namespace smol
     {
       public:
         virtual bool ShouldCollide(JPH::ObjectLayer inObject1, JPH::ObjectLayer inObject2) const override
-        {
-            return !(inObject1 == physics::layers::NON_MOVING && inObject2 == physics::layers::NON_MOVING);
-        }
+        { return !(inObject1 == physics::layers::NON_MOVING && inObject2 == physics::layers::NON_MOVING); }
     };
 
     void on_rigidbody_destroyed(ecs::registry_t& reg, ecs::entity_t entity)
@@ -74,9 +72,20 @@ namespace smol
         }
     }
 
+    static void jph_trace_impl(const char* in_fmt, ...)
+    {
+        va_list list;
+        va_start(list, in_fmt);
+        char buffer[1024];
+        vsnprintf(buffer, sizeof(buffer), in_fmt, list);
+        va_end(list);
+        SMOL_LOG_FATAL("JPH", "{}", buffer);
+    }
+
     void physics_world_t::init(ecs::registry_t& reg)
     {
         JPH::RegisterDefaultAllocator();
+        JPH::Trace = jph_trace_impl;
         JPH::Factory::sInstance = new JPH::Factory;
         JPH::RegisterTypes();
 
@@ -88,7 +97,6 @@ namespace smol
         object_vs_object_filter = new object_layer_pair_filter_impl_t();
 
         system.Init(1024, 0, 1024, 1024, *bp_interface, *object_vs_bp_filter, *object_vs_object_filter);
-
         reg.on_destroy<rigidbody_t>().connect<&on_rigidbody_destroyed>();
     }
 

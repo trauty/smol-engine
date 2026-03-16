@@ -65,7 +65,7 @@ enum smol_result_e
     #define SMOL_PLATFORM_MACOS 1 // no ios support, probably also no macos support
 #endif
 
-#if defined(_MSC_VER) && !defined(__clang__)
+#if defined(SMOL_PLATFORM_WIN)
     #if defined(SMOL_EXPORT)
         #define SMOL_API __declspec(dllexport)
     #else

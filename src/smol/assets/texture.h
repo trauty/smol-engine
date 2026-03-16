@@ -10,7 +10,7 @@
 
 namespace smol
 {
-    enum class SMOL_API texture_format_e
+    enum class texture_format_e
     {
         SRGB,
         LINEAR
@@ -29,7 +29,7 @@ namespace smol
     };
 
     template <>
-    struct asset_loader_t<texture_t>
+    struct SMOL_API asset_loader_t<texture_t>
     {
         static std::optional<texture_t> load(const std::string& path, texture_format_e type = texture_format_e::SRGB);
         static void unload(texture_t& tex);

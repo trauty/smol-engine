@@ -12,7 +12,7 @@
 namespace smol
 {
     template <typename T>
-    struct SMOL_API asset_t
+    struct asset_t
     {
         using slot_ptr = typename asset_pool_t<T>::slot_t*;
 
@@ -96,7 +96,7 @@ namespace smol
     };
 
     template <typename T, typename... Args>
-    SMOL_API asset_t<T> load_asset(const std::string& path, Args&&... args)
+    asset_t<T> load_asset(const std::string& path, Args&&... args)
     {
         asset_registry_t& asset_reg = engine::get_asset_registry();
         typename asset_pool_t<T>::slot_t* slot = asset_reg.load_async<T>(path, std::forward<Args>(args)...);
@@ -105,7 +105,7 @@ namespace smol
     }
 
     template <typename T, typename... Args>
-    SMOL_API asset_t<T> load_asset_sync(const std::string& path, Args&&... args)
+    asset_t<T> load_asset_sync(const std::string& path, Args&&... args)
     {
         asset_registry_t& asset_reg = engine::get_asset_registry();
         typename asset_pool_t<T>::slot_t* slot = asset_reg.load_sync<T>(path, std::forward<Args>(args)...);
