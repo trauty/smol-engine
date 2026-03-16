@@ -431,6 +431,11 @@ namespace smol::renderer
 
     void render(ecs::registry_t& reg)
     {
+        for (auto [entity, event] : reg.view<window::window_size_changed_event>().each())
+        {
+            resize(event.width, event.height);
+        }
+
         u64_t gpu_timeline_value = 0;
         vkGetSemaphoreCounterValue(ctx.device, res_system.timeline_semaphore, &gpu_timeline_value);
 

@@ -6,8 +6,6 @@
 #include "smol/os.h"
 #include "smol/world.h"
 
-#include <memory>
-
 #if SMOL_PLATFORM_WIN
     #include <windows.h>
 #elif SMOL_PLATFORM_LINUX || SMOL_PLATFORM_ANDROID
@@ -44,7 +42,7 @@ int main()
 
     if (!game_init || !game_update || !game_shutdown)
     {
-        SMOL_LOG_FATAL("ENGINE", "Could not find one or more game logic functions inside game dll");
+        SMOL_LOG_FATAL("ENGINE", "Could not find one or more game logic functions inside game lib");
         return -1;
     }
 

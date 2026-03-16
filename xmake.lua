@@ -75,8 +75,8 @@ add_requires("joltphysics",
 
 add_requires("cglm", {system = false, configs = {shared = false}})
 add_requires("fmt", {system = false, configs = {shared = false}})
-add_requires("entt")
-add_requires("tracy", {configs = {shared = false}})
+add_requires("entt", {system = false, configs = {shared = false}})
+add_requires("tracy", {system = false, configs = {shared = false}})
 add_requires("slang " .. slang_version)
 
 target("smol-interface")

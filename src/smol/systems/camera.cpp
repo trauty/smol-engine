@@ -1,18 +1,13 @@
 #include "camera.h"
 
-#include "cglm/cam.h"
 #include "cglm/clipspace/persp_lh_zo.h"
 #include "cglm/clipspace/view_lh.h"
 #include "cglm/util.h"
 #include "cglm/vec3.h"
 #include "smol/components/camera.h"
 #include "smol/components/transform.h"
-#include "smol/ecs.h"
-#include "smol/log.h"
 #include "smol/math.h"
 #include "smol/window.h"
-
-#include <tuple>
 
 namespace smol::camera_system
 {
