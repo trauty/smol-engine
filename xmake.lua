@@ -32,7 +32,8 @@ option("profiling")
     set_default(false)
     set_showmenu(true)
     set_description("Enable Tracy Profiling")
-    add_defines("SMOL_ENABLE_PROFILING", "TRACY_ENABLE")
+    add_defines("SMOL_ENABLE_PROFILING")
+    add_defines("TRACY_ENABLE")
 option_end()
 
 package("slang")
@@ -93,6 +94,7 @@ target_end()
 target("smol-engine")
     set_kind("shared")
     add_cxflags("-march=x86-64-v3")
+    add_options("profiling", {public = true})
 
     if is_mode("release") then 
         set_optimize("fastest")

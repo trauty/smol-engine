@@ -85,18 +85,17 @@ namespace smol::engine
     {
         constexpr f64 fixed_timestep = 1.0 / 60.0; // this should be in a settings file later on
         smol::time::fixed_dt = fixed_timestep;
-        f64 current_time = smol::time::time;
         f64 accumulator = 0.0;
+
+        smol::time::update();
 
         while (is_running)
         {
             smol::time::update();
-            const f64 new_time = smol::time::time;
-            f64 frame_time = new_time - current_time;
+            f64 frame_time = smol::time::get_dt();
 
             if (frame_time >= 0.25) { frame_time = 0.25; }
 
-            current_time = new_time;
             accumulator += frame_time;
 
             static SDL_Event event;

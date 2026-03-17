@@ -2,7 +2,6 @@
 
 #include "smol/defines.h"
 #include "smol/rendering/renderer_types.h"
-#include "smol/rendering/vulkan.h"
 #include "smol/window.h"
 
 namespace smol::renderer
@@ -28,7 +27,6 @@ namespace smol::renderer
     bool resize(const u32_t width, const u32_t height);
     void init_swapchain();
     VkResult acquire_next_image(u32_t* image);
-    VkResult present_image(u32_t image);
     VkFormat find_depth_format();
     VkSurfaceFormatKHR select_surface_format(VkPhysicalDevice physical_device, VkSurfaceKHR surface,
                                              std::vector<VkFormat> const& preferred_formats = {

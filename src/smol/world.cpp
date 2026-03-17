@@ -6,11 +6,14 @@
 #include "smol/physics/physics_sync.h"
 #include "smol/physics/physics_world.h"
 #include "smol/systems/transform.h"
+#include "tracy/Tracy.hpp"
 
 namespace smol
 {
     void on_transform_changed(ecs::registry_t& reg, ecs::entity_t entity)
-    { smol::transform_system::is_hierarchy_dirty = true; }
+    {
+        smol::transform_system::is_hierarchy_dirty = true;
+    }
 
     void world_t::init()
     {
@@ -26,11 +29,13 @@ namespace smol
 
     void world_t::update()
     {
+        ZoneScoped;
         for (system_func_t& system : update_systems) { system(registry); }
     }
 
     void world_t::fixed_update()
     {
+        ZoneScoped;
         physics.create_bodies(registry);
 
         for (system_func_t& system : fixed_update_systems) { system(registry); }

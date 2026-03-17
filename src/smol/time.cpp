@@ -6,20 +6,32 @@
 
 namespace smol::time
 {
-    f64 time;
-    f64 dt;
-    f64 fixed_dt;
+    f64 time = 0.0;
+    f64 dt = 0.0;
+    f64 fixed_dt = 0.0;
+
+    static u64_t start_ticks = 0;
+    static u64_t last_ticks = 0;
 
     void update()
     {
-        static u64_t freq = SDL_GetPerformanceFrequency();
-        const u64_t counter = SDL_GetPerformanceCounter();
-        time = static_cast<f64>(counter) / static_cast<f64>(freq);
+        const u64_t cur_ticks = SDL_GetTicksNS();
+
+        if (start_ticks == 0)
+        {
+            start_ticks = cur_ticks;
+            last_ticks = cur_ticks;
+        }
+
+        constexpr f64 NS_TO_SECONDS = 1.0 / 1000000000.0;
+
+        time = static_cast<f64>(cur_ticks - start_ticks) * NS_TO_SECONDS;
+        dt = static_cast<f64>(cur_ticks - last_ticks) * NS_TO_SECONDS;
+
+        last_ticks = cur_ticks;
     }
 
     f64 get_time() { return time; }
-
     f64 get_dt() { return dt; }
-
     f64 get_fixed_dt() { return fixed_dt; }
 } // namespace smol::time

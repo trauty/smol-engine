@@ -17,6 +17,7 @@
 #include "smol/systems/camera.h"
 #include "smol/time.h"
 #include "smol/window.h"
+#include "vulkan/vulkan_core.h"
 
 #include <SDL3/SDL_error.h>
 #include <SDL3/SDL_video.h>
@@ -32,12 +33,17 @@
 #include <mutex>
 #include <set>
 #include <tracy/Tracy.hpp>
+#include <tracy/TracyVulkan.hpp>
 #include <vector>
 
 namespace smol::renderer
 {
     render_context_t ctx;
-    namespace { const std::vector<const char*> validation_layers = {"VK_LAYER_KHRONOS_validation"}; } // namespace
+    namespace
+    {
+        const std::vector<const char*> validation_layers = {"VK_LAYER_KHRONOS_validation"};
+        TracyVkCtx tracy_vk_ctx = nullptr;
+    } // namespace
 
     namespace detail
     {
@@ -366,11 +372,42 @@ namespace smol::renderer
         vkUpdateDescriptorSets(ctx.device, 1, &samplers_write_desc, 0, nullptr);
 
         SMOL_LOG_INFO("VULKAN", "Context initialized for GPU: {}", ctx.properties.deviceName);
+
+#ifdef SMOL_ENABLE_PROFILING
+        VkCommandPoolCreateInfo tracy_pool_info = {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
+            .flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT,
+            .queueFamilyIndex = ctx.queue_fam_indices.graphics_family.value(),
+        };
+
+        VkCommandPool tracy_pool;
+        vkCreateCommandPool(ctx.device, &tracy_pool_info, nullptr, &tracy_pool);
+
+        VkCommandBufferAllocateInfo tracy_alloc_info = {
+            .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO,
+            .commandPool = tracy_pool,
+            .level = VK_COMMAND_BUFFER_LEVEL_PRIMARY,
+            .commandBufferCount = 1,
+        };
+
+        VkCommandBuffer tracy_cmd;
+        vkAllocateCommandBuffers(ctx.device, &tracy_alloc_info, &tracy_cmd);
+
+        tracy_vk_ctx = TracyVkContext(ctx.physical_device, ctx.device, ctx.graphics_queue, tracy_cmd);
+
+        vkDestroyCommandPool(ctx.device, tracy_pool, nullptr);
+#endif
+
         return true;
     }
 
     void shutdown()
     {
+
+#ifdef SMOL_ENABLE_PROFILING
+        if (tracy_vk_ctx) { TracyVkDestroy(tracy_vk_ctx); }
+#endif
+
         if (!ctx.samplers.empty())
         {
             for (VkSampler sampler : ctx.samplers) { vkDestroySampler(ctx.device, sampler, nullptr); }
@@ -394,9 +431,9 @@ namespace smol::renderer
 
         ctx.per_frame_objects.clear();
 
-        for (VkSemaphore sem : ctx.recycled_semaphores) { vkDestroySemaphore(ctx.device, sem, nullptr); }
-
         for (VkImageView image_view : ctx.swapchain.views) { vkDestroyImageView(ctx.device, image_view, nullptr); }
+
+        for (VkSemaphore sem : ctx.swapchain.release_semaphores) { vkDestroySemaphore(ctx.device, sem, nullptr); }
 
         if (ctx.swapchain.depth_view != VK_NULL_HANDLE)
         {
@@ -431,6 +468,8 @@ namespace smol::renderer
 
     void render(ecs::registry_t& reg)
     {
+        ZoneScoped;
+
         for (auto [entity, event] : reg.view<window::window_size_changed_event>().each())
         {
             resize(event.width, event.height);
@@ -457,7 +496,8 @@ namespace smol::renderer
         }
 
         // render here
-        VkCommandBuffer cmd = ctx.per_frame_objects[index].main_command_buffer;
+        per_frame_t& frame_data = ctx.per_frame_objects[ctx.cur_frame];
+        VkCommandBuffer cmd = frame_data.main_command_buffer;
 
         VkCommandBufferBeginInfo cmd_begin_info = {
             .sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO,
@@ -465,6 +505,10 @@ namespace smol::renderer
         };
 
         vkBeginCommandBuffer(cmd, &cmd_begin_info);
+
+#ifdef SMOL_ENABLE_PROFILING
+        TracyVkCollect(tracy_vk_ctx, cmd);
+#endif
 
         {
             std::scoped_lock lock(res_system.pending_mutex);
@@ -494,8 +538,6 @@ namespace smol::renderer
             {.color = {{0.01f, 0.01f, 0.01f, 1.0f}}},
             {.depthStencil = {1.0f, 0}},
         };
-
-        per_frame_t& frame_data = ctx.per_frame_objects[index];
 
         ecs::entity_t active_cam = camera_system::get_active_camera(reg);
         if (active_cam != ecs::NULL_ENTITY)
@@ -554,132 +596,136 @@ namespace smol::renderer
             .pDepthAttachment = &depth_attachment,
         };
 
-        vkCmdBeginRendering(cmd, &rendering_info);
-
-        VkViewport vp = {
-            .width = static_cast<f32>(ctx.swapchain.extent.width),
-            .height = static_cast<f32>(ctx.swapchain.extent.height),
-            .minDepth = 0.0f,
-            .maxDepth = 1.0f,
-        };
-        vkCmdSetViewport(cmd, 0, 1, &vp);
-
-        VkRect2D scissor = {.extent = ctx.swapchain.extent};
-        vkCmdSetScissor(cmd, 0, 1, &scissor);
-
-        reg.sort<mesh_renderer_t>(
-            [](const mesh_renderer_t& lhs, const mesh_renderer_t& rhs)
-            {
-                if (!lhs.material->shader || !rhs.material->shader)
-                {
-                    return lhs.material->shader > rhs.material->shader;
-                }
-
-                if (lhs.material->shader->pipeline != rhs.material->shader->pipeline)
-                {
-                    return lhs.material->shader->pipeline < rhs.material->shader->pipeline;
-                }
-
-                return lhs.material.get() < rhs.material.get();
-            });
-
-        std::vector<render_batch_t> batches;
-        u32_t cur_object_id = 0;
-        u32_t cur_material_offset = 0;
-        u8* gpu_material_ptr = frame_data.mapped_material_data;
-
-        material_t* last_processed_mat = nullptr;
-
-        auto view = reg.view<transform_t, mesh_renderer_t>();
-
-        for (auto [entity, transform, renderer] : view.each())
         {
-            if (!renderer.active || !renderer.mesh || !renderer.material->shader) { continue; }
+#ifdef SMOL_ENABLE_PROFILING
+            TracyVkZone(tracy_vk_ctx, cmd, "Main Pass");
+#endif
 
-            material_t* cur_mat = renderer.material.get();
+            vkCmdBeginRendering(cmd, &rendering_info);
 
-            if (cur_mat != last_processed_mat)
-            {
-                if (!cur_mat->data.empty())
+            VkViewport vp = {
+                .width = static_cast<f32>(ctx.swapchain.extent.width),
+                .height = static_cast<f32>(ctx.swapchain.extent.height),
+                .minDepth = 0.0f,
+                .maxDepth = 1.0f,
+            };
+            vkCmdSetViewport(cmd, 0, 1, &vp);
+
+            VkRect2D scissor = {.extent = ctx.swapchain.extent};
+            vkCmdSetScissor(cmd, 0, 1, &scissor);
+
+            reg.sort<mesh_renderer_t>(
+                [](const mesh_renderer_t& lhs, const mesh_renderer_t& rhs)
                 {
-                    cur_mat->heap_offset = cur_material_offset;
+                    if (!lhs.material->shader || !rhs.material->shader)
+                    {
+                        return lhs.material->shader > rhs.material->shader;
+                    }
 
-                    std::memcpy(gpu_material_ptr + cur_material_offset, cur_mat->data.data(), cur_mat->data.size());
+                    if (lhs.material->shader->pipeline != rhs.material->shader->pipeline)
+                    {
+                        return lhs.material->shader->pipeline < rhs.material->shader->pipeline;
+                    }
 
-                    cur_material_offset += cur_mat->data.size();
+                    return lhs.material.get() < rhs.material.get();
+                });
+
+            std::vector<render_batch_t> batches;
+            u32_t cur_object_id = 0;
+            u32_t cur_material_offset = 0;
+            u8* gpu_material_ptr = frame_data.mapped_material_data;
+
+            material_t* last_processed_mat = nullptr;
+
+            auto view = reg.view<transform_t, mesh_renderer_t>();
+
+            for (auto [entity, transform, renderer] : view.each())
+            {
+                if (!renderer.active || !renderer.mesh || !renderer.material->shader) { continue; }
+
+                material_t* cur_mat = renderer.material.get();
+
+                if (cur_mat != last_processed_mat)
+                {
+                    if (!cur_mat->data.empty())
+                    {
+                        cur_mat->heap_offset = cur_material_offset;
+
+                        std::memcpy(gpu_material_ptr + cur_material_offset, cur_mat->data.data(), cur_mat->data.size());
+
+                        cur_material_offset += cur_mat->data.size();
+                    }
+
+                    last_processed_mat = cur_mat;
                 }
 
-                last_processed_mat = cur_mat;
+                object_data_t& obj_data = frame_data.mapped_object_data[cur_object_id];
+                std::memcpy(obj_data.model_matrix.data, &transform.world_mat, sizeof(mat4_t));
+                obj_data.material_offset = cur_mat->heap_offset;
+                obj_data.vertex_buffer_id = renderer.mesh->vertex_bindless_id;
+                obj_data.index_buffer_id = renderer.mesh->index_bindless_id;
+
+                VkDrawIndirectCommand& draw_cmd = frame_data.mapped_indirect_data[cur_object_id];
+                draw_cmd.vertexCount =
+                    renderer.mesh->uses_indices ? renderer.mesh->index_count : renderer.mesh->vertex_count;
+                draw_cmd.instanceCount = 1;
+                draw_cmd.firstVertex = 0;
+                draw_cmd.firstInstance = 0;
+
+                VkPipeline cur_pipeline = renderer.material->shader->pipeline;
+                VkPipelineLayout cur_layout = renderer.material->shader->pipeline_layout;
+
+                if (batches.empty() || batches.back().pipeline != cur_pipeline)
+                {
+                    batches.push_back({cur_pipeline, cur_layout, cur_object_id, 1});
+                }
+                else
+                {
+                    batches.back().count++;
+                }
+
+                cur_object_id++;
             }
 
-            object_data_t& obj_data = frame_data.mapped_object_data[cur_object_id];
-            std::memcpy(obj_data.model_matrix.data, &transform.world_mat, sizeof(mat4_t));
-            obj_data.material_offset = cur_mat->heap_offset;
-            obj_data.vertex_buffer_id = renderer.mesh->vertex_bindless_id;
-            obj_data.index_buffer_id = renderer.mesh->index_bindless_id;
-
-            VkDrawIndirectCommand& draw_cmd = frame_data.mapped_indirect_data[cur_object_id];
-            draw_cmd.vertexCount =
-                renderer.mesh->uses_indices ? renderer.mesh->index_count : renderer.mesh->vertex_count;
-            draw_cmd.instanceCount = 1;
-            draw_cmd.firstVertex = 0;
-            draw_cmd.firstInstance = 0;
-
-            VkPipeline cur_pipeline = renderer.material->shader->pipeline;
-            VkPipelineLayout cur_layout = renderer.material->shader->pipeline_layout;
-
-            if (batches.empty() || batches.back().pipeline != cur_pipeline)
+            struct
             {
-                batches.push_back({cur_pipeline, cur_layout, cur_object_id, 1});
-            }
-            else
+                u32_t global_buffer_id;
+                u32_t object_buffer_id;
+                u32_t material_buffer_id;
+            } pc_data = {
+                frame_data.global_bindless_id,
+                frame_data.object_bindless_id,
+                frame_data.material_bindless_id,
+            };
+
+            for (const render_batch_t& batch : batches)
             {
-                batches.back().count++;
+                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, batch.pipeline);
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, batch.layout, 0, 1,
+                                        &res_system.global_set, 0, nullptr);
+                vkCmdPushConstants(cmd, batch.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                                   sizeof(pc_data), &pc_data);
+
+                vkCmdDrawIndirect(cmd, frame_data.indirect_buffer, batch.start_idx * sizeof(VkDrawIndirectCommand),
+                                  batch.count, sizeof(VkDrawIndirectCommand));
             }
 
-            cur_object_id++;
+            vkCmdEndRendering(cmd);
         }
-
-        struct
-        {
-            u32_t global_buffer_id;
-            u32_t object_buffer_id;
-            u32_t material_buffer_id;
-        } pc_data = {
-            frame_data.global_bindless_id,
-            frame_data.object_bindless_id,
-            frame_data.material_bindless_id,
-        };
-
-        for (const render_batch_t& batch : batches)
-        {
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, batch.pipeline);
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, batch.layout, 0, 1, &res_system.global_set, 0,
-                                    nullptr);
-            vkCmdPushConstants(cmd, batch.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-                               sizeof(pc_data), &pc_data);
-
-            vkCmdDrawIndirect(cmd, frame_data.indirect_buffer, batch.start_idx * sizeof(VkDrawIndirectCommand),
-                              batch.count, sizeof(VkDrawIndirectCommand));
-        }
-
-        vkCmdEndRendering(cmd);
 
         transition_image(cmd, ctx.swapchain.images[index], VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
                          VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
         vkEndCommandBuffer(cmd);
 
-        if (ctx.per_frame_objects[index].swapchain_release_semaphore == VK_NULL_HANDLE)
-        {
-            VkSemaphoreCreateInfo sem_info = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
-            VK_CHECK(vkCreateSemaphore(ctx.device, &sem_info, nullptr,
-                                       &ctx.per_frame_objects[index].swapchain_release_semaphore));
-        }
-
         VkSemaphore wait_semaphores[] = {
-            ctx.per_frame_objects[index].swapchain_acquire_semaphore,
+            frame_data.swapchain_acquire_semaphore,
             res_system.timeline_semaphore,
+        };
+
+        VkSemaphore signal_semaphores[] = {
+            ctx.swapchain.release_semaphores[index],
+            ctx.timeline_semaphore,
         };
 
         VkPipelineStageFlags wait_stages[] = {
@@ -691,7 +737,6 @@ namespace smol::renderer
 
         u64_t next_timeline_value = ctx.timeline_value + 1;
         ctx.timeline_value = next_timeline_value;
-
         u64_t signal_values[] = {0, next_timeline_value};
 
         VkTimelineSemaphoreSubmitInfo timeline_sem_info = {
@@ -700,11 +745,6 @@ namespace smol::renderer
             .pWaitSemaphoreValues = wait_values,
             .signalSemaphoreValueCount = 2,
             .pSignalSemaphoreValues = signal_values,
-        };
-
-        VkSemaphore signal_semaphores[] = {
-            ctx.per_frame_objects[index].swapchain_release_semaphore,
-            ctx.timeline_semaphore,
         };
 
         VkSubmitInfo submit_info = {
@@ -719,14 +759,27 @@ namespace smol::renderer
             .pSignalSemaphores = signal_semaphores,
         };
 
-        vkQueueSubmit(ctx.graphics_queue, 1, &submit_info, ctx.per_frame_objects[index].queue_submit_fence);
+        vkQueueSubmit(ctx.graphics_queue, 1, &submit_info, VK_NULL_HANDLE);
 
-        res = present_image(index);
+        frame_data.target_timeline_value = next_timeline_value;
+
+        VkPresentInfoKHR present_info = {
+            .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
+            .waitSemaphoreCount = 1,
+            .pWaitSemaphores = &ctx.swapchain.release_semaphores[index],
+            .swapchainCount = 1,
+            .pSwapchains = &ctx.swapchain.handle,
+            .pImageIndices = &index,
+        };
+
+        res = vkQueuePresentKHR(ctx.present_queue, &present_info);
 
         if (res == VK_SUBOPTIMAL_KHR || res == VK_ERROR_OUT_OF_DATE_KHR)
         {
             resize(ctx.swapchain.extent.width, ctx.swapchain.extent.height);
         }
+
+        ctx.cur_frame = (ctx.cur_frame + 1) % MAX_FRAMES_IN_FLIGHT;
     }
 
     VkFormat find_depth_format()
@@ -978,10 +1031,21 @@ namespace smol::renderer
         VK_CHECK(vkGetSwapchainImagesKHR(ctx.device, ctx.swapchain.handle, &image_count, swapchain_images.data()));
         ctx.swapchain.images = swapchain_images;
 
-        ctx.per_frame_objects.clear();
-        ctx.per_frame_objects.resize(image_count);
+        for (VkSemaphore sem : ctx.swapchain.release_semaphores) { vkDestroySemaphore(ctx.device, sem, nullptr); }
 
-        for (size_t i = 0; i < image_count; i++) { init_per_frame(ctx.per_frame_objects[i]); }
+        ctx.swapchain.release_semaphores.clear();
+        ctx.swapchain.release_semaphores.resize(image_count);
+
+        for (size_t i = 0; i < image_count; i++)
+        {
+            VkSemaphoreCreateInfo sem_info = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+            VK_CHECK(vkCreateSemaphore(ctx.device, &sem_info, nullptr, &ctx.swapchain.release_semaphores[i]));
+        }
+
+        ctx.per_frame_objects.clear();
+        ctx.per_frame_objects.resize(MAX_FRAMES_IN_FLIGHT);
+
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) { init_per_frame(ctx.per_frame_objects[i]); }
 
         for (size_t i = 0; i < image_count; i++)
         {
@@ -1004,69 +1068,34 @@ namespace smol::renderer
         }
     }
 
-    VkResult acquire_next_image(u32_t* image)
+    VkResult acquire_next_image(u32_t* image_index)
     {
-        VkSemaphore acquire_semaphore;
-        if (ctx.recycled_semaphores.empty())
-        {
-            VkSemaphoreCreateInfo sem_info = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
-            VK_CHECK(vkCreateSemaphore(ctx.device, &sem_info, nullptr, &acquire_semaphore));
-        }
-        else
-        {
-            acquire_semaphore = ctx.recycled_semaphores.back();
-            ctx.recycled_semaphores.pop_back();
-        }
+        per_frame_t& frame_data = ctx.per_frame_objects[ctx.cur_frame];
 
-        VkResult res = vkAcquireNextImageKHR(ctx.device, ctx.swapchain.handle, UINT64_MAX, acquire_semaphore,
-                                             VK_NULL_HANDLE, image);
-
-        if (res != VK_SUCCESS)
+        if (frame_data.target_timeline_value > 0)
         {
-            ctx.recycled_semaphores.push_back(acquire_semaphore);
-            return res;
+            VkSemaphoreWaitInfo wait_info = {
+                .sType = VK_STRUCTURE_TYPE_SEMAPHORE_WAIT_INFO,
+                .semaphoreCount = 1,
+                .pSemaphores = &ctx.timeline_semaphore,
+                .pValues = &frame_data.target_timeline_value,
+            };
+
+            vkWaitSemaphores(ctx.device, &wait_info, UINT64_MAX);
         }
 
-        if (ctx.per_frame_objects[*image].queue_submit_fence != VK_NULL_HANDLE)
-        {
-            vkWaitForFences(ctx.device, 1, &ctx.per_frame_objects[*image].queue_submit_fence, true, UINT64_MAX);
-            vkResetFences(ctx.device, 1, &ctx.per_frame_objects[*image].queue_submit_fence);
-        }
+        VkResult res = vkAcquireNextImageKHR(ctx.device, ctx.swapchain.handle, UINT64_MAX,
+                                             frame_data.swapchain_acquire_semaphore, VK_NULL_HANDLE, image_index);
 
-        if (ctx.per_frame_objects[*image].main_command_pool != VK_NULL_HANDLE)
-        {
-            vkResetCommandPool(ctx.device, ctx.per_frame_objects[*image].main_command_pool, 0);
-        }
+        if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR) { return res; }
 
-        VkSemaphore old_semaphore = ctx.per_frame_objects[*image].swapchain_acquire_semaphore;
-
-        if (old_semaphore != VK_NULL_HANDLE) { ctx.recycled_semaphores.push_back(old_semaphore); }
-
-        ctx.per_frame_objects[*image].swapchain_acquire_semaphore = acquire_semaphore;
+        vkResetCommandPool(ctx.device, frame_data.main_command_pool, 0);
 
         return VK_SUCCESS;
     }
 
-    VkResult present_image(u32_t image)
-    {
-        VkPresentInfoKHR present_info = {
-            .sType = VK_STRUCTURE_TYPE_PRESENT_INFO_KHR,
-            .waitSemaphoreCount = 1,
-            .pWaitSemaphores = &ctx.per_frame_objects[image].swapchain_release_semaphore,
-            .swapchainCount = 1,
-            .pSwapchains = &ctx.swapchain.handle,
-            .pImageIndices = &image,
-        };
-
-        return vkQueuePresentKHR(ctx.present_queue, &present_info);
-    }
-
     void init_per_frame(per_frame_t& frame_data)
     {
-        VkFenceCreateInfo fence_info = {VK_STRUCTURE_TYPE_FENCE_CREATE_INFO};
-        fence_info.flags = VK_FENCE_CREATE_SIGNALED_BIT;
-        VK_CHECK(vkCreateFence(ctx.device, &fence_info, nullptr, &frame_data.queue_submit_fence));
-
         VkCommandPoolCreateInfo cmd_pool_info = {VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO};
         cmd_pool_info.flags = VK_COMMAND_POOL_CREATE_TRANSIENT_BIT;
         cmd_pool_info.queueFamilyIndex = static_cast<u32_t>(ctx.queue_fam_indices.graphics_family.value());
@@ -1134,16 +1163,13 @@ namespace smol::renderer
         create_mapped_buffer(MAX_MATERIAL_BUFFER_SIZE, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, frame_data.material_buffer,
                              frame_data.material_allocation, (void*&)frame_data.mapped_material_data);
         make_bindless(frame_data.material_buffer, frame_data.material_bindless_id);
+
+        VkSemaphoreCreateInfo sem_info = {VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
+        VK_CHECK(vkCreateSemaphore(ctx.device, &sem_info, nullptr, &frame_data.swapchain_acquire_semaphore));
     }
 
     void shutdown_per_frame(per_frame_t& frame_data)
     {
-        if (frame_data.queue_submit_fence != VK_NULL_HANDLE)
-        {
-            vkDestroyFence(ctx.device, frame_data.queue_submit_fence, nullptr);
-            frame_data.queue_submit_fence = VK_NULL_HANDLE;
-        }
-
         if (frame_data.main_command_buffer != VK_NULL_HANDLE)
         {
             vkFreeCommandBuffers(ctx.device, frame_data.main_command_pool, 1, &frame_data.main_command_buffer);
@@ -1160,12 +1186,6 @@ namespace smol::renderer
         {
             vkDestroySemaphore(ctx.device, frame_data.swapchain_acquire_semaphore, nullptr);
             frame_data.swapchain_acquire_semaphore = VK_NULL_HANDLE;
-        }
-
-        if (frame_data.swapchain_release_semaphore != VK_NULL_HANDLE)
-        {
-            vkDestroySemaphore(ctx.device, frame_data.swapchain_release_semaphore, nullptr);
-            frame_data.swapchain_release_semaphore = VK_NULL_HANDLE;
         }
 
         if (frame_data.global_buffer != VK_NULL_HANDLE)

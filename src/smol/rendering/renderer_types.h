@@ -57,6 +57,7 @@ namespace smol::renderer
 
         std::vector<VkImage> images;
         std::vector<VkImageView> views;
+        std::vector<VkSemaphore> release_semaphores;
 
         VkImage depth_image = VK_NULL_HANDLE;
         VkImageView depth_view = VK_NULL_HANDLE;
@@ -98,11 +99,10 @@ namespace smol::renderer
 
     struct per_frame_t
     {
-        VkFence queue_submit_fence = VK_NULL_HANDLE;
+        u64_t target_timeline_value = 0;
         VkCommandPool main_command_pool = VK_NULL_HANDLE;
         VkCommandBuffer main_command_buffer = VK_NULL_HANDLE;
         VkSemaphore swapchain_acquire_semaphore = VK_NULL_HANDLE;
-        VkSemaphore swapchain_release_semaphore = VK_NULL_HANDLE;
 
         VkBuffer global_buffer = VK_NULL_HANDLE;
         VmaAllocation global_allocation = VK_NULL_HANDLE;
@@ -155,7 +155,7 @@ namespace smol::renderer
         std::mutex descriptor_mutex;
 
         std::vector<per_frame_t> per_frame_objects;
-        std::vector<VkSemaphore> recycled_semaphores;
+        u32_t cur_frame = 0;
 
         VkSemaphore timeline_semaphore = VK_NULL_HANDLE;
         u64_t timeline_value = 0;

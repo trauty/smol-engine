@@ -9,6 +9,7 @@
 #include "smol/ecs_fwd.h"
 #include "smol/log.h"
 #include "smol/math.h"
+#include "tracy/Tracy.hpp"
 
 #include <vector>
 
@@ -175,6 +176,8 @@ namespace smol::transform_system
 
     void update(ecs::registry_t& reg)
     {
+        ZoneScoped;
+
         if (is_hierarchy_dirty) { rebuild_hierarchy(reg); }
 
         auto view = reg.view<transform_t>();
