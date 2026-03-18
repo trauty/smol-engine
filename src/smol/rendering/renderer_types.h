@@ -1,12 +1,10 @@
 #pragma once
 
-#include "smol/assets/mesh.h"
-#include "smol/assets/texture.h"
 #include "smol/defines.h"
 #include "smol/log.h"
-#include "smol/math.h"
 #include "smol/rendering/vulkan.h"
 
+#include <deque>
 #include <mutex>
 #include <optional>
 #include <vector>
@@ -65,6 +63,14 @@ namespace smol::renderer
         VkFormat depth_format;
     };
 
+    struct push_constants_t
+    {
+        u32_t global_buffer_id;
+        u32_t object_buffer_id;
+        u32_t material_buffer_id;
+        u32_t custom_data;
+    };
+
     struct alignas(16) gpu_mat4_t
     {
         f32 data[16];
@@ -97,6 +103,40 @@ namespace smol::renderer
         u32_t _pad;
     };
 
+    struct image_desc_t
+    {
+        u32_t width;
+        u32_t height;
+        VkFormat format;
+        VkImageUsageFlags usage;
+        VkImageAspectFlags aspect;
+
+        bool operator==(const image_desc_t& other) const
+        {
+            return width == other.width && height == other.height && format == other.format && usage == other.usage &&
+                   aspect == other.aspect;
+        }
+    };
+
+    struct transient_image_t
+    {
+        image_desc_t desc;
+        VkImage image = VK_NULL_HANDLE;
+        VkImageView view = VK_NULL_HANDLE;
+        VmaAllocation allocation = VK_NULL_HANDLE;
+        u32_t bindless_id = BINDLESS_NULL_HANDLE;
+        bool in_use = false;
+    };
+
+    struct transient_pool_t
+    {
+        std::deque<transient_image_t> images;
+
+        transient_image_t* acquire(const image_desc_t& desc);
+        void reset();
+        void shutdown();
+    };
+
     struct per_frame_t
     {
         u64_t target_timeline_value = 0;
@@ -114,6 +154,8 @@ namespace smol::renderer
         object_data_t* mapped_object_data = nullptr;
         u32_t object_bindless_id = BINDLESS_NULL_HANDLE;
 
+        u32_t object_counter = 0;
+
         VkBuffer indirect_buffer = VK_NULL_HANDLE;
         VmaAllocation indirect_allocation = VK_NULL_HANDLE;
         VkDrawIndirectCommand* mapped_indirect_data = nullptr;
@@ -122,6 +164,8 @@ namespace smol::renderer
         VmaAllocation material_allocation = VK_NULL_HANDLE;
         u8* mapped_material_data = nullptr;
         u32_t material_bindless_id = BINDLESS_NULL_HANDLE;
+
+        transient_pool_t transient_pool;
     };
 
     struct render_context_t

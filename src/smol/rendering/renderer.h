@@ -1,8 +1,15 @@
 #pragma once
 
+#include "smol/asset.h"
+#include "smol/assets/material.h"
 #include "smol/defines.h"
+#include "smol/ecs_fwd.h"
 #include "smol/rendering/renderer_types.h"
+#include "smol/rendering/rendergraph.h"
 #include "smol/window.h"
+
+#include <functional>
+#include <vector>
 
 namespace smol::renderer
 {
@@ -14,7 +21,27 @@ namespace smol::renderer
         u32_t count;
     };
 
+    using graph_builder_func_t = void (*)(rendergraph_t&, ecs::registry_t&);
+
+    SMOL_API void register_renderer_feature(graph_builder_func_t builder);
+
+    SMOL_API rg_pass_t& add_mesh_pass(rendergraph_t& graph, const std::string& name, const std::string& target_pass_tag,
+                                      const std::vector<rg_resource_id>& reads,
+                                      const std::vector<rg_resource_id>& writes, rg_resource_id depth);
+
+    SMOL_API rg_pass_t&
+    add_fullscreen_pass(rendergraph_t& graph, const std::string& name, asset_t<smol::material_t> material,
+                        const std::vector<rg_resource_id>& reads, const std::vector<rg_resource_id>& writes,
+                        std::function<void(rendergraph_t&, smol::material_t&)> on_execute = nullptr);
+
+    SMOL_API rg_pass_t& add_compute_pass(rendergraph_t& graph, const std::string& name,
+                                         asset_t<smol::material_t> material, u32_t dispatch_x, u32_t dispatch_y,
+                                         u32_t dispatch_z, const std::vector<rg_resource_id>& reads,
+                                         const std::vector<rg_resource_id>& writes,
+                                         std::function<void(rendergraph_t&, smol::material_t&)> on_execute = nullptr);
+
     bool init(const context_config_t& config, SDL_Window* window);
+    void reset_graph_state();
     void shutdown();
 
     extern render_context_t ctx;

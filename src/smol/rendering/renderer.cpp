@@ -12,6 +12,7 @@
 #include "smol/math.h"
 #include "smol/rendering/renderer_resources.h"
 #include "smol/rendering/renderer_types.h"
+#include "smol/rendering/rendergraph.h"
 #include "smol/rendering/samplers.h"
 #include "smol/rendering/vulkan.h"
 #include "smol/systems/camera.h"
@@ -43,7 +44,174 @@ namespace smol::renderer
     {
         const std::vector<const char*> validation_layers = {"VK_LAYER_KHRONOS_validation"};
         TracyVkCtx tracy_vk_ctx = nullptr;
+
+        rendergraph_t rendergraph;
+        std::vector<graph_builder_func_t> custom_renderer_features;
     } // namespace
+
+    void register_renderer_feature(graph_builder_func_t builder) { custom_renderer_features.push_back(builder); }
+
+    SMOL_API rg_pass_t& add_mesh_pass(rendergraph_t& graph, const std::string& name, const std::string& target_pass_tag,
+                                      const std::vector<rg_resource_id>& reads,
+                                      const std::vector<rg_resource_id>& writes, rg_resource_id depth)
+    {
+        rg_pass_t& pass = graph.add_pass(name);
+        pass.texture_reads = reads;
+        pass.color_writes = writes;
+        pass.depth_stencil = depth;
+
+        pass.execute_callback = [target_pass_tag](VkCommandBuffer cmd, ecs::registry_t& reg)
+        {
+            per_frame_t& frame_data = ctx.per_frame_objects[ctx.cur_frame];
+            std::vector<render_batch_t> batches;
+
+            u32_t cur_object_id = frame_data.object_counter;
+
+            auto view = reg.view<transform_t, mesh_renderer_t>();
+            for (auto [entity, transform, renderer] : view.each())
+            {
+                if (!renderer.active || !renderer.mesh || !renderer.material || !renderer.material->shader)
+                {
+                    continue;
+                }
+
+                if (renderer.material->shader->target_pass != target_pass_tag) { continue; }
+
+                renderer.material->sync();
+
+                object_data_t& obj_data = frame_data.mapped_object_data[cur_object_id];
+                std::memcpy(obj_data.model_matrix.data, &transform.world_mat, sizeof(mat4_t));
+                obj_data.material_offset = renderer.material->heap_offset;
+                obj_data.vertex_buffer_id = renderer.mesh->vertex_bindless_id;
+                obj_data.index_buffer_id = renderer.mesh->index_bindless_id;
+
+                VkDrawIndirectCommand& draw_cmd = frame_data.mapped_indirect_data[cur_object_id];
+                draw_cmd.vertexCount =
+                    renderer.mesh->uses_indices ? renderer.mesh->index_count : renderer.mesh->vertex_count;
+                draw_cmd.instanceCount = 1;
+                draw_cmd.firstVertex = 0;
+                draw_cmd.firstInstance = 0;
+
+                VkPipeline cur_pipeline = renderer.material->shader->pipeline;
+                VkPipelineLayout cur_layout = renderer.material->shader->pipeline_layout;
+
+                if (batches.empty() || batches.back().pipeline != cur_pipeline)
+                {
+                    batches.push_back({cur_pipeline, cur_layout, cur_object_id, 1});
+                }
+                else
+                {
+                    batches.back().count++;
+                }
+
+                cur_object_id++;
+            }
+
+            frame_data.object_counter = cur_object_id;
+
+            push_constants_t pc_data = {
+                frame_data.global_bindless_id,
+                frame_data.object_bindless_id,
+                res_system.material_heap.bindless_id,
+            };
+
+            for (const render_batch_t& batch : batches)
+            {
+                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, batch.pipeline);
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, batch.layout, 0, 1,
+                                        &res_system.global_set, 0, nullptr);
+
+                vkCmdPushConstants(cmd, batch.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                                   sizeof(push_constants_t), &pc_data);
+
+                vkCmdDrawIndirect(cmd, frame_data.indirect_buffer, batch.start_idx * sizeof(VkDrawIndirectCommand),
+                                  batch.count, sizeof(VkDrawIndirectCommand));
+            }
+        };
+
+        return pass;
+    }
+
+    SMOL_API rg_pass_t& add_fullscreen_pass(rendergraph_t& graph, const std::string& name,
+                                            asset_t<smol::material_t> material,
+                                            const std::vector<rg_resource_id>& reads,
+                                            const std::vector<rg_resource_id>& writes,
+                                            std::function<void(rendergraph_t&, smol::material_t&)> on_execute)
+    {
+        rg_pass_t& pass = graph.add_pass(name);
+        pass.texture_reads = reads;
+        pass.color_writes = writes;
+
+        pass.execute_callback = [&graph, material, on_execute](VkCommandBuffer cmd, ecs::registry_t& reg)
+        {
+            if (!material || !material->shader || !material->shader->ready()) { return; }
+
+            if (on_execute) { on_execute(graph, *material); }
+
+            material->sync();
+
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, material->shader->pipeline);
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, material->shader->pipeline_layout, 0, 1,
+                                    &res_system.global_set, 0, nullptr);
+
+            per_frame_t& frame_data = ctx.per_frame_objects[ctx.cur_frame];
+            push_constants_t pc_data = {
+                frame_data.global_bindless_id,
+                frame_data.object_bindless_id,
+                res_system.material_heap.bindless_id,
+                material->heap_offset,
+            };
+
+            vkCmdPushConstants(cmd, material->shader->pipeline_layout,
+                               VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push_constants_t),
+                               &pc_data);
+
+            vkCmdDraw(cmd, 3, 1, 0, 0);
+        };
+
+        return pass;
+    }
+
+    SMOL_API rg_pass_t& add_compute_pass(rendergraph_t& graph, const std::string& name,
+                                         asset_t<smol::material_t> material, u32_t dispatch_x, u32_t dispatch_y,
+                                         u32_t dispatch_z, const std::vector<rg_resource_id>& reads,
+                                         const std::vector<rg_resource_id>& writes,
+                                         std::function<void(rendergraph_t&, smol::material_t&)> on_execute)
+    {
+        rg_pass_t& pass = graph.add_pass(name);
+        pass.texture_reads = reads;
+        pass.storage_writes = writes;
+
+        pass.execute_callback = [&graph, material, dispatch_x, dispatch_y, dispatch_z, on_execute](VkCommandBuffer cmd,
+                                                                                                   ecs::registry_t& reg)
+        {
+            if (!material || !material->shader || !material->shader->ready()) { return; }
+
+            if (on_execute) { on_execute(graph, *material); }
+
+            material->sync();
+
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, material->shader->pipeline);
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, material->shader->pipeline_layout, 0, 1,
+                                    &res_system.global_set, 0, nullptr);
+
+            per_frame_t& frame_data = ctx.per_frame_objects[ctx.cur_frame];
+            push_constants_t pc_data = {
+                frame_data.global_bindless_id,
+                frame_data.object_bindless_id,
+                res_system.material_heap.bindless_id,
+                material->heap_offset,
+            };
+
+            vkCmdPushConstants(cmd, material->shader->pipeline_layout,
+                               VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push_constants_t),
+                               &pc_data);
+
+            vkCmdDispatch(cmd, dispatch_x, dispatch_y, dispatch_z);
+        };
+
+        return pass;
+    }
 
     namespace detail
     {
@@ -401,9 +569,14 @@ namespace smol::renderer
         return true;
     }
 
+    void reset_graph_state()
+    {
+        rendergraph.clear();
+        custom_renderer_features.clear();
+    }
+
     void shutdown()
     {
-
 #ifdef SMOL_ENABLE_PROFILING
         if (tracy_vk_ctx) { TracyVkDestroy(tracy_vk_ctx); }
 #endif
@@ -534,11 +707,6 @@ namespace smol::renderer
             }
         }
 
-        VkClearValue clear_values[] = {
-            {.color = {{0.01f, 0.01f, 0.01f, 1.0f}}},
-            {.depthStencil = {1.0f, 0}},
-        };
-
         ecs::entity_t active_cam = camera_system::get_active_camera(reg);
         if (active_cam != ecs::NULL_ENTITY)
         {
@@ -556,165 +724,61 @@ namespace smol::renderer
 
         frame_data.mapped_global_data->time = time::time;
 
-        transition_image(cmd, ctx.swapchain.images[index], VK_IMAGE_LAYOUT_UNDEFINED,
-                         VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL);
+        rendergraph.clear();
 
-        VkImageAspectFlags depth_aspect = VK_IMAGE_ASPECT_DEPTH_BIT;
-        if (ctx.swapchain.depth_format == VK_FORMAT_D32_SFLOAT_S8_UINT ||
-            ctx.swapchain.depth_format == VK_FORMAT_D24_UNORM_S8_UINT)
+        reg.sort<mesh_renderer_t>(
+            [](const mesh_renderer_t& lhs, const mesh_renderer_t& rhs)
+            {
+                if (!lhs.material->shader || !rhs.material->shader)
+                {
+                    return lhs.material->shader > rhs.material->shader;
+                }
+
+                if (lhs.material->shader->pipeline != rhs.material->shader->pipeline)
+                {
+                    return lhs.material->shader->pipeline < rhs.material->shader->pipeline;
+                }
+
+                return lhs.material.get() < rhs.material.get();
+            });
+
+        rg_resource_id swapchain_res =
+            rendergraph.import_image("Swapchain", ctx.swapchain.images[index], ctx.swapchain.views[index],
+                                     ctx.swapchain.format, ctx.swapchain.extent.width, ctx.swapchain.extent.height);
+
+        image_desc_t color_desc = {
+            .width = ctx.swapchain.extent.width,
+            .height = ctx.swapchain.extent.height,
+            .format = VK_FORMAT_R16G16B16A16_SFLOAT,
+            .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+            .aspect = VK_IMAGE_ASPECT_COLOR_BIT,
+        };
+
+        rg_resource_id color_res = rendergraph.create_image("SceneColor", color_desc);
+
+        image_desc_t depth_desc = {
+            .width = ctx.swapchain.extent.width,
+            .height = ctx.swapchain.extent.height,
+            .format = ctx.swapchain.depth_format,
+            .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+            .aspect = VK_IMAGE_ASPECT_DEPTH_BIT,
+        };
+
+        rg_resource_id depth_res = rendergraph.create_image("SceneDepth", depth_desc);
+
+        frame_data.object_counter = 0;
+
+        for (graph_builder_func_t& feature_builder : custom_renderer_features) { feature_builder(rendergraph, reg); }
+
+        rendergraph.compile(frame_data);
+        rendergraph.execute(cmd, reg);
+
+        VkImageLayout final_layout = rendergraph.get_layout(swapchain_res);
+        if (final_layout != VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)
         {
-            depth_aspect |= VK_IMAGE_ASPECT_STENCIL_BIT;
+            transition_image(cmd, ctx.swapchain.images[index], final_layout, VK_IMAGE_LAYOUT_PRESENT_SRC_KHR,
+                             VK_IMAGE_ASPECT_COLOR_BIT);
         }
-
-        transition_image(cmd, ctx.swapchain.depth_image, VK_IMAGE_LAYOUT_UNDEFINED,
-                         VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL, depth_aspect);
-
-        VkRenderingAttachmentInfo color_attachment = {
-            .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-            .imageView = ctx.swapchain.views[index],
-            .imageLayout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-            .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-            .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
-            .clearValue = clear_values[0],
-        };
-
-        VkRenderingAttachmentInfo depth_attachment = {
-            .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
-            .imageView = ctx.swapchain.depth_view,
-            .imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-            .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
-            .storeOp = VK_ATTACHMENT_STORE_OP_DONT_CARE,
-            .clearValue = clear_values[1],
-        };
-
-        VkRenderingInfo rendering_info = {
-            .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-            .renderArea = {.extent = ctx.swapchain.extent},
-            .layerCount = 1,
-            .colorAttachmentCount = 1,
-            .pColorAttachments = &color_attachment,
-            .pDepthAttachment = &depth_attachment,
-        };
-
-        {
-#ifdef SMOL_ENABLE_PROFILING
-            TracyVkZone(tracy_vk_ctx, cmd, "Main Pass");
-#endif
-
-            vkCmdBeginRendering(cmd, &rendering_info);
-
-            VkViewport vp = {
-                .width = static_cast<f32>(ctx.swapchain.extent.width),
-                .height = static_cast<f32>(ctx.swapchain.extent.height),
-                .minDepth = 0.0f,
-                .maxDepth = 1.0f,
-            };
-            vkCmdSetViewport(cmd, 0, 1, &vp);
-
-            VkRect2D scissor = {.extent = ctx.swapchain.extent};
-            vkCmdSetScissor(cmd, 0, 1, &scissor);
-
-            reg.sort<mesh_renderer_t>(
-                [](const mesh_renderer_t& lhs, const mesh_renderer_t& rhs)
-                {
-                    if (!lhs.material->shader || !rhs.material->shader)
-                    {
-                        return lhs.material->shader > rhs.material->shader;
-                    }
-
-                    if (lhs.material->shader->pipeline != rhs.material->shader->pipeline)
-                    {
-                        return lhs.material->shader->pipeline < rhs.material->shader->pipeline;
-                    }
-
-                    return lhs.material.get() < rhs.material.get();
-                });
-
-            std::vector<render_batch_t> batches;
-            u32_t cur_object_id = 0;
-            u32_t cur_material_offset = 0;
-            u8* gpu_material_ptr = frame_data.mapped_material_data;
-
-            material_t* last_processed_mat = nullptr;
-
-            auto view = reg.view<transform_t, mesh_renderer_t>();
-
-            for (auto [entity, transform, renderer] : view.each())
-            {
-                if (!renderer.active || !renderer.mesh || !renderer.material->shader) { continue; }
-
-                material_t* cur_mat = renderer.material.get();
-
-                if (cur_mat != last_processed_mat)
-                {
-                    if (!cur_mat->data.empty())
-                    {
-                        cur_mat->heap_offset = cur_material_offset;
-
-                        std::memcpy(gpu_material_ptr + cur_material_offset, cur_mat->data.data(), cur_mat->data.size());
-
-                        cur_material_offset += cur_mat->data.size();
-                    }
-
-                    last_processed_mat = cur_mat;
-                }
-
-                object_data_t& obj_data = frame_data.mapped_object_data[cur_object_id];
-                std::memcpy(obj_data.model_matrix.data, &transform.world_mat, sizeof(mat4_t));
-                obj_data.material_offset = cur_mat->heap_offset;
-                obj_data.vertex_buffer_id = renderer.mesh->vertex_bindless_id;
-                obj_data.index_buffer_id = renderer.mesh->index_bindless_id;
-
-                VkDrawIndirectCommand& draw_cmd = frame_data.mapped_indirect_data[cur_object_id];
-                draw_cmd.vertexCount =
-                    renderer.mesh->uses_indices ? renderer.mesh->index_count : renderer.mesh->vertex_count;
-                draw_cmd.instanceCount = 1;
-                draw_cmd.firstVertex = 0;
-                draw_cmd.firstInstance = 0;
-
-                VkPipeline cur_pipeline = renderer.material->shader->pipeline;
-                VkPipelineLayout cur_layout = renderer.material->shader->pipeline_layout;
-
-                if (batches.empty() || batches.back().pipeline != cur_pipeline)
-                {
-                    batches.push_back({cur_pipeline, cur_layout, cur_object_id, 1});
-                }
-                else
-                {
-                    batches.back().count++;
-                }
-
-                cur_object_id++;
-            }
-
-            struct
-            {
-                u32_t global_buffer_id;
-                u32_t object_buffer_id;
-                u32_t material_buffer_id;
-            } pc_data = {
-                frame_data.global_bindless_id,
-                frame_data.object_bindless_id,
-                frame_data.material_bindless_id,
-            };
-
-            for (const render_batch_t& batch : batches)
-            {
-                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, batch.pipeline);
-                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, batch.layout, 0, 1,
-                                        &res_system.global_set, 0, nullptr);
-                vkCmdPushConstants(cmd, batch.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-                                   sizeof(pc_data), &pc_data);
-
-                vkCmdDrawIndirect(cmd, frame_data.indirect_buffer, batch.start_idx * sizeof(VkDrawIndirectCommand),
-                                  batch.count, sizeof(VkDrawIndirectCommand));
-            }
-
-            vkCmdEndRendering(cmd);
-        }
-
-        transition_image(cmd, ctx.swapchain.images[index], VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL,
-                         VK_IMAGE_LAYOUT_PRESENT_SRC_KHR);
 
         vkEndCommandBuffer(cmd);
 
@@ -857,6 +921,21 @@ namespace smol::renderer
         {
             barrier.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
             barrier.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+            barrier.dstStageMask = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
+            barrier.dstAccessMask = 0;
+        }
+        else if (old_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL &&
+                 new_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+        {
+            barrier.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+            barrier.srcAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+            barrier.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+            barrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
+        }
+        else if (old_layout == VK_IMAGE_LAYOUT_UNDEFINED && new_layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)
+        {
+            barrier.srcStageMask = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+            barrier.srcAccessMask = 0;
             barrier.dstStageMask = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
             barrier.dstAccessMask = 0;
         }
@@ -1091,6 +1170,8 @@ namespace smol::renderer
 
         vkResetCommandPool(ctx.device, frame_data.main_command_pool, 0);
 
+        frame_data.transient_pool.reset();
+
         return VK_SUCCESS;
     }
 
@@ -1170,6 +1251,8 @@ namespace smol::renderer
 
     void shutdown_per_frame(per_frame_t& frame_data)
     {
+        frame_data.transient_pool.shutdown();
+
         if (frame_data.main_command_buffer != VK_NULL_HANDLE)
         {
             vkFreeCommandBuffers(ctx.device, frame_data.main_command_pool, 1, &frame_data.main_command_buffer);

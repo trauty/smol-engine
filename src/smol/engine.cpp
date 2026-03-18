@@ -143,14 +143,13 @@ namespace smol::engine
             active_scene.reset();
         }
 
+        smol::renderer::reset_graph_state();
         engine_assets.shutdown();
-
         smol::renderer::shutdown();
-
         smol::jobs::shutdown();
-
         smol::window::shutdown();
         smol::log::shutdown();
+
         return 0;
     }
 

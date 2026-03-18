@@ -1,11 +1,13 @@
 #include "shader.h"
 
+#include "smol/defines.h"
 #include "smol/log.h"
 #include "smol/rendering/renderer.h"
 #include "smol/rendering/renderer_resources.h"
 #include "smol/rendering/renderer_types.h"
 #include "smol/rendering/shader_compiler.h"
 #include "smol/rendering/vulkan.h"
+#include "vulkan/vulkan_core.h"
 
 #include <mutex>
 #include <optional>
@@ -25,6 +27,13 @@ namespace smol
             std::vector<u32> frag_spirv;
             shader_reflection_t reflection;
             bool success = false;
+
+            std::string target_pass = "MainForwardPass";
+            std::string blend_mode = "Opaque";
+            bool depth_write = true;
+            bool depth_test = true;
+
+            std::vector<VkFormat> target_formats;
         };
 
         VkShaderModule create_shader_module(const std::vector<u32>& code)
@@ -41,6 +50,20 @@ namespace smol
             }
 
             return module;
+        }
+
+        VkFormat map_alias_to_format(const std::string& alias)
+        {
+            if (alias == "Swapchain") { return renderer::ctx.swapchain.format; }
+            if (alias == "RGBA8_SRGB") { return VK_FORMAT_R8G8B8A8_SRGB; }
+            if (alias == "RGBA8_UNORM") { return VK_FORMAT_R8G8B8A8_UNORM; }
+            if (alias == "RGBA16_FLOAT") { return VK_FORMAT_R16G16B16A16_SFLOAT; }
+            if (alias == "RG16_FLOAT") { return VK_FORMAT_R16G16_SFLOAT; }
+            if (alias == "R8_UNORM") { return VK_FORMAT_R8_UNORM; }
+
+            SMOL_LOG_ERROR("SHADER", "Unkown format alias: {}", alias);
+
+            return renderer::ctx.swapchain.format;
         }
 
         struct traversal_state_t
@@ -107,21 +130,34 @@ namespace smol
             {
                 slang::VariableLayoutReflection* var = layout->getParameterByIndex(i);
                 slang::TypeLayoutReflection* type = var->getTypeLayout();
-                std::string var_name = var->getName() ? std::string(var->getName()) : "";
 
-                SMOL_LOG_INFO("SHADER", "Type name: {}", var_name);
+                slang::TypeReflection::Kind kind = type->getKind();
 
-                if (var_name != "pc" && !var_name.empty())
+                if ((kind == slang::TypeReflection::Kind::Resource &&
+                     type->getResourceShape() == SlangResourceShape::SLANG_STRUCTURED_BUFFER) ||
+                    kind == slang::TypeReflection::Kind::ConstantBuffer)
                 {
-                    slang::TypeReflection::Kind kind = type->getKind();
-
-                    if ((kind == slang::TypeReflection::Kind::Resource &&
-                         type->getResourceShape() == SlangResourceShape::SLANG_STRUCTURED_BUFFER) ||
-                        kind == slang::TypeReflection::Kind::ConstantBuffer)
+                    slang::TypeLayoutReflection* content_type = type->getElementTypeLayout();
+                    if (content_type->getKind() == slang::TypeReflection::Kind::Struct)
                     {
-                        slang::TypeLayoutReflection* content_type = type->getElementTypeLayout();
-                        if (content_type->getKind() == slang::TypeReflection::Kind::Struct)
+                        slang::TypeReflection* struct_type = content_type->getType();
+
+                        bool is_material = false;
+                        for (u32 attr_idx = 0; attr_idx < struct_type->getUserAttributeCount(); attr_idx++)
                         {
+                            slang::UserAttribute* attr = struct_type->getUserAttributeByIndex(attr_idx);
+                            std::string attr_name = attr->getName();
+
+                            if (attr_name == "MaterialReflection" || attr_name == "MaterialReflectionAttribute")
+                            {
+                                is_material = true;
+                                break;
+                            }
+                        }
+
+                        if (is_material)
+                        {
+                            SMOL_LOG_INFO("SHADER", "Found material data struct '{}'", type->getName());
                             reflect_material_struct(content_type, res);
                         }
                     }
@@ -184,7 +220,79 @@ namespace smol
                 if (SLANG_FAILED(link_res) || !linked_program) { return res; }
             }
 
-            res.reflection = reflect_slang_layout(linked_program->getLayout());
+            slang::ProgramLayout* layout = linked_program->getLayout();
+            res.reflection = reflect_slang_layout(layout);
+
+            // extraction of render config for pipeline creation
+            for (u32 ep_idx = 0; ep_idx < layout->getEntryPointCount(); ep_idx++)
+            {
+                slang::EntryPointReflection* entry_point = layout->getEntryPointByIndex(ep_idx);
+                std::string ep_name = entry_point->getName() ? entry_point->getName() : "";
+
+                if (ep_name == "fragmentMain")
+                {
+                    slang::VariableLayoutReflection* result_var = entry_point->getResultVarLayout();
+                    if (!result_var) { continue; }
+
+                    slang::TypeReflection* result_type = result_var->getTypeLayout()->getType();
+
+                    for (u32 attr_idx = 0; attr_idx < result_type->getUserAttributeCount(); attr_idx++)
+                    {
+                        slang::UserAttribute* attr_reflection = result_type->getUserAttributeByIndex(attr_idx);
+                        std::string attr_name = attr_reflection->getName();
+
+                        if (attr_name == "RenderConfig" || attr_name == "RenderConfigAttribute")
+                        {
+                            size_t len = 0;
+                            if (const char* pass_str = attr_reflection->getArgumentValueString(0, &len))
+                            {
+                                res.target_pass = std::string(pass_str, len);
+                            }
+                            if (const char* blend_str = attr_reflection->getArgumentValueString(1, &len))
+                            {
+                                res.blend_mode = std::string(blend_str, len);
+                            }
+
+                            i32 depth_write_val;
+                            attr_reflection->getArgumentValueInt(2, &depth_write_val);
+                            res.depth_write = depth_write_val != 0;
+
+                            i32 depth_test_val;
+                            attr_reflection->getArgumentValueInt(3, &depth_test_val);
+                            res.depth_test = depth_test_val != 0;
+
+                            SMOL_LOG_INFO("SHADER", "Found target pass of shader '{}': {}", path, res.target_pass);
+                        }
+                    }
+
+                    for (u32 field_idx = 0; field_idx < result_type->getFieldCount(); field_idx++)
+                    {
+                        slang::VariableReflection* field = result_type->getFieldByIndex(field_idx);
+
+                        for (u32 attr_idx = 0; attr_idx < field->getUserAttributeCount(); attr_idx++)
+                        {
+                            slang::UserAttribute* attr_reflection = field->getUserAttributeByIndex(attr_idx);
+                            std::string attr_name = attr_reflection->getName();
+
+                            if (attr_name == "RenderTarget" || attr_name == "RenderTargetAttribute")
+                            {
+                                size_t len = 0;
+                                const char* alias_str = attr_reflection->getArgumentValueString(0, &len);
+                                if (alias_str)
+                                {
+                                    res.target_formats.push_back(map_alias_to_format(std::string(alias_str, len)));
+                                }
+
+                                SMOL_LOG_INFO("SHADER",
+                                              "Found target format of target '{} - SV_Target{}' of shader '{}': {}",
+                                              result_type->getName(), attr_idx, path, alias_str);
+                            }
+                        }
+                    }
+                }
+            }
+
+            if (res.target_formats.empty()) { res.target_formats.push_back(renderer::ctx.swapchain.format); }
 
             Slang::ComPtr<slang::IBlob> kernel_blob;
             linked_program->getEntryPointCode(0, 0, kernel_blob.writeRef(), diag_blob.writeRef());
@@ -220,6 +328,12 @@ namespace smol
 
         shader_t shader_asset;
         shader_asset.reflection = compiled_shader.reflection;
+
+        shader_asset.target_pass = compiled_shader.target_pass;
+        shader_asset.blend_mode = compiled_shader.blend_mode;
+        shader_asset.depth_write = compiled_shader.depth_write;
+        shader_asset.depth_test = compiled_shader.depth_test;
+        shader_asset.target_formats = compiled_shader.target_formats;
 
         VkShaderModule vert_mod = create_shader_module(compiled_shader.vert_spirv);
         VkShaderModule frag_mod = create_shader_module(compiled_shader.frag_spirv);
@@ -283,24 +397,46 @@ namespace smol
 
         VkPipelineDepthStencilStateCreateInfo depth_stencil_info = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-            .depthTestEnable = VK_TRUE,
-            .depthWriteEnable = VK_TRUE,
-            .depthCompareOp = VK_COMPARE_OP_LESS,
+            .depthTestEnable = shader_asset.depth_test ? VK_TRUE : VK_FALSE,
+            .depthWriteEnable = shader_asset.depth_write ? VK_TRUE : VK_FALSE,
+            .depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
             .depthBoundsTestEnable = VK_FALSE,
             .stencilTestEnable = VK_FALSE,
         };
 
-        VkPipelineColorBlendAttachmentState color_blend_attachment_info = {
+        VkPipelineColorBlendAttachmentState base_blend = {
             .blendEnable = VK_FALSE,
+            .srcColorBlendFactor = VK_BLEND_FACTOR_ONE,
+            .dstColorBlendFactor = VK_BLEND_FACTOR_ZERO,
+            .colorBlendOp = VK_BLEND_OP_ADD,
+            .srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE,
+            .dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO,
+            .alphaBlendOp = VK_BLEND_OP_ADD,
             .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT |
                               VK_COLOR_COMPONENT_A_BIT,
         };
 
+        if (shader_asset.blend_mode == "Alpha")
+        {
+            base_blend.blendEnable = VK_TRUE;
+            base_blend.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
+            base_blend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+        }
+        else if (shader_asset.blend_mode == "Additive")
+        {
+            base_blend.blendEnable = VK_TRUE;
+            base_blend.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+            base_blend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
+        }
+
+        std::vector<VkPipelineColorBlendAttachmentState> blend_attachments(shader_asset.target_formats.size(),
+                                                                           base_blend);
+
         VkPipelineColorBlendStateCreateInfo color_blend_info = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
             .logicOpEnable = VK_FALSE,
-            .attachmentCount = 1,
-            .pAttachments = &color_blend_attachment_info,
+            .attachmentCount = static_cast<u32_t>(blend_attachments.size()),
+            .pAttachments = blend_attachments.empty() ? nullptr : blend_attachments.data(),
         };
 
         std::vector<VkDynamicState> dynamic_states = {
@@ -316,7 +452,7 @@ namespace smol
         VkPushConstantRange push_constant = {
             .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
             .offset = 0,
-            .size = sizeof(u32_t) * 3,
+            .size = sizeof(renderer::push_constants_t),
         };
 
         VkDescriptorSetLayout set_layouts[] = {renderer::res_system.global_layout};
@@ -336,15 +472,17 @@ namespace smol
             return std::nullopt;
         }
 
-        VkFormat color_format = renderer::ctx.swapchain.format;
-        VkFormat depth_format = renderer::ctx.swapchain.depth_format;
-
         VkPipelineRenderingCreateInfo pipeline_rendering_info = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
-            .colorAttachmentCount = 1,
-            .pColorAttachmentFormats = &color_format,
-            .depthAttachmentFormat = depth_format,
+            .colorAttachmentCount = static_cast<u32_t>(shader_asset.target_formats.size()),
+            .pColorAttachmentFormats =
+                shader_asset.target_formats.empty() ? nullptr : shader_asset.target_formats.data(),
         };
+
+        if (shader_asset.depth_test || shader_asset.depth_write)
+        {
+            pipeline_rendering_info.depthAttachmentFormat = renderer::ctx.swapchain.depth_format;
+        }
 
         VkGraphicsPipelineCreateInfo pipeline_info = {
             .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,

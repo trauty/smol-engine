@@ -40,6 +40,8 @@ namespace smol
             data.resize(total_size, 0);
         }
 
+        void sync();
+
         template <typename T>
         void set_property(const std::string& name, const T& value)
         {
@@ -77,7 +79,9 @@ namespace smol
         }
 
         void set_sampler(const std::string& name, sampler_type_e sampler)
-        { set_property<u32_t>(name, static_cast<u32_t>(sampler)); }
+        {
+            set_property<u32_t>(name, static_cast<u32_t>(sampler));
+        }
     };
 
     template <>

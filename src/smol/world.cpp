@@ -51,6 +51,9 @@ namespace smol
 
         physics.destroy_bodies(registry);
         physics.shutdown();
+
+        registry.clear();
+        registry.ctx().clear();
     }
 
     void world_t::register_init_system(system_func_t system) { init_systems.push_back(system); }

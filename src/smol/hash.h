@@ -4,7 +4,7 @@
 
 #include <string_view>
 
-namespace smol::hash
+namespace smol
 {
     // http://www.isthe.com/chongo/tech/comp/fnv/index.html
     constexpr u32_t hash_string(std::string_view str)
@@ -29,4 +29,4 @@ namespace smol::hash
         return hash;
     }
 
-} // namespace smol::hash
+} // namespace smol

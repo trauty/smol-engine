@@ -1,12 +1,9 @@
 #pragma once
 
 #include "smol/asset_registry.h"
-#include "smol/ecs.h"
 #include "smol/engine.h"
-#include "smol/log.h"
 
 #include <atomic>
-#include <iostream>
 #include <thread>
 
 namespace smol
@@ -62,6 +59,8 @@ namespace smol
 
             return *this;
         }
+
+        bool operator==(const asset_t& other) const { return slot == other.slot; }
 
         void release()
         {
