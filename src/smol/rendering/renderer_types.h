@@ -3,6 +3,7 @@
 #include "smol/defines.h"
 #include "smol/log.h"
 #include "smol/rendering/vulkan.h"
+#include "vulkan/vulkan_core.h"
 
 #include <deque>
 #include <mutex>
@@ -42,9 +43,7 @@ namespace smol::renderer
         std::optional<u32_t> present_family;
 
         bool is_complete() const
-        {
-            return graphics_family.has_value() && present_family.has_value() && transfer_family.has_value();
-        }
+        { return graphics_family.has_value() && present_family.has_value() && transfer_family.has_value(); }
     };
 
     struct swapchain_t
@@ -76,13 +75,51 @@ namespace smol::renderer
         f32 data[16];
     };
 
+    struct alignas(16) gpu_vec4_t
+    {
+        union
+        {
+            struct
+            {
+                f32 x, y, z, w;
+            };
+            f32 raw[4];
+        } data;
+    };
+
     struct alignas(16) gpu_vec3_t
     {
         union
         {
-            f32 x, y, z;
+            struct
+            {
+                f32 x, y, z;
+            };
             f32 raw[3];
         } data;
+    };
+
+    constexpr u32_t MAX_LIGHTS = 1024;
+    constexpr u32_t MAX_DIR_LIGHTS = 32;
+
+    struct gpu_directional_light_t
+    {
+        gpu_vec4_t direction_intensity;
+        gpu_vec4_t color;
+    };
+
+    struct gpu_point_light_t
+    {
+        gpu_vec4_t position_radius;
+        gpu_vec4_t color_intensity;
+    };
+
+    struct gpu_spot_light_t
+    {
+        gpu_vec4_t position_range;
+        gpu_vec4_t direction_intensity;
+        gpu_vec4_t color_inner_cos;
+        gpu_vec4_t outer_cos;
     };
 
     struct global_data_t
@@ -90,13 +127,23 @@ namespace smol::renderer
         gpu_mat4_t view;
         gpu_mat4_t projection;
         gpu_mat4_t view_proj;
-        gpu_vec3_t camera_pos;
+        gpu_vec4_t camera_pos;
         f32 time;
+
+        u32_t dir_light_buffer_id;
+        u32_t dir_light_count;
+
+        u32_t point_light_buffer_id;
+        u32_t point_light_count;
+
+        u32_t spot_light_buffer_id;
+        u32_t spot_light_count;
     };
 
     struct object_data_t
     {
         gpu_mat4_t model_matrix;
+        gpu_mat4_t normal_matrix;
         u32_t material_offset;
         u32_t vertex_buffer_id;
         u32_t index_buffer_id;
@@ -166,6 +213,21 @@ namespace smol::renderer
         u32_t material_bindless_id = BINDLESS_NULL_HANDLE;
 
         transient_pool_t transient_pool;
+
+        VkBuffer dir_light_buffer = VK_NULL_HANDLE;
+        VmaAllocation dir_light_allocation = VK_NULL_HANDLE;
+        gpu_directional_light_t* mapped_dir_lights = nullptr;
+        u32_t dir_light_bindless_id = BINDLESS_NULL_HANDLE;
+
+        VkBuffer point_light_buffer = VK_NULL_HANDLE;
+        VmaAllocation point_light_allocation = VK_NULL_HANDLE;
+        gpu_point_light_t* mapped_point_lights = nullptr;
+        u32_t point_light_bindless_id = BINDLESS_NULL_HANDLE;
+
+        VkBuffer spot_light_buffer = VK_NULL_HANDLE;
+        VmaAllocation spot_light_allocation = VK_NULL_HANDLE;
+        gpu_spot_light_t* mapped_spot_lights = nullptr;
+        u32_t spot_light_bindless_id = BINDLESS_NULL_HANDLE;
     };
 
     struct render_context_t
@@ -214,13 +276,4 @@ namespace smol::renderer
         std::vector<const char*> required_instance_exts;
         std::vector<const char*> required_device_exts;
     };
-
-    /*
-    struct gpu_light_t
-    {
-        vec4_t position_radius;  // xyz position, w radius
-        vec4_t color_intensity;  // rgb color, w intensity
-        vec4_t direction_cutoff; // xyz direction, w cutoff
-    };
-    */
 } // namespace smol::renderer

@@ -1,9 +1,12 @@
 #include "renderer.h"
 
+#include "cglm/simd/sse2/mat4.h"
+#include "cglm/util.h"
 #include "smol/assets/material.h"
 #include "smol/assets/mesh.h"
 #include "smol/assets/shader.h"
 #include "smol/components/camera.h"
+#include "smol/components/lighting.h"
 #include "smol/components/renderer.h"
 #include "smol/components/transform.h"
 #include "smol/defines.h"
@@ -27,6 +30,7 @@
 #include <cglm/mat4.h>
 #include <cglm/types.h>
 #include <cglm/vec3.h>
+#include <cmath>
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
@@ -81,6 +85,12 @@ namespace smol::renderer
 
                 object_data_t& obj_data = frame_data.mapped_object_data[cur_object_id];
                 std::memcpy(obj_data.model_matrix.data, &transform.world_mat, sizeof(mat4_t));
+
+                mat4_t normal_mat;
+                glm_mat4_inv(transform.world_mat, normal_mat);
+                glm_mat4_transpose(normal_mat);
+                std::memcpy(obj_data.normal_matrix.data, &normal_mat, sizeof(mat4_t));
+
                 obj_data.material_offset = renderer.material->heap_offset;
                 obj_data.vertex_buffer_id = renderer.mesh->vertex_bindless_id;
                 obj_data.index_buffer_id = renderer.mesh->index_bindless_id;
@@ -724,6 +734,94 @@ namespace smol::renderer
 
         frame_data.mapped_global_data->time = time::time;
 
+        u32_t dir_count = 0;
+        for (auto [entity, light, transform] : reg.view<directional_light_t, transform_t>().each())
+        {
+            if (dir_count >= MAX_DIR_LIGHTS) { break; }
+
+            vec3_t dir = {transform.world_mat[2][0], transform.world_mat[2][1], transform.world_mat[2][2]};
+            dir = vec3_t::normalize(dir);
+
+            gpu_directional_light_t& gpu_light = frame_data.mapped_dir_lights[dir_count];
+
+            gpu_light.direction_intensity.data.x = dir.x;
+            gpu_light.direction_intensity.data.y = dir.y;
+            gpu_light.direction_intensity.data.z = dir.z;
+            gpu_light.direction_intensity.data.w = light.intensity;
+
+            gpu_light.color.data.x = light.color.x;
+            gpu_light.color.data.y = light.color.y;
+            gpu_light.color.data.z = light.color.z;
+            gpu_light.color.data.w = 0.0f;
+
+            dir_count++;
+        }
+
+        u32_t point_count = 0;
+        for (auto [entity, light, transform] : reg.view<point_light_t, transform_t>().each())
+        {
+            if (point_count >= MAX_LIGHTS) { break; }
+
+            gpu_point_light_t& gpu_light = frame_data.mapped_point_lights[point_count];
+
+            gpu_light.position_radius.data.x = transform.world_mat[3][0];
+            gpu_light.position_radius.data.y = transform.world_mat[3][1];
+            gpu_light.position_radius.data.z = transform.world_mat[3][2];
+            gpu_light.position_radius.data.w = light.intensity;
+
+            gpu_light.color_intensity.data.x = light.color.x;
+            gpu_light.color_intensity.data.y = light.color.y;
+            gpu_light.color_intensity.data.z = light.color.z;
+            gpu_light.color_intensity.data.w = light.intensity;
+
+            point_count++;
+        }
+
+        u32_t spot_count = 0;
+        for (auto [entity, light, transform] : reg.view<spot_light_t, transform_t>().each())
+        {
+            if (spot_count >= MAX_LIGHTS) { break; }
+
+            vec3_t dir = {transform.world_mat[2][0], transform.world_mat[2][1], transform.world_mat[2][2]};
+            dir = vec3_t::normalize(dir);
+
+            f32 inner_cos = std::cos(glm_rad(light.inner_angle));
+            f32 outer_cos = std::cos(glm_rad(light.outer_angle));
+
+            gpu_spot_light_t& gpu_light = frame_data.mapped_spot_lights[spot_count];
+
+            gpu_light.position_range.data.x = transform.world_mat[3][0];
+            gpu_light.position_range.data.y = transform.world_mat[3][1];
+            gpu_light.position_range.data.z = transform.world_mat[3][2];
+            gpu_light.position_range.data.w = light.radius;
+
+            gpu_light.direction_intensity.data.x = dir.x;
+            gpu_light.direction_intensity.data.y = dir.y;
+            gpu_light.direction_intensity.data.z = dir.z;
+            gpu_light.direction_intensity.data.w = light.intensity;
+
+            gpu_light.color_inner_cos.data.x = light.color.x;
+            gpu_light.color_inner_cos.data.y = light.color.y;
+            gpu_light.color_inner_cos.data.z = light.color.z;
+            gpu_light.color_inner_cos.data.w = inner_cos;
+
+            gpu_light.outer_cos.data.x = outer_cos;
+            gpu_light.outer_cos.data.y = 0.0f;
+            gpu_light.outer_cos.data.z = 0.0f;
+            gpu_light.outer_cos.data.w = 0.0f;
+
+            spot_count++;
+        }
+
+        frame_data.mapped_global_data->dir_light_count = dir_count;
+        frame_data.mapped_global_data->dir_light_buffer_id = frame_data.dir_light_bindless_id;
+
+        frame_data.mapped_global_data->point_light_count = point_count;
+        frame_data.mapped_global_data->point_light_buffer_id = frame_data.point_light_bindless_id;
+
+        frame_data.mapped_global_data->spot_light_count = spot_count;
+        frame_data.mapped_global_data->spot_light_buffer_id = frame_data.spot_light_bindless_id;
+
         rendergraph.clear();
 
         reg.sort<mesh_renderer_t>(
@@ -1247,6 +1345,21 @@ namespace smol::renderer
 
         VkSemaphoreCreateInfo sem_info = {VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
         VK_CHECK(vkCreateSemaphore(ctx.device, &sem_info, nullptr, &frame_data.swapchain_acquire_semaphore));
+
+        create_mapped_buffer(sizeof(gpu_directional_light_t) * MAX_DIR_LIGHTS, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                             frame_data.dir_light_buffer, frame_data.dir_light_allocation,
+                             (void*&)frame_data.mapped_dir_lights);
+        make_bindless(frame_data.dir_light_buffer, frame_data.dir_light_bindless_id);
+
+        create_mapped_buffer(sizeof(gpu_point_light_t) * MAX_LIGHTS, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                             frame_data.point_light_buffer, frame_data.point_light_allocation,
+                             (void*&)frame_data.mapped_point_lights);
+        make_bindless(frame_data.point_light_buffer, frame_data.point_light_bindless_id);
+
+        create_mapped_buffer(sizeof(gpu_spot_light_t) * MAX_LIGHTS, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                             frame_data.spot_light_buffer, frame_data.spot_light_allocation,
+                             (void*&)frame_data.mapped_spot_lights);
+        make_bindless(frame_data.spot_light_buffer, frame_data.spot_light_bindless_id);
     }
 
     void shutdown_per_frame(per_frame_t& frame_data)
@@ -1291,6 +1404,23 @@ namespace smol::renderer
         if (frame_data.material_buffer != VK_NULL_HANDLE)
         {
             vmaDestroyBuffer(ctx.allocator, frame_data.material_buffer, frame_data.material_allocation);
+            res_system.buffer_heap.release(frame_data.material_bindless_id);
+        }
+
+        if (frame_data.dir_light_buffer != VK_NULL_HANDLE)
+        {
+            vmaDestroyBuffer(ctx.allocator, frame_data.dir_light_buffer, frame_data.dir_light_allocation);
+            res_system.buffer_heap.release(frame_data.dir_light_bindless_id);
+        }
+        if (frame_data.point_light_buffer != VK_NULL_HANDLE)
+        {
+            vmaDestroyBuffer(ctx.allocator, frame_data.point_light_buffer, frame_data.point_light_allocation);
+            res_system.buffer_heap.release(frame_data.point_light_bindless_id);
+        }
+        if (frame_data.spot_light_buffer != VK_NULL_HANDLE)
+        {
+            vmaDestroyBuffer(ctx.allocator, frame_data.spot_light_buffer, frame_data.spot_light_allocation);
+            res_system.buffer_heap.release(frame_data.spot_light_bindless_id);
         }
     }
 

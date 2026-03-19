@@ -19,6 +19,7 @@ public struct Vertex
 public struct ObjectData
 {
     public float4x4 model_matrix;
+    public float4x4 normal_matrix;
     public uint material_offset;
     public uint vertex_buffer_id;
     public uint index_buffer_id;
@@ -30,8 +31,17 @@ public struct GlobalData
     public float4x4 view;
     public float4x4 projection;
     public float4x4 view_proj;
-    public float3 camera_pos;
+    public float4 camera_pos;
     public float time;
+
+    public uint dir_light_buffer_id;
+    public uint dir_light_count;
+
+    public uint point_light_buffer_id;
+    public uint point_light_count;
+
+    public uint spot_light_buffer_id;
+    public uint spot_light_count;
 };
 
 public struct PushConstants
@@ -69,9 +79,7 @@ public Vertex getIndexedVertex(uint vertex_buffer_id, uint index_buffer_id, uint
 }
 
 public T getMaterial<T>(uint material_buffer_id, uint byte_offset)
-{
-    return global_buffers[material_buffer_id].Load<T>(byte_offset);
-}
+{ return global_buffers[material_buffer_id].Load<T>(byte_offset); }
 
 [__AttributeUsage(_AttributeTargets.Struct)]
 public struct RenderConfigAttribute
@@ -91,4 +99,94 @@ public struct RenderTargetAttribute
 [__AttributeUsage(_AttributeTargets.Struct)]
 public struct MaterialReflectionAttribute
 {
+};
+
+public struct IncidentLight
+{
+    public float3 direction;
+    public float3 radiance;
+};
+
+public interface ILight
+{
+    IncidentLight evaluate(float3 world_pos);
+};
+
+public struct PointLight : ILight
+{
+    public float4 position_radius; // xyz = pos, w = radius
+    public float4 color_intensity; // xyz = color, w = intensity
+
+    public IncidentLight evaluate(float3 world_pos)
+    {
+        IncidentLight out_light;
+        out_light.radiance = float(0.0f);
+        out_light.direction = float3(0.0f, 1.0f, 0.0f);
+
+        float3 light_vec = position_radius.xyz - world_pos;
+        float distance = length(light_vec);
+
+        float attenuation = clamp(1.0 - (distance / position_radius.w), 0.0f, 1.0f);
+        attenuation *= attenuation;
+
+        out_light.direction = light_vec / distance;
+        out_light.radiance = color_intensity.xyz * color_intensity.w * attenuation;
+
+        return out_light;
+    }
+};
+
+public struct DirectionalLight : ILight
+{
+    public float4 direction_intensity; // xyz = dir, w = intensity
+    public float4 color;               // xyz = color, w = padding
+
+    public IncidentLight evaluate(float3 world_pos)
+    {
+        IncidentLight out_light;
+
+        out_light.direction = normalize(-direction_intensity.xyz);
+        out_light.radiance = color.xyz * direction_intensity.w;
+
+        return out_light;
+    }
+};
+
+public struct SpotLight : ILight
+{
+    public float4 position_range;      // xyz = pos, w = range
+    public float4 direction_intensity; // xyz = dir, w = intensity
+    public float4 color_inner_cos;     // xyz = color, w = inner_cosine
+    public float4 outer_cos;           // x = outer_cosine, yzw = padding
+
+    public IncidentLight evaluate(float3 world_pos)
+    {
+        IncidentLight out_light;
+        out_light.radiance = float(0.0f);
+        out_light.direction = float3(0.0f, 1.0f, 0.0f);
+
+        float3 light_vec = position_range.xyz - world_pos;
+        float distance = length(light_vec);
+
+        float dist_attenuation = clamp(1.0 - (distance / position_range.w), 0.0f, 1.0f);
+        dist_attenuation *= dist_attenuation;
+
+        if (dist_attenuation <= 0.0f) { return out_light; }
+
+        float3 light_dir = light_vec / distance;
+
+        float theta = dot(light_dir, normalize(-direction_intensity.xyz));
+        float inner_cos = color_inner_cos.w;
+        float outer_cos = outer_cos.x;
+
+        float epsilon = inner_cos - outer_cos;
+        float cone_attenuation = clamp((theta - outer_cos) / epsilon, 0.0f, 1.0f);
+
+        if (cone_attenuation <= 0.0f) { return out_light; }
+
+        out_light.direction = light_dir;
+        out_light.radiance = color_inner_cos.xyz * direction_intensity.w * dist_attenuation * cone_attenuation;
+
+        return out_light;
+    }
 };

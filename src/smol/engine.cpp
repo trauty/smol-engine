@@ -2,6 +2,7 @@
 
 #include "smol/asset_registry.h"
 #include "smol/defines.h"
+#include "smol/input.h"
 #include "smol/jobs.h"
 #include "smol/log.h"
 #include "smol/rendering/renderer.h"
@@ -54,6 +55,8 @@ namespace smol::engine
         // SDL_SetHintWithPriority(SDL_HINT_SHUTDOWN_DBUS_ON_QUIT, "1", SDL_HintPriority::SDL_HINT_OVERRIDE);
         SDL_Init(SDL_INIT_VIDEO);
 
+        smol::input::detail::init();
+
         if (volkInitialize() != VK_SUCCESS) {}
 
         SDL_Window* window = SDL_CreateWindow(game_name.c_str(), init_window_width, init_window_height,
@@ -98,6 +101,8 @@ namespace smol::engine
 
             accumulator += frame_time;
 
+            smol::input::detail::prepare_update();
+
             static SDL_Event event;
             while (SDL_PollEvent(&event))
             {
@@ -109,6 +114,8 @@ namespace smol::engine
                     break;
                 default: break;
                 }
+
+                smol::input::detail::process(event);
             }
 
             while (accumulator >= fixed_timestep)

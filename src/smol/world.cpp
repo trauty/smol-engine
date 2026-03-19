@@ -2,7 +2,6 @@
 
 #include "smol/components/transform.h"
 #include "smol/ecs_fwd.h"
-#include "smol/log.h"
 #include "smol/physics/physics_sync.h"
 #include "smol/physics/physics_world.h"
 #include "smol/systems/transform.h"
@@ -11,9 +10,7 @@
 namespace smol
 {
     void on_transform_changed(ecs::registry_t& reg, ecs::entity_t entity)
-    {
-        smol::transform_system::is_hierarchy_dirty = true;
-    }
+    { smol::transform_system::is_hierarchy_dirty = true; }
 
     void world_t::init()
     {
