@@ -132,6 +132,12 @@ target("smol-engine")
                 os.trycp(path.join(slang_dir:installdir(), "bin", "slang-compiler.dll"), dest_dir)
             end
         end 
+
+        local engine_assets_dir = path.join(os.scriptdir(), "assets")
+        if os.isdir(engine_assets_dir) then 
+            os.cp(path.join(engine_assets_dir, "*"), path.join(dest_dir, "assets"))
+            print("Copied core engine assets")
+        end 
     end)
 target_end()
 

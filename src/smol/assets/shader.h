@@ -31,6 +31,8 @@ namespace smol
         VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
         shader_reflection_t reflection;
 
+        bool is_compute = false;
+
         std::string target_pass = "MainForwardPass";
         std::string blend_mode = "Opaque";
         bool depth_write = true;

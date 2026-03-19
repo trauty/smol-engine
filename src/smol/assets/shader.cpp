@@ -25,7 +25,10 @@ namespace smol
         {
             std::vector<u32> vert_spirv;
             std::vector<u32> frag_spirv;
+            std::vector<u32> compute_spirv;
             shader_reflection_t reflection;
+            bool is_compute = false;
+
             bool success = false;
 
             std::string target_pass = "MainForwardPass";
@@ -196,13 +199,24 @@ namespace smol
             std::vector<slang::IComponentType*> components;
             components.push_back(module);
 
-            Slang::ComPtr<slang::IEntryPoint> vert_entry;
-            module->findEntryPointByName("vertexMain", vert_entry.writeRef());
-            components.push_back(vert_entry);
+            Slang::ComPtr<slang::IEntryPoint> comp_entry;
+            module->findEntryPointByName("computeMain", comp_entry.writeRef());
 
-            Slang::ComPtr<slang::IEntryPoint> frag_entry;
-            module->findEntryPointByName("fragmentMain", frag_entry.writeRef());
-            components.push_back(frag_entry);
+            if (comp_entry)
+            {
+                res.is_compute = true;
+                components.push_back(comp_entry);
+            }
+            else
+            {
+                Slang::ComPtr<slang::IEntryPoint> vert_entry;
+                module->findEntryPointByName("vertexMain", vert_entry.writeRef());
+                components.push_back(vert_entry);
+
+                Slang::ComPtr<slang::IEntryPoint> frag_entry;
+                module->findEntryPointByName("fragmentMain", frag_entry.writeRef());
+                components.push_back(frag_entry);
+            }
 
             Slang::ComPtr<slang::IComponentType> composed_program;
             session->createCompositeComponentType(components.data(), components.size(), composed_program.writeRef());
@@ -294,24 +308,40 @@ namespace smol
 
             if (res.target_formats.empty()) { res.target_formats.push_back(renderer::ctx.swapchain.format); }
 
-            Slang::ComPtr<slang::IBlob> kernel_blob;
-            linked_program->getEntryPointCode(0, 0, kernel_blob.writeRef(), diag_blob.writeRef());
-            if (kernel_blob)
+            if (res.is_compute)
             {
-                res.vert_spirv.assign((u32*)kernel_blob->getBufferPointer(),
-                                      (u32*)kernel_blob->getBufferPointer() + kernel_blob->getBufferSize() / 4);
+                Slang::ComPtr<slang::IBlob> kernel_blob;
+                linked_program->getEntryPointCode(0, 0, kernel_blob.writeRef(), diag_blob.writeRef());
+                if (kernel_blob)
+                {
+                    res.compute_spirv.assign((u32*)kernel_blob->getBufferPointer(),
+                                             (u32*)kernel_blob->getBufferPointer() + kernel_blob->getBufferSize() / 4);
+                }
+
+                res.success = !res.compute_spirv.empty();
+            }
+            else
+            {
+                Slang::ComPtr<slang::IBlob> kernel_blob;
+                linked_program->getEntryPointCode(0, 0, kernel_blob.writeRef(), diag_blob.writeRef());
+                if (kernel_blob)
+                {
+                    res.vert_spirv.assign((u32*)kernel_blob->getBufferPointer(),
+                                          (u32*)kernel_blob->getBufferPointer() + kernel_blob->getBufferSize() / 4);
+                }
+
+                kernel_blob = nullptr;
+
+                linked_program->getEntryPointCode(1, 0, kernel_blob.writeRef(), diag_blob.writeRef());
+                if (kernel_blob)
+                {
+                    res.frag_spirv.assign((u32*)kernel_blob->getBufferPointer(),
+                                          (u32*)kernel_blob->getBufferPointer() + kernel_blob->getBufferSize() / 4);
+                }
+
+                res.success = !res.vert_spirv.empty() && !res.frag_spirv.empty();
             }
 
-            kernel_blob = nullptr;
-
-            linked_program->getEntryPointCode(1, 0, kernel_blob.writeRef(), diag_blob.writeRef());
-            if (kernel_blob)
-            {
-                res.frag_spirv.assign((u32*)kernel_blob->getBufferPointer(),
-                                      (u32*)kernel_blob->getBufferPointer() + kernel_blob->getBufferSize() / 4);
-            }
-
-            res.success = !res.vert_spirv.empty() && !res.frag_spirv.empty();
             return res;
         }
     } // namespace
@@ -334,29 +364,7 @@ namespace smol
         shader_asset.depth_write = compiled_shader.depth_write;
         shader_asset.depth_test = compiled_shader.depth_test;
         shader_asset.target_formats = compiled_shader.target_formats;
-
-        VkShaderModule vert_mod = create_shader_module(compiled_shader.vert_spirv);
-        VkShaderModule frag_mod = create_shader_module(compiled_shader.frag_spirv);
-
-        if (!vert_mod || !frag_mod)
-        {
-            if (vert_mod) { vkDestroyShaderModule(renderer::ctx.device, vert_mod, nullptr); }
-            if (frag_mod) { vkDestroyShaderModule(renderer::ctx.device, frag_mod, nullptr); }
-            SMOL_LOG_ERROR("SHADER", "Could not create Vulkan shader module from file at: {}", path);
-            return std::nullopt;
-        }
-
-        VkPipelineShaderStageCreateInfo vert_stage_info = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO};
-        vert_stage_info.stage = VK_SHADER_STAGE_VERTEX_BIT;
-        vert_stage_info.module = vert_mod;
-        vert_stage_info.pName = "main";
-
-        VkPipelineShaderStageCreateInfo frag_stage_info = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO};
-        frag_stage_info.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
-        frag_stage_info.module = frag_mod;
-        frag_stage_info.pName = "main";
-
-        VkPipelineShaderStageCreateInfo shader_stages[] = {vert_stage_info, frag_stage_info};
+        shader_asset.is_compute = compiled_shader.is_compute;
 
         VkPipelineVertexInputStateCreateInfo vertex_input_info = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
@@ -450,7 +458,9 @@ namespace smol
         };
 
         VkPushConstantRange push_constant = {
-            .stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+            .stageFlags = static_cast<VkShaderStageFlags>(
+                shader_asset.is_compute ? VK_SHADER_STAGE_COMPUTE_BIT
+                                        : (VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)),
             .offset = 0,
             .size = sizeof(renderer::push_constants_t),
         };
@@ -472,46 +482,96 @@ namespace smol
             return std::nullopt;
         }
 
-        VkPipelineRenderingCreateInfo pipeline_rendering_info = {
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
-            .colorAttachmentCount = static_cast<u32_t>(shader_asset.target_formats.size()),
-            .pColorAttachmentFormats =
-                shader_asset.target_formats.empty() ? nullptr : shader_asset.target_formats.data(),
-        };
-
-        if (shader_asset.depth_test || shader_asset.depth_write)
+        if (shader_asset.is_compute)
         {
-            pipeline_rendering_info.depthAttachmentFormat = renderer::ctx.swapchain.depth_format;
+            VkShaderModule comp_module = create_shader_module(compiled_shader.compute_spirv);
+
+            VkPipelineShaderStageCreateInfo comp_stage_info = {
+                .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
+                .stage = VK_SHADER_STAGE_COMPUTE_BIT,
+                .module = comp_module,
+                .pName = "main",
+            };
+
+            VkComputePipelineCreateInfo comp_pipeline_info = {
+                .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
+                .stage = comp_stage_info,
+                .layout = shader_asset.pipeline_layout,
+            };
+
+            if (vkCreateComputePipelines(renderer::ctx.device, VK_NULL_HANDLE, 1, &comp_pipeline_info, nullptr,
+                                         &shader_asset.pipeline) != VK_SUCCESS)
+            {
+                SMOL_LOG_ERROR("SHADER", "Failed to create compute pipeline for shader at path: {}", path);
+            }
+
+            vkDestroyShaderModule(renderer::ctx.device, comp_module, nullptr);
         }
-
-        VkGraphicsPipelineCreateInfo pipeline_info = {
-            .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-            .pNext = &pipeline_rendering_info,
-            .stageCount = 2,
-            .pStages = shader_stages,
-            .pVertexInputState = &vertex_input_info,
-            .pInputAssemblyState = &input_assembly,
-            .pViewportState = &viewport_state,
-            .pRasterizationState = &rasterizer_info,
-            .pMultisampleState = &multisampling_info,
-            .pDepthStencilState = &depth_stencil_info,
-            .pColorBlendState = &color_blend_info,
-            .pDynamicState = &dynamic_state_info,
-            .layout = shader_asset.pipeline_layout,
-            .renderPass = VK_NULL_HANDLE,
-            .subpass = 0,
-            .basePipelineHandle = VK_NULL_HANDLE,
-        };
-
-        if (vkCreateGraphicsPipelines(renderer::ctx.device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr,
-                                      &shader_asset.pipeline) != VK_SUCCESS)
+        else
         {
-            SMOL_LOG_ERROR("SHADER", "Failed to create pipeline for shader at path: {}", path);
-            return std::nullopt;
-        }
+            VkShaderModule vert_mod = create_shader_module(compiled_shader.vert_spirv);
+            VkShaderModule frag_mod = create_shader_module(compiled_shader.frag_spirv);
 
-        vkDestroyShaderModule(renderer::ctx.device, vert_mod, nullptr);
-        vkDestroyShaderModule(renderer::ctx.device, frag_mod, nullptr);
+            if (!vert_mod || !frag_mod)
+            {
+                if (vert_mod) { vkDestroyShaderModule(renderer::ctx.device, vert_mod, nullptr); }
+                if (frag_mod) { vkDestroyShaderModule(renderer::ctx.device, frag_mod, nullptr); }
+                SMOL_LOG_ERROR("SHADER", "Could not create Vulkan shader module from file at: {}", path);
+                return std::nullopt;
+            }
+
+            VkPipelineShaderStageCreateInfo vert_stage_info = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO};
+            vert_stage_info.stage = VK_SHADER_STAGE_VERTEX_BIT;
+            vert_stage_info.module = vert_mod;
+            vert_stage_info.pName = "main";
+
+            VkPipelineShaderStageCreateInfo frag_stage_info = {VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO};
+            frag_stage_info.stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+            frag_stage_info.module = frag_mod;
+            frag_stage_info.pName = "main";
+
+            VkPipelineShaderStageCreateInfo shader_stages[] = {vert_stage_info, frag_stage_info};
+
+            VkPipelineRenderingCreateInfo pipeline_rendering_info = {
+                .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
+                .colorAttachmentCount = static_cast<u32_t>(shader_asset.target_formats.size()),
+                .pColorAttachmentFormats =
+                    shader_asset.target_formats.empty() ? nullptr : shader_asset.target_formats.data(),
+            };
+
+            if (shader_asset.depth_test || shader_asset.depth_write)
+            {
+                pipeline_rendering_info.depthAttachmentFormat = renderer::ctx.swapchain.depth_format;
+            }
+
+            VkGraphicsPipelineCreateInfo pipeline_info = {
+                .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+                .pNext = &pipeline_rendering_info,
+                .stageCount = 2,
+                .pStages = shader_stages,
+                .pVertexInputState = &vertex_input_info,
+                .pInputAssemblyState = &input_assembly,
+                .pViewportState = &viewport_state,
+                .pRasterizationState = &rasterizer_info,
+                .pMultisampleState = &multisampling_info,
+                .pDepthStencilState = &depth_stencil_info,
+                .pColorBlendState = &color_blend_info,
+                .pDynamicState = &dynamic_state_info,
+                .layout = shader_asset.pipeline_layout,
+                .renderPass = VK_NULL_HANDLE,
+                .subpass = 0,
+                .basePipelineHandle = VK_NULL_HANDLE,
+            };
+
+            if (vkCreateGraphicsPipelines(renderer::ctx.device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr,
+                                          &shader_asset.pipeline) != VK_SUCCESS)
+            {
+                SMOL_LOG_ERROR("SHADER", "Failed to create pipeline for shader at path: {}", path);
+            }
+
+            vkDestroyShaderModule(renderer::ctx.device, vert_mod, nullptr);
+            vkDestroyShaderModule(renderer::ctx.device, frag_mod, nullptr);
+        }
 
         return shader_asset;
     } // namespace smol
