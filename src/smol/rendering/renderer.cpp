@@ -1,7 +1,8 @@
 #include "renderer.h"
 
-#include "cglm/simd/sse2/mat4.h"
+#include "cglm/frustum.h"
 #include "cglm/util.h"
+#include "smol/asset.h"
 #include "smol/assets/material.h"
 #include "smol/assets/mesh.h"
 #include "smol/assets/shader.h"
@@ -67,65 +68,15 @@ namespace smol::renderer
         pass.execute_callback = [target_pass_tag](VkCommandBuffer cmd, ecs::registry_t& reg)
         {
             per_frame_t& frame_data = ctx.per_frame_objects[ctx.cur_frame];
-            std::vector<render_batch_t> batches;
-
-            u32_t cur_object_id = frame_data.object_counter;
-
-            auto view = reg.view<transform_t, mesh_renderer_t>();
-            for (auto [entity, transform, renderer] : view.each())
-            {
-                if (!renderer.active || !renderer.mesh || !renderer.material || !renderer.material->shader)
-                {
-                    continue;
-                }
-
-                if (renderer.material->shader->target_pass != target_pass_tag) { continue; }
-
-                renderer.material->sync();
-
-                object_data_t& obj_data = frame_data.mapped_object_data[cur_object_id];
-                std::memcpy(obj_data.model_matrix.data, &transform.world_mat, sizeof(mat4_t));
-
-                mat4_t normal_mat;
-                glm_mat4_inv(transform.world_mat, normal_mat);
-                glm_mat4_transpose(normal_mat);
-                std::memcpy(obj_data.normal_matrix.data, &normal_mat, sizeof(mat4_t));
-
-                obj_data.material_offset = renderer.material->heap_offset;
-                obj_data.vertex_buffer_id = renderer.mesh->vertex_bindless_id;
-                obj_data.index_buffer_id = renderer.mesh->index_bindless_id;
-
-                VkDrawIndirectCommand& draw_cmd = frame_data.mapped_indirect_data[cur_object_id];
-                draw_cmd.vertexCount =
-                    renderer.mesh->uses_indices ? renderer.mesh->index_count : renderer.mesh->vertex_count;
-                draw_cmd.instanceCount = 1;
-                draw_cmd.firstVertex = 0;
-                draw_cmd.firstInstance = 0;
-
-                VkPipeline cur_pipeline = renderer.material->shader->pipeline;
-                VkPipelineLayout cur_layout = renderer.material->shader->pipeline_layout;
-
-                if (batches.empty() || batches.back().pipeline != cur_pipeline)
-                {
-                    batches.push_back({cur_pipeline, cur_layout, cur_object_id, 1});
-                }
-                else
-                {
-                    batches.back().count++;
-                }
-
-                cur_object_id++;
-            }
-
-            frame_data.object_counter = cur_object_id;
 
             push_constants_t pc_data = {
                 frame_data.global_bindless_id,
                 frame_data.object_bindless_id,
                 res_system.material_heap.bindless_id,
+                0,
             };
 
-            for (const render_batch_t& batch : batches)
+            for (const render_batch_t& batch : frame_data.batches)
             {
                 vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, batch.pipeline);
                 vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, batch.layout, 0, 1,
@@ -587,6 +538,8 @@ namespace smol::renderer
 
     void shutdown()
     {
+        ctx.culling_shader.release();
+
 #ifdef SMOL_ENABLE_PROFILING
         if (tracy_vk_ctx) { TracyVkDestroy(tracy_vk_ctx); }
 #endif
@@ -651,6 +604,11 @@ namespace smol::renderer
 
     void render(ecs::registry_t& reg)
     {
+        if (!ctx.culling_shader)
+        {
+            ctx.culling_shader = smol::load_asset_sync<shader_t>("assets/shaders/culling.slang");
+        }
+
         ZoneScoped;
 
         for (auto [entity, event] : reg.view<window::window_size_changed_event>().each())
@@ -726,6 +684,10 @@ namespace smol::renderer
             std::memcpy(frame_data.mapped_global_data->view.data, &cam.view, sizeof(mat4_t));
             std::memcpy(frame_data.mapped_global_data->projection.data, &cam.projection, sizeof(mat4_t));
             std::memcpy(frame_data.mapped_global_data->view_proj.data, &cam.view_proj, sizeof(mat4_t));
+
+            vec4 planes[6];
+            glm_frustum_planes(cam.view_proj, planes);
+            std::memcpy(frame_data.mapped_global_data->frustum_planes, planes, sizeof(vec4) * 6);
 
             frame_data.mapped_global_data->camera_pos.data.x = cam_transform.world_mat[3][0];
             frame_data.mapped_global_data->camera_pos.data.y = cam_transform.world_mat[3][1];
@@ -822,7 +784,8 @@ namespace smol::renderer
         frame_data.mapped_global_data->spot_light_count = spot_count;
         frame_data.mapped_global_data->spot_light_buffer_id = frame_data.spot_light_bindless_id;
 
-        rendergraph.clear();
+        frame_data.batches.clear();
+        u32_t cur_object_id = 0;
 
         reg.sort<mesh_renderer_t>(
             [](const mesh_renderer_t& lhs, const mesh_renderer_t& rhs)
@@ -839,6 +802,100 @@ namespace smol::renderer
 
                 return lhs.material.get() < rhs.material.get();
             });
+
+        auto view = reg.view<transform_t, mesh_renderer_t>();
+        for (auto [entity, transform, renderer] : view.each())
+        {
+            if (!renderer.active || !renderer.mesh || !renderer.material || !renderer.material->shader) { continue; }
+
+            renderer.material->sync();
+
+            object_data_t& obj_data = frame_data.mapped_object_data[cur_object_id];
+            std::memcpy(obj_data.model_matrix.data, &transform.world_mat, sizeof(mat4_t));
+
+            mat4_t normal_mat;
+            glm_mat4_inv(transform.world_mat, normal_mat);
+            glm_mat4_transpose(normal_mat);
+            std::memcpy(obj_data.normal_matrix.data, &normal_mat, sizeof(mat4_t));
+
+            obj_data.material_offset = renderer.material->heap_offset;
+            obj_data.vertex_buffer_id = renderer.mesh->vertex_bindless_id;
+            obj_data.index_buffer_id = renderer.mesh->index_bindless_id;
+
+            obj_data.index_count =
+                renderer.mesh->uses_indices ? renderer.mesh->index_count : renderer.mesh->vertex_count;
+            obj_data.vertex_count = renderer.mesh->vertex_count;
+
+            vec3_t world_center;
+            vec3_t local_c = renderer.mesh->local_center;
+            glm_mat4_mulv3(transform.world_mat, local_c, 1.0f, world_center);
+
+            obj_data.bounding_sphere_center.data.x = world_center.x;
+            obj_data.bounding_sphere_center.data.y = world_center.y;
+            obj_data.bounding_sphere_center.data.z = world_center.z;
+            obj_data.bounding_sphere_center.data.w = 0.0f;
+
+            f32 scale_x =
+                glm_vec3_norm((vec3){transform.world_mat[0][0], transform.world_mat[0][1], transform.world_mat[0][2]});
+            f32 scale_y =
+                glm_vec3_norm((vec3){transform.world_mat[1][0], transform.world_mat[1][1], transform.world_mat[1][2]});
+            f32 scale_z =
+                glm_vec3_norm((vec3){transform.world_mat[2][0], transform.world_mat[2][1], transform.world_mat[2][2]});
+
+            f32 max_scale = std::max({scale_x, scale_y, scale_z});
+            obj_data.bounding_sphere_radius = renderer.mesh->local_radius * max_scale;
+
+            VkPipeline cur_pipeline = renderer.material->shader->pipeline;
+            VkPipelineLayout cur_layout = renderer.material->shader->pipeline_layout;
+
+            if (frame_data.batches.empty() || frame_data.batches.back().pipeline != cur_pipeline)
+            {
+                frame_data.batches.push_back({cur_pipeline, cur_layout, cur_object_id, 1});
+            }
+            else
+            {
+                frame_data.batches.back().count++;
+            }
+
+            cur_object_id++;
+        }
+
+        frame_data.object_counter = cur_object_id;
+        frame_data.mapped_global_data->object_count = cur_object_id;
+        frame_data.mapped_global_data->indirect_buffer_id = frame_data.indirect_bindless_id;
+
+        if (cur_object_id > 0)
+        {
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, ctx.culling_shader->pipeline);
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, ctx.culling_shader->pipeline_layout, 0, 1,
+                                    &res_system.global_set, 0, nullptr);
+
+            push_constants_t pc_data = {
+                frame_data.global_bindless_id,
+                frame_data.object_bindless_id,
+                res_system.material_heap.bindless_id,
+                0,
+            };
+            vkCmdPushConstants(cmd, ctx.culling_shader->pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                               sizeof(push_constants_t), &pc_data);
+
+            vkCmdDispatch(cmd, (cur_object_id + 63) / 64, 1, 1);
+
+            VkBufferMemoryBarrier indirect_barrier = {
+                .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+                .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+                .dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT,
+                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .buffer = frame_data.indirect_buffer,
+                .offset = 0,
+                .size = sizeof(VkDrawIndirectCommand) * cur_object_id,
+            };
+            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT, 0, 0,
+                                 nullptr, 1, &indirect_barrier, 0, nullptr);
+        }
+
+        rendergraph.clear();
 
         rg_resource_id swapchain_res =
             rendergraph.import_image("Swapchain", ctx.swapchain.images[index], ctx.swapchain.views[index],
@@ -1338,6 +1395,7 @@ namespace smol::renderer
                              VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                              frame_data.indirect_buffer, frame_data.indirect_allocation,
                              (void*&)frame_data.mapped_indirect_data);
+        make_bindless(frame_data.indirect_buffer, frame_data.indirect_bindless_id);
 
         create_mapped_buffer(MAX_MATERIAL_BUFFER_SIZE, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, frame_data.material_buffer,
                              frame_data.material_allocation, (void*&)frame_data.mapped_material_data);
@@ -1399,6 +1457,7 @@ namespace smol::renderer
         if (frame_data.indirect_buffer != VK_NULL_HANDLE)
         {
             vmaDestroyBuffer(ctx.allocator, frame_data.indirect_buffer, frame_data.indirect_allocation);
+            res_system.buffer_heap.release(frame_data.indirect_bindless_id);
         }
 
         if (frame_data.material_buffer != VK_NULL_HANDLE)

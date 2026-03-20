@@ -1,9 +1,10 @@
 #pragma once
 
+#include "smol/asset.h"
+#include "smol/assets/shader.h"
 #include "smol/defines.h"
 #include "smol/log.h"
 #include "smol/rendering/vulkan.h"
-#include "vulkan/vulkan_core.h"
 
 #include <deque>
 #include <mutex>
@@ -128,6 +129,7 @@ namespace smol::renderer
         gpu_mat4_t projection;
         gpu_mat4_t view_proj;
         gpu_vec4_t camera_pos;
+        gpu_vec4_t frustum_planes[6];
         f32 time;
 
         u32_t dir_light_buffer_id;
@@ -138,6 +140,9 @@ namespace smol::renderer
 
         u32_t spot_light_buffer_id;
         u32_t spot_light_count;
+
+        u32_t indirect_buffer_id;
+        u32_t object_count;
     };
 
     struct object_data_t
@@ -147,7 +152,11 @@ namespace smol::renderer
         u32_t material_offset;
         u32_t vertex_buffer_id;
         u32_t index_buffer_id;
-        u32_t _pad;
+        u32_t index_count;
+        u32_t vertex_count;
+        f32 bounding_sphere_radius;
+        u32_t _pad[2];
+        gpu_vec4_t bounding_sphere_center;
     };
 
     struct image_desc_t
@@ -184,6 +193,14 @@ namespace smol::renderer
         void shutdown();
     };
 
+    struct render_batch_t
+    {
+        VkPipeline pipeline;
+        VkPipelineLayout layout;
+        u32_t start_idx;
+        u32_t count;
+    };
+
     struct per_frame_t
     {
         u64_t target_timeline_value = 0;
@@ -206,6 +223,9 @@ namespace smol::renderer
         VkBuffer indirect_buffer = VK_NULL_HANDLE;
         VmaAllocation indirect_allocation = VK_NULL_HANDLE;
         VkDrawIndirectCommand* mapped_indirect_data = nullptr;
+        u32_t indirect_bindless_id = BINDLESS_NULL_HANDLE;
+
+        std::vector<render_batch_t> batches;
 
         VkBuffer material_buffer = VK_NULL_HANDLE;
         VmaAllocation material_allocation = VK_NULL_HANDLE;
@@ -267,6 +287,8 @@ namespace smol::renderer
         u64_t timeline_value = 0;
 
         std::vector<VkSampler> samplers;
+
+        asset_t<shader_t> culling_shader;
     };
 
     struct context_config_t

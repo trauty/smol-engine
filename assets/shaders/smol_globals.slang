@@ -7,13 +7,25 @@ public Texture2D global_textures[];
 [[vk::binding(2, 0)]]
 public RWTexture2D<float4> global_storage_images[];
 [[vk::binding(3, 0)]]
-public ByteAddressBuffer global_buffers[];
+public RWByteAddressBuffer global_buffers[];
+
+public Texture2D getTexture(uint id) { return global_textures[NonUniformResourceIndex(id)]; }
+public SamplerState getSampler(uint id) { return global_samplers[NonUniformResourceIndex(id)]; }
+public RWByteAddressBuffer getBuffer(uint id) { return global_buffers[NonUniformResourceIndex(id)]; }
 
 public struct Vertex
 {
     public float3 position;
     public float3 normal;
     public float2 uv;
+};
+
+public struct DrawIndirectCommand
+{
+    public uint vertex_count;
+    public uint instance_count;
+    public uint first_vertex;
+    public uint first_instance;
 };
 
 public struct ObjectData
@@ -23,7 +35,12 @@ public struct ObjectData
     public uint material_offset;
     public uint vertex_buffer_id;
     public uint index_buffer_id;
-    public uint pad0;
+    public uint index_count;
+    public uint vertex_count;
+    public float bounding_sphere_radius;
+    uint pad0;
+    uint pad1;
+    public float4 bounding_sphere_center;
 };
 
 public struct GlobalData
@@ -32,6 +49,7 @@ public struct GlobalData
     public float4x4 projection;
     public float4x4 view_proj;
     public float4 camera_pos;
+    public float4 frustum_planes[6];
     public float time;
 
     public uint dir_light_buffer_id;
@@ -42,6 +60,9 @@ public struct GlobalData
 
     public uint spot_light_buffer_id;
     public uint spot_light_count;
+
+    public uint indirect_buffer_id;
+    public uint object_count;
 };
 
 public struct PushConstants

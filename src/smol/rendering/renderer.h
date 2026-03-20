@@ -13,14 +13,6 @@
 
 namespace smol::renderer
 {
-    struct render_batch_t
-    {
-        VkPipeline pipeline;
-        VkPipelineLayout layout;
-        u32_t start_idx;
-        u32_t count;
-    };
-
     using graph_builder_func_t = void (*)(rendergraph_t&, ecs::registry_t&);
 
     SMOL_API void register_renderer_feature(graph_builder_func_t builder);

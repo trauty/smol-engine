@@ -8,6 +8,9 @@
 #include "smol/rendering/renderer_types.h"
 #include "smol/rendering/vulkan.h"
 
+#include <algorithm>
+#include <cfloat>
+#include <cmath>
 #include <cstdint>
 #include <mutex>
 #include <optional>
@@ -118,6 +121,37 @@ namespace smol
             mesh_asset.index_count = static_cast<i32>(indices.size());
             mesh_asset.uses_indices = true;
         }
+
+        vec3_t min_pos = {FLT_MAX, FLT_MAX, FLT_MAX};
+        vec3_t max_pos = {-FLT_MAX, -FLT_MAX, -FLT_MAX};
+
+        for (const vertex_t& vertex : vertex_data)
+        {
+            min_pos.x = std::min(min_pos.x, vertex.position[0]);
+            min_pos.y = std::min(min_pos.y, vertex.position[1]);
+            min_pos.z = std::min(min_pos.z, vertex.position[2]);
+
+            max_pos.x = std::max(max_pos.x, vertex.position[0]);
+            max_pos.y = std::max(max_pos.y, vertex.position[1]);
+            max_pos.z = std::max(max_pos.z, vertex.position[2]);
+        }
+
+        mesh_asset.local_center.x = (min_pos.x + max_pos.x) * 0.5f;
+        mesh_asset.local_center.y = (min_pos.y + max_pos.y) * 0.5f;
+        mesh_asset.local_center.z = (min_pos.z + max_pos.z) * 0.5f;
+
+        f32 max_sq_dist = 0.0f;
+        for (const vertex_t& vertex : vertex_data)
+        {
+            f32 dx = vertex.position[0] - mesh_asset.local_center.x;
+            f32 dy = vertex.position[1] - mesh_asset.local_center.y;
+            f32 dz = vertex.position[2] - mesh_asset.local_center.z;
+
+            f32 sq_dist = (dx * dx) + (dy * dy) + (dz * dz);
+            if (sq_dist > max_sq_dist) { max_sq_dist = sq_dist; }
+        }
+
+        mesh_asset.local_radius = std::sqrt(max_sq_dist);
 
         VkDeviceSize vertex_size = vertex_data.size() * sizeof(vertex_t);
         VkDeviceSize index_size = indices.size() * sizeof(u32);

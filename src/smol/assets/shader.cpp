@@ -183,7 +183,7 @@ namespace smol
 
             slang::TargetDesc target_descs[1] = {};
             target_descs[0].format = SLANG_SPIRV;
-            target_descs[0].profile = global_session->findProfile("spirv_1_5");
+            target_descs[0].profile = global_session->findProfile("sm_6_2");
             session_desc.targets = target_descs;
             session_desc.targetCount = 1;
 

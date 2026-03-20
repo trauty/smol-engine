@@ -2,9 +2,9 @@
 
 #include "smol/asset.h"
 #include "smol/defines.h"
+#include "smol/math.h"
 #include "smol/rendering/vulkan.h"
 
-#include <memory>
 #include <optional>
 #include <string>
 
@@ -22,6 +22,9 @@ namespace smol
         i32 vertex_count = 0;
         i32 index_count = 0;
         bool uses_indices = false;
+
+        vec3_t local_center;
+        f32 local_radius;
 
         VkBuffer vertex_buffer = VK_NULL_HANDLE;
         VmaAllocation vertex_allocation = VK_NULL_HANDLE;
