@@ -19,6 +19,8 @@ namespace smol
         std::vector<u8> data;
 
         std::vector<asset_t<texture_t>> bound_textures;
+        u32_t type_id;
+        shader_module_info_t* shader_info;
 
         u32_t heap_offset = renderer::BINDLESS_NULL_HANDLE;
 
@@ -28,17 +30,7 @@ namespace smol
         material_t(material_t&&) noexcept = default;
         material_t& operator=(material_t&&) noexcept = default;
 
-        material_t(asset_t<shader_t> shader_asset) : shader(shader_asset)
-        {
-            if (!shader || !shader->ready())
-            {
-                SMOL_LOG_ERROR("MATERIAL", "Shader is not valid, can't create material");
-                return;
-            }
-
-            u32_t total_size = shader->reflection.material_size;
-            data.resize(total_size, 0);
-        }
+        material_t(const std::string& shader_name);
 
         void sync();
 
@@ -47,7 +39,7 @@ namespace smol
         {
             if (!shader) { return; }
 
-            const std::unordered_map<std::string, shader_member_t>& members = shader->reflection.members;
+            const std::unordered_map<std::string, shader_member_t>& members = shader_info->members;
             auto it = members.find(name);
 
             if (it == members.end())
@@ -79,15 +71,13 @@ namespace smol
         }
 
         void set_sampler(const std::string& name, sampler_type_e sampler)
-        {
-            set_property<u32_t>(name, static_cast<u32_t>(sampler));
-        }
+        { set_property<u32_t>(name, static_cast<u32_t>(sampler)); }
     };
 
     template <>
     struct SMOL_API asset_loader_t<material_t>
     {
-        static std::optional<material_t> load(const std::string& path, asset_t<shader_t> shader);
+        static std::optional<material_t> load(const std::string& path, const std::string& shader_name);
         static void unload(material_t& mat);
     };
 } // namespace smol

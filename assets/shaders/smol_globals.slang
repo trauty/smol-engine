@@ -38,8 +38,8 @@ public struct ObjectData
     public uint index_count;
     public uint vertex_count;
     public float bounding_sphere_radius;
-    uint pad0;
-    uint pad1;
+    public uint material_type;
+    public uint bin_index;
     public float4 bounding_sphere_center;
 };
 
@@ -103,23 +103,23 @@ public T getMaterial<T>(uint material_buffer_id, uint byte_offset)
 { return global_buffers[material_buffer_id].Load<T>(byte_offset); }
 
 [__AttributeUsage(_AttributeTargets.Struct)]
-public struct RenderConfigAttribute
+public struct ShaderConfigAttribute
 {
     public string pass_name;
-    public string blend_mode; // Opaque, Alpha, Additive
+    public string blend_mode; // Opaque, Cutout, Transparent
     public bool depth_write;
     public bool depth_test;
+};
+
+[__AttributeUsage(_AttributeTargets.Struct)]
+public struct RenderTargetsConfigAttribute
+{
 };
 
 [__AttributeUsage(_AttributeTargets.Var)]
 public struct RenderTargetAttribute
 {
     public string format_alias; // Swapchain, RGBA8_SRGB, RGBA8_UNORM, RGBA16_FLOAT, RG16_FLOAT, R8_UNORM
-};
-
-[__AttributeUsage(_AttributeTargets.Struct)]
-public struct MaterialReflectionAttribute
-{
 };
 
 public struct IncidentLight

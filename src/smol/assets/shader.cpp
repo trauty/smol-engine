@@ -9,12 +9,13 @@
 #include "smol/rendering/vulkan.h"
 #include "vulkan/vulkan_core.h"
 
+#include <cstddef>
 #include <mutex>
 #include <optional>
 #include <slang-com-ptr.h>
 #include <slang.h>
-#include <stack>
 #include <string>
+#include <utility>
 #include <vector>
 
 namespace smol
@@ -26,7 +27,7 @@ namespace smol
             std::vector<u32> vert_spirv;
             std::vector<u32> frag_spirv;
             std::vector<u32> compute_spirv;
-            shader_reflection_t reflection;
+            std::vector<shader_module_info_t> shader_types;
             bool is_compute = false;
 
             bool success = false;
@@ -69,103 +70,81 @@ namespace smol
             return renderer::ctx.swapchain.format;
         }
 
-        struct traversal_state_t
+        std::vector<shader_module_info_t> reflect_slang_layout(slang::ProgramLayout* layout)
         {
-            slang::TypeLayoutReflection* type_layout;
-            std::string prefix;
-            u32 base_offset;
-        };
+            std::vector<shader_module_info_t> res;
 
-        void reflect_material_struct(slang::TypeLayoutReflection* root_type_layout, shader_reflection_t& res)
-        {
-            res.material_size = static_cast<u32_t>(root_type_layout->getSize());
-
-            std::stack<traversal_state_t> traversal_stack;
-            traversal_stack.push({root_type_layout, "", 0});
-
-            while (!traversal_stack.empty())
+            u32_t param_count = layout->getParameterCount();
+            for (u32_t i = 0; i < param_count; i++)
             {
-                traversal_state_t cur = traversal_stack.top();
-                traversal_stack.pop();
+                slang::VariableLayoutReflection* param = layout->getParameterByIndex(i);
+                if (!param) { continue; }
 
-                u32 field_count = cur.type_layout->getFieldCount();
+                slang::TypeLayoutReflection* param_type_layout = param->getTypeLayout();
+                if (!param_type_layout) { continue; }
 
-                for (u32 i = 0; i < field_count; i++)
+                slang::TypeLayoutReflection* element_layout = param_type_layout->getElementTypeLayout();
+
+                slang::TypeReflection* target_type =
+                    element_layout ? element_layout->getType() : param_type_layout->getType();
+                if (!target_type) { continue; }
+
+                if (target_type->getKind() != slang::TypeReflection::Kind::Struct) { continue; }
+
+                bool is_material = false;
+                shader_module_info_t shader_info;
+                shader_info.name = target_type->getName() ? target_type->getName() : "Unknown";
+
+                for (u32_t attr_idx = 0; attr_idx < target_type->getUserAttributeCount(); attr_idx++)
                 {
-                    slang::VariableLayoutReflection* field_var = cur.type_layout->getFieldByIndex(i);
-                    slang::TypeLayoutReflection* field_type = field_var->getTypeLayout();
+                    slang::UserAttribute* attr = target_type->getUserAttributeByIndex(attr_idx);
+                    std::string attr_name = attr->getName();
 
-                    const char* field_name_cstr = field_var->getName();
-                    std::string field_name = cur.prefix + (field_name_cstr ? field_name_cstr : "");
-
-                    u32 relative_offset = (u32)field_var->getOffset();
-                    u32 absolute_offset = cur.base_offset + relative_offset;
-                    u32 size = (u32)field_type->getSize();
-
-                    slang::TypeReflection::Kind kind = field_type->getKind();
-
-                    if (kind == slang::TypeReflection::Kind::Scalar || kind == slang::TypeReflection::Kind::Vector ||
-                        kind == slang::TypeReflection::Kind::Matrix)
+                    if (attr_name == "ShaderConfig" || attr_name == "ShaderConfigAttribute")
                     {
-                        shader_member_t member = {};
-                        member.name = field_name;
-                        member.offset = absolute_offset;
-                        member.size = size;
-
-                        res.members[field_name] = member;
-                        SMOL_LOG_INFO("SHADER", "Found member: {}; Offset: {}; Size: {};", field_name, absolute_offset,
-                                      size);
-                    }
-                    else if (kind == slang::TypeReflection::Kind::Struct)
-                    {
-                        traversal_stack.push({field_type, field_name + ".", absolute_offset});
-                    }
-                }
-            }
-        }
-
-        shader_reflection_t reflect_slang_layout(slang::ProgramLayout* layout)
-        {
-            shader_reflection_t res;
-
-            u32 param_count = layout->getParameterCount();
-            for (u32 i = 0; i < param_count; i++)
-            {
-                slang::VariableLayoutReflection* var = layout->getParameterByIndex(i);
-                slang::TypeLayoutReflection* type = var->getTypeLayout();
-
-                slang::TypeReflection::Kind kind = type->getKind();
-
-                if ((kind == slang::TypeReflection::Kind::Resource &&
-                     type->getResourceShape() == SlangResourceShape::SLANG_STRUCTURED_BUFFER) ||
-                    kind == slang::TypeReflection::Kind::ConstantBuffer)
-                {
-                    slang::TypeLayoutReflection* content_type = type->getElementTypeLayout();
-                    if (content_type->getKind() == slang::TypeReflection::Kind::Struct)
-                    {
-                        slang::TypeReflection* struct_type = content_type->getType();
-
-                        bool is_material = false;
-                        for (u32 attr_idx = 0; attr_idx < struct_type->getUserAttributeCount(); attr_idx++)
+                        is_material = true;
+                        size_t len = 0;
+                        if (const char* pass_str = attr->getArgumentValueString(0, &len))
                         {
-                            slang::UserAttribute* attr = struct_type->getUserAttributeByIndex(attr_idx);
-                            std::string attr_name = attr->getName();
-
-                            if (attr_name == "MaterialReflection" || attr_name == "MaterialReflectionAttribute")
-                            {
-                                is_material = true;
-                                break;
-                            }
+                            shader_info.target_pass = std::string(pass_str, len);
                         }
 
-                        if (is_material)
+                        if (const char* blend_str = attr->getArgumentValueString(1, &len))
                         {
-                            SMOL_LOG_INFO("SHADER", "Found material data struct '{}'", type->getName());
-                            reflect_material_struct(content_type, res);
+                            shader_info.blend_mode = std::string(blend_str, len);
                         }
+
+                        i32 dw = 1, dt = 1;
+                        attr->getArgumentValueInt(2, &dw);
+                        shader_info.depth_write = dw != 0;
+                        attr->getArgumentValueInt(3, &dt);
+                        shader_info.depth_test = dt != 0;
+
+                        break;
                     }
                 }
+
+                if (is_material)
+                {
+                    slang::TypeLayoutReflection* struct_layout = layout->getTypeLayout(target_type);
+                    shader_info.size = struct_layout->getSize();
+
+                    for (u32_t field_idx = 0; field_idx < struct_layout->getFieldCount(); field_idx++)
+                    {
+                        slang::VariableLayoutReflection* field_layout = struct_layout->getFieldByIndex(field_idx);
+                        shader_member_t member;
+                        member.name = field_layout->getVariable()->getName();
+                        member.offset = static_cast<u32_t>(field_layout->getOffset());
+                        member.size = static_cast<u32_t>(field_layout->getTypeLayout()->getSize());
+                        shader_info.members[member.name] = member;
+                    }
+
+                    SMOL_LOG_INFO("SHADER", "Discovered shader module: {} (size: {} bytes)", shader_info.name,
+                                  shader_info.size);
+                    res.push_back(shader_info);
+                }
             }
+
             return res;
         }
 
@@ -175,7 +154,7 @@ namespace smol
 
             slang::IGlobalSession* global_session = smol::shader_compiler::get_global_session();
 
-            const char* include_paths[] = {"assets/shaders"};
+            const char* include_paths[] = {"assets"};
 
             slang::SessionDesc session_desc = {};
             session_desc.searchPaths = include_paths;
@@ -235,7 +214,8 @@ namespace smol
             }
 
             slang::ProgramLayout* layout = linked_program->getLayout();
-            res.reflection = reflect_slang_layout(layout);
+            std::vector<shader_module_info_t> info = reflect_slang_layout(layout);
+            res.shader_types = std::move(info);
 
             // extraction of render config for pipeline creation
             for (u32 ep_idx = 0; ep_idx < layout->getEntryPointCount(); ep_idx++)
@@ -249,35 +229,6 @@ namespace smol
                     if (!result_var) { continue; }
 
                     slang::TypeReflection* result_type = result_var->getTypeLayout()->getType();
-
-                    for (u32 attr_idx = 0; attr_idx < result_type->getUserAttributeCount(); attr_idx++)
-                    {
-                        slang::UserAttribute* attr_reflection = result_type->getUserAttributeByIndex(attr_idx);
-                        std::string attr_name = attr_reflection->getName();
-
-                        if (attr_name == "RenderConfig" || attr_name == "RenderConfigAttribute")
-                        {
-                            size_t len = 0;
-                            if (const char* pass_str = attr_reflection->getArgumentValueString(0, &len))
-                            {
-                                res.target_pass = std::string(pass_str, len);
-                            }
-                            if (const char* blend_str = attr_reflection->getArgumentValueString(1, &len))
-                            {
-                                res.blend_mode = std::string(blend_str, len);
-                            }
-
-                            i32 depth_write_val;
-                            attr_reflection->getArgumentValueInt(2, &depth_write_val);
-                            res.depth_write = depth_write_val != 0;
-
-                            i32 depth_test_val;
-                            attr_reflection->getArgumentValueInt(3, &depth_test_val);
-                            res.depth_test = depth_test_val != 0;
-
-                            SMOL_LOG_INFO("SHADER", "Found target pass of shader '{}': {}", path, res.target_pass);
-                        }
-                    }
 
                     for (u32 field_idx = 0; field_idx < result_type->getFieldCount(); field_idx++)
                     {
@@ -356,15 +307,10 @@ namespace smol
             return std::nullopt;
         }
 
-        shader_t shader_asset;
-        shader_asset.reflection = compiled_shader.reflection;
-
-        shader_asset.target_pass = compiled_shader.target_pass;
-        shader_asset.blend_mode = compiled_shader.blend_mode;
-        shader_asset.depth_write = compiled_shader.depth_write;
-        shader_asset.depth_test = compiled_shader.depth_test;
-        shader_asset.target_formats = compiled_shader.target_formats;
-        shader_asset.is_compute = compiled_shader.is_compute;
+        shader_t shader;
+        shader.modules = compiled_shader.shader_types;
+        shader.target_formats = compiled_shader.target_formats;
+        shader.is_compute = compiled_shader.is_compute;
 
         VkPipelineVertexInputStateCreateInfo vertex_input_info = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
@@ -403,15 +349,6 @@ namespace smol
             .sampleShadingEnable = VK_FALSE,
         };
 
-        VkPipelineDepthStencilStateCreateInfo depth_stencil_info = {
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
-            .depthTestEnable = shader_asset.depth_test ? VK_TRUE : VK_FALSE,
-            .depthWriteEnable = shader_asset.depth_write ? VK_TRUE : VK_FALSE,
-            .depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
-            .depthBoundsTestEnable = VK_FALSE,
-            .stencilTestEnable = VK_FALSE,
-        };
-
         VkPipelineColorBlendAttachmentState base_blend = {
             .blendEnable = VK_FALSE,
             .srcColorBlendFactor = VK_BLEND_FACTOR_ONE,
@@ -424,21 +361,40 @@ namespace smol
                               VK_COLOR_COMPONENT_A_BIT,
         };
 
-        if (shader_asset.blend_mode == "Alpha")
+        std::string blend_mode = "Opaque";
+        bool is_depth_write = true;
+        bool is_depth_test = true;
+
+        if (!shader.modules.empty())
+        {
+            blend_mode = shader.modules[0].blend_mode;
+            is_depth_write = shader.modules[0].depth_write;
+            is_depth_test = shader.modules[0].depth_test;
+        }
+
+        if (blend_mode == "Alpha")
         {
             base_blend.blendEnable = VK_TRUE;
             base_blend.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
             base_blend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
         }
-        else if (shader_asset.blend_mode == "Additive")
+        else if (blend_mode == "Additive")
         {
             base_blend.blendEnable = VK_TRUE;
             base_blend.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
             base_blend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
         }
 
-        std::vector<VkPipelineColorBlendAttachmentState> blend_attachments(shader_asset.target_formats.size(),
-                                                                           base_blend);
+        VkPipelineDepthStencilStateCreateInfo depth_stencil_info = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
+            .depthTestEnable = is_depth_test ? VK_TRUE : VK_FALSE,
+            .depthWriteEnable = is_depth_write ? VK_TRUE : VK_FALSE,
+            .depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
+            .depthBoundsTestEnable = VK_FALSE,
+            .stencilTestEnable = VK_FALSE,
+        };
+
+        std::vector<VkPipelineColorBlendAttachmentState> blend_attachments(shader.target_formats.size(), base_blend);
 
         VkPipelineColorBlendStateCreateInfo color_blend_info = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO,
@@ -459,8 +415,8 @@ namespace smol
 
         VkPushConstantRange push_constant = {
             .stageFlags = static_cast<VkShaderStageFlags>(
-                shader_asset.is_compute ? VK_SHADER_STAGE_COMPUTE_BIT
-                                        : (VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)),
+                shader.is_compute ? VK_SHADER_STAGE_COMPUTE_BIT
+                                  : (VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT)),
             .offset = 0,
             .size = sizeof(renderer::push_constants_t),
         };
@@ -475,14 +431,14 @@ namespace smol
             .pPushConstantRanges = &push_constant,
         };
 
-        if (vkCreatePipelineLayout(renderer::ctx.device, &pipeline_layout_info, nullptr,
-                                   &shader_asset.pipeline_layout) != VK_SUCCESS)
+        if (vkCreatePipelineLayout(renderer::ctx.device, &pipeline_layout_info, nullptr, &shader.pipeline_layout) !=
+            VK_SUCCESS)
         {
             SMOL_LOG_ERROR("SHADER", "Failed to create pipeline layout for shader at path: {}", path);
             return std::nullopt;
         }
 
-        if (shader_asset.is_compute)
+        if (shader.is_compute)
         {
             VkShaderModule comp_module = create_shader_module(compiled_shader.compute_spirv);
 
@@ -496,11 +452,11 @@ namespace smol
             VkComputePipelineCreateInfo comp_pipeline_info = {
                 .sType = VK_STRUCTURE_TYPE_COMPUTE_PIPELINE_CREATE_INFO,
                 .stage = comp_stage_info,
-                .layout = shader_asset.pipeline_layout,
+                .layout = shader.pipeline_layout,
             };
 
             if (vkCreateComputePipelines(renderer::ctx.device, VK_NULL_HANDLE, 1, &comp_pipeline_info, nullptr,
-                                         &shader_asset.pipeline) != VK_SUCCESS)
+                                         &shader.pipeline) != VK_SUCCESS)
             {
                 SMOL_LOG_ERROR("SHADER", "Failed to create compute pipeline for shader at path: {}", path);
             }
@@ -534,12 +490,11 @@ namespace smol
 
             VkPipelineRenderingCreateInfo pipeline_rendering_info = {
                 .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
-                .colorAttachmentCount = static_cast<u32_t>(shader_asset.target_formats.size()),
-                .pColorAttachmentFormats =
-                    shader_asset.target_formats.empty() ? nullptr : shader_asset.target_formats.data(),
+                .colorAttachmentCount = static_cast<u32_t>(shader.target_formats.size()),
+                .pColorAttachmentFormats = shader.target_formats.empty() ? nullptr : shader.target_formats.data(),
             };
 
-            if (shader_asset.depth_test || shader_asset.depth_write)
+            if (shader.modules[0].depth_test || shader.modules[0].depth_write)
             {
                 pipeline_rendering_info.depthAttachmentFormat = renderer::ctx.swapchain.depth_format;
             }
@@ -557,14 +512,14 @@ namespace smol
                 .pDepthStencilState = &depth_stencil_info,
                 .pColorBlendState = &color_blend_info,
                 .pDynamicState = &dynamic_state_info,
-                .layout = shader_asset.pipeline_layout,
+                .layout = shader.pipeline_layout,
                 .renderPass = VK_NULL_HANDLE,
                 .subpass = 0,
                 .basePipelineHandle = VK_NULL_HANDLE,
             };
 
             if (vkCreateGraphicsPipelines(renderer::ctx.device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr,
-                                          &shader_asset.pipeline) != VK_SUCCESS)
+                                          &shader.pipeline) != VK_SUCCESS)
             {
                 SMOL_LOG_ERROR("SHADER", "Failed to create pipeline for shader at path: {}", path);
             }
@@ -573,7 +528,7 @@ namespace smol
             vkDestroyShaderModule(renderer::ctx.device, frag_mod, nullptr);
         }
 
-        return shader_asset;
+        return shader;
     } // namespace smol
 
     void asset_loader_t<shader_t>::unload(shader_t& shader)

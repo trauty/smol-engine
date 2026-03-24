@@ -2,6 +2,7 @@
 
 #include "smol/asset.h"
 #include "smol/assets/material.h"
+#include "smol/assets/shader.h"
 #include "smol/defines.h"
 #include "smol/ecs_fwd.h"
 #include "smol/rendering/renderer_types.h"
@@ -33,7 +34,7 @@ namespace smol::renderer
                                          std::function<void(rendergraph_t&, smol::material_t&)> on_execute = nullptr);
 
     bool init(const context_config_t& config, SDL_Window* window);
-    void reset_graph_state();
+    void reset_assets();
     void shutdown();
 
     extern render_context_t ctx;
@@ -64,4 +65,6 @@ namespace smol::renderer
     u64_t submit_transfer_commands(VkCommandBuffer cmd);
 
     VkSampler create_sampler(VkFilter filter, VkSamplerAddressMode address_mode);
+
+    void register_custom_shader(asset_t<shader_t> shader);
 } // namespace smol::renderer

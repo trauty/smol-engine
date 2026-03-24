@@ -9,6 +9,7 @@
 #include <deque>
 #include <mutex>
 #include <optional>
+#include <unordered_map>
 #include <vector>
 
 #define VK_CHECK(x)                                                                                                    \
@@ -155,7 +156,8 @@ namespace smol::renderer
         u32_t index_count;
         u32_t vertex_count;
         f32 bounding_sphere_radius;
-        u32_t _pad[2];
+        u32_t material_type;
+        u32_t bin_index;
         gpu_vec4_t bounding_sphere_center;
     };
 
@@ -250,6 +252,12 @@ namespace smol::renderer
         u32_t spot_light_bindless_id = BINDLESS_NULL_HANDLE;
     };
 
+    struct registered_shader_t
+    {
+        asset_t<shader_t> shader;
+        u32_t type_id;
+    };
+
     struct render_context_t
     {
         VkInstance instance = VK_NULL_HANDLE;
@@ -289,6 +297,9 @@ namespace smol::renderer
         std::vector<VkSampler> samplers;
 
         asset_t<shader_t> culling_shader;
+        asset_t<shader_t> opaque_uber_shader;
+
+        std::unordered_map<std::string, registered_shader_t> shader_registry;
     };
 
     struct context_config_t

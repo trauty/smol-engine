@@ -56,6 +56,7 @@ namespace smol::engine
         SDL_Init(SDL_INIT_VIDEO);
 
         smol::input::detail::init();
+        smol::shader_compiler::init();
 
         if (volkInitialize() != VK_SUCCESS) {}
 
@@ -80,7 +81,6 @@ namespace smol::engine
             return false;
         }
 
-        smol::shader_compiler::init();
         return true;
     }
 
@@ -150,7 +150,7 @@ namespace smol::engine
             active_scene.reset();
         }
 
-        smol::renderer::reset_graph_state();
+        smol::renderer::reset_assets();
         engine_assets.shutdown();
         smol::renderer::shutdown();
         smol::jobs::shutdown();

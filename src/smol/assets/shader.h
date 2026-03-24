@@ -19,27 +19,29 @@ namespace smol
         u32_t size = 0;
     };
 
-    struct SMOL_API shader_reflection_t
+    struct SMOL_API shader_module_info_t
     {
+        std::string name;
+        u32_t size;
         std::unordered_map<std::string, shader_member_t> members;
-        u32_t material_size;
+
+        std::string target_pass = "MainForwardPass";
+        std::string blend_mode = "Opaque";
+        bool depth_write = true;
+        bool depth_test = true;
     };
 
     struct SMOL_API shader_t
     {
         VkPipeline pipeline = VK_NULL_HANDLE;
         VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
-        shader_reflection_t reflection;
+
+        std::vector<shader_module_info_t> modules;
 
         bool is_compute = false;
-
-        std::string target_pass = "MainForwardPass";
-        std::string blend_mode = "Opaque";
-        bool depth_write = true;
-        bool depth_test = true;
         std::vector<VkFormat> target_formats;
 
-        bool ready() const { return pipeline != VK_NULL_HANDLE; }
+        bool ready() const { return pipeline_layout != VK_NULL_HANDLE; }
     };
 
     template <>

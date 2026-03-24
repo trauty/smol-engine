@@ -18,6 +18,7 @@
 #include "smol/rendering/renderer_types.h"
 #include "smol/rendering/rendergraph.h"
 #include "smol/rendering/samplers.h"
+#include "smol/rendering/shader_compiler.h"
 #include "smol/rendering/vulkan.h"
 #include "smol/systems/camera.h"
 #include "smol/time.h"
@@ -527,19 +528,43 @@ namespace smol::renderer
         vkDestroyCommandPool(ctx.device, tracy_pool, nullptr);
 #endif
 
+        std::vector<shader_compiler::generated_shader_module_t> opaque_shaders =
+            shader_compiler::generate_uber_shader("Opaque", "assets/shaders/.uber_opaque.slang");
+
+        ctx.culling_shader = smol::load_asset_sync<shader_t>("assets/shaders/culling.slang");
+        ctx.opaque_uber_shader = smol::load_asset_sync<shader_t>("assets/shaders/.uber_opaque.slang");
+
+        for (const shader_module_info_t& module : ctx.opaque_uber_shader->modules)
+        {
+            u32_t type_id = 0;
+            for (const shader_compiler::generated_shader_module_t& shader_type : opaque_shaders)
+            {
+                if (shader_type.shader_name == module.name)
+                {
+                    type_id = shader_type.id;
+                    break;
+                }
+            }
+
+            ctx.shader_registry[module.name] = {ctx.opaque_uber_shader, type_id};
+            SMOL_LOG_INFO("RENDERER", "Registered opaque shader module: {}", module.name);
+        }
+
         return true;
     }
 
-    void reset_graph_state()
+    void reset_assets()
     {
+        ctx.shader_registry.clear();
+        ctx.culling_shader.release();
+        ctx.opaque_uber_shader.release();
+
         rendergraph.clear();
         custom_renderer_features.clear();
     }
 
     void shutdown()
     {
-        ctx.culling_shader.release();
-
 #ifdef SMOL_ENABLE_PROFILING
         if (tracy_vk_ctx) { TracyVkDestroy(tracy_vk_ctx); }
 #endif
@@ -604,11 +629,6 @@ namespace smol::renderer
 
     void render(ecs::registry_t& reg)
     {
-        if (!ctx.culling_shader)
-        {
-            ctx.culling_shader = smol::load_asset_sync<shader_t>("assets/shaders/culling.slang");
-        }
-
         ZoneScoped;
 
         for (auto [entity, event] : reg.view<window::window_size_changed_event>().each())
@@ -825,6 +845,9 @@ namespace smol::renderer
             obj_data.index_count =
                 renderer.mesh->uses_indices ? renderer.mesh->index_count : renderer.mesh->vertex_count;
             obj_data.vertex_count = renderer.mesh->vertex_count;
+
+            obj_data.material_type = renderer.material->type_id;
+            obj_data.bin_index = 0;
 
             vec3_t world_center;
             vec3_t local_c = renderer.mesh->local_center;
@@ -1617,5 +1640,10 @@ namespace smol::renderer
         VK_CHECK(vkCreateSampler(ctx.device, &sampler_info, nullptr, &sampler));
 
         return sampler;
+    }
+
+    void register_custom_shader(asset_t<shader_t> shader)
+    {
+        for (const shader_module_info_t& module : shader->modules) { ctx.shader_registry[module.name] = {shader, 0}; }
     }
 } // namespace smol::renderer
