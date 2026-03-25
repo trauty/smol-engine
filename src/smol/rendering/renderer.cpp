@@ -869,13 +869,35 @@ namespace smol::renderer
         frame_data.object_counter = cur_object_id;
         frame_data.mapped_global_data->object_count = cur_object_id;
 
+        std::vector<VkBufferMemoryBarrier2> fill_barriers;
         for (u32_t i = 0; i < MAX_BINS; i++)
         {
             frame_data.mapped_global_data->indirect_buffer_ids[i] = frame_data.indirect_bindless_ids[i];
             frame_data.mapped_global_data->draw_count_ids[i] = frame_data.draw_count_bindless_ids[i];
 
-            *frame_data.mapped_draw_counts[i] = 0;
+            vkCmdFillBuffer(cmd, frame_data.draw_count_buffers[i], 0, sizeof(u32_t), 0);
+
+            fill_barriers.push_back({
+                .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+                .srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                .dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT,
+                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .buffer = frame_data.draw_count_buffers[i],
+                .offset = 0,
+                .size = sizeof(u32_t),
+            });
         }
+
+        VkDependencyInfo fill_dep_info = {
+            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+            .bufferMemoryBarrierCount = static_cast<u32_t>(fill_barriers.size()),
+            .pBufferMemoryBarriers = fill_barriers.data(),
+        };
+
+        vkCmdPipelineBarrier2(cmd, &fill_dep_info);
 
         if (cur_object_id > 0)
         {
@@ -894,13 +916,15 @@ namespace smol::renderer
 
             vkCmdDispatch(cmd, (cur_object_id + 63) / 64, 1, 1);
 
-            std::vector<VkBufferMemoryBarrier> indirect_barriers;
+            std::vector<VkBufferMemoryBarrier2> indirect_barriers;
             for (u32_t i = 0; i < MAX_BINS; i++)
             {
                 indirect_barriers.push_back({
-                    .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
-                    .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-                    .dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT,
+                    .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+                    .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                    .srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT,
+                    .dstStageMask = VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
+                    .dstAccessMask = VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT,
                     .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                     .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                     .buffer = frame_data.indirect_buffers[i],
@@ -909,9 +933,11 @@ namespace smol::renderer
                 });
 
                 indirect_barriers.push_back({
-                    .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
-                    .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-                    .dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT,
+                    .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+                    .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                    .srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT,
+                    .dstStageMask = VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
+                    .dstAccessMask = VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT,
                     .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                     .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                     .buffer = frame_data.draw_count_buffers[i],
@@ -920,9 +946,13 @@ namespace smol::renderer
                 });
             }
 
-            vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT, 0, 0,
-                                 nullptr, static_cast<u32_t>(indirect_barriers.size()), indirect_barriers.data(), 0,
-                                 nullptr);
+            VkDependencyInfo indirect_dep_info = {
+                .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                .bufferMemoryBarrierCount = static_cast<u32_t>(indirect_barriers.size()),
+                .pBufferMemoryBarriers = indirect_barriers.data(),
+            };
+
+            vkCmdPipelineBarrier2(cmd, &indirect_dep_info);
         }
 
         rendergraph.clear();
@@ -1410,6 +1440,21 @@ namespace smol::renderer
             vkUpdateDescriptorSets(ctx.device, 1, &write_desc, 0, nullptr);
         };
 
+        auto create_device_buffer =
+            [](VkDeviceSize size, VkBufferUsageFlags usage, VkBuffer& buffer, VmaAllocation& alloc)
+        {
+            VkBufferCreateInfo buf_info = {
+                .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                .size = size,
+                .usage = usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            };
+            VmaAllocationCreateInfo alloc_info = {
+                .usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
+            };
+
+            VK_CHECK(vmaCreateBuffer(ctx.allocator, &buf_info, &alloc_info, &buffer, &alloc, nullptr));
+        };
+
         create_mapped_buffer(sizeof(global_data_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, frame_data.global_buffer,
                              frame_data.global_allocation, (void*&)frame_data.mapped_global_data);
         make_bindless(frame_data.global_buffer, frame_data.global_bindless_id);
@@ -1421,16 +1466,14 @@ namespace smol::renderer
 
         for (u32_t i = 0; i < MAX_BINS; i++)
         {
-            create_mapped_buffer(sizeof(VkDrawIndirectCommand) * ecs::MAX_ENTITIES,
+            create_device_buffer(sizeof(VkDrawIndirectCommand) * ecs::MAX_ENTITIES,
                                  VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                                 frame_data.indirect_buffers[i], frame_data.indirect_allocations[i],
-                                 (void*&)frame_data.mapped_indirect_data[i]);
+                                 frame_data.indirect_buffers[i], frame_data.indirect_allocations[i]);
             make_bindless(frame_data.indirect_buffers[i], frame_data.indirect_bindless_ids[i]);
 
-            create_mapped_buffer(sizeof(u32_t),
+            create_device_buffer(sizeof(u32_t),
                                  VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                                 frame_data.draw_count_buffers[i], frame_data.draw_count_allocations[i],
-                                 (void*&)frame_data.mapped_draw_counts[i]);
+                                 frame_data.draw_count_buffers[i], frame_data.draw_count_allocations[i]);
             make_bindless(frame_data.draw_count_buffers[i], frame_data.draw_count_bindless_ids[i]);
         }
 
