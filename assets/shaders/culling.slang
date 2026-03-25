@@ -1,15 +1,21 @@
 import smol_globals;
 
+struct DrawIndirectCommand
+{
+    uint vertex_count;
+    uint instance_count;
+    uint first_vertex;
+    uint first_instance;
+};
+
 [shader("compute")]
 [numthreads(64, 1, 1)]
 void computeMain(uint3 thread_id: SV_DispatchThreadID)
 {
-    uint obj_id = thread_id.x;
     GlobalData globals = getGlobalData();
+    if (thread_id.x >= globals.object_count) { return; }
 
-    if (obj_id >= globals.object_count) { return; }
-
-    ObjectData obj = getObjectData(obj_id);
+    ObjectData obj = getObjectData(thread_id.x);
 
     bool is_visible = true;
     float3 center = obj.bounding_sphere_center.xyz;
@@ -26,12 +32,20 @@ void computeMain(uint3 thread_id: SV_DispatchThreadID)
         }
     }
 
-    DrawIndirectCommand cmd;
-    cmd.vertex_count = (obj.index_count > 0) ? obj.index_count : obj.vertex_count;
-    cmd.instance_count = is_visible ? 1 : 0;
-    cmd.first_vertex = 0;
-    cmd.first_instance = 0;
+    if (is_visible)
+    {
+        uint bin = obj.bin_index;
 
-    uint byte_offset = obj_id * sizeof(DrawIndirectCommand);
-    global_buffers[globals.indirect_buffer_id].Store<DrawIndirectCommand>(byte_offset, cmd);
+        uint draw_idx;
+        global_buffers[globals.draw_count_ids[bin]].InterlockedAdd(0, 1, draw_idx);
+
+        DrawIndirectCommand cmd;
+        cmd.vertex_count = (obj.index_count > 0) ? obj.index_count : obj.vertex_count;
+        cmd.instance_count = 1;
+        cmd.first_vertex = 0;
+        cmd.first_instance = thread_id.x;
+
+        global_buffers[globals.indirect_buffer_ids[bin]].Store<DrawIndirectCommand>(
+            draw_idx * sizeof(DrawIndirectCommand), cmd);
+    }
 }

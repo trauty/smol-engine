@@ -37,6 +37,8 @@ namespace smol::renderer
 
     constexpr u32_t MAX_FRAMES_IN_FLIGHT = 2;
 
+    constexpr u32_t MAX_BINS = 3;
+
     struct queue_family_indices_t
     {
         std::optional<u32_t> graphics_family;
@@ -142,7 +144,8 @@ namespace smol::renderer
         u32_t spot_light_buffer_id;
         u32_t spot_light_count;
 
-        u32_t indirect_buffer_id;
+        u32_t indirect_buffer_ids[4];
+        u32_t draw_count_ids[4];
         u32_t object_count;
     };
 
@@ -222,12 +225,15 @@ namespace smol::renderer
 
         u32_t object_counter = 0;
 
-        VkBuffer indirect_buffer = VK_NULL_HANDLE;
-        VmaAllocation indirect_allocation = VK_NULL_HANDLE;
-        VkDrawIndirectCommand* mapped_indirect_data = nullptr;
-        u32_t indirect_bindless_id = BINDLESS_NULL_HANDLE;
+        VkBuffer indirect_buffers[MAX_BINS] = {};
+        VmaAllocation indirect_allocations[MAX_BINS] = {};
+        VkDrawIndirectCommand* mapped_indirect_data[MAX_BINS] = {};
+        u32_t indirect_bindless_ids[MAX_BINS] = {};
 
-        std::vector<render_batch_t> batches;
+        VkBuffer draw_count_buffers[MAX_BINS] = {};
+        VmaAllocation draw_count_allocations[MAX_BINS] = {};
+        u32_t* mapped_draw_counts[MAX_BINS] = {};
+        u32_t draw_count_bindless_ids[MAX_BINS] = {};
 
         VkBuffer material_buffer = VK_NULL_HANDLE;
         VmaAllocation material_allocation = VK_NULL_HANDLE;

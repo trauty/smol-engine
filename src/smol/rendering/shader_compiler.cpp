@@ -96,9 +96,10 @@ namespace smol::shader_compiler
         out << "    public float4 position : SV_Position;\n    public float3 world_pos;\n    public float3 normal;\n   "
                " public float2 uv;\n    public uint draw_id;\n};\n\n";
 
-        out << "[shader(\"vertex\")]\nVertexOut vertexMain(uint vertex_id: SV_VertexID, uint draw_id: "
-               "SV_DrawIndex)\n{\n";
-        out << "    ObjectData obj = getObjectData(draw_id);\n    GlobalData globals = getGlobalData();\n";
+        out << "[shader(\"vertex\")]\nVertexOut vertexMain(uint vertex_id: SV_VertexID, uint instance_id: "
+               "SV_InstanceID, uint base_instance: SV_StartInstanceLocation)\n{\n";
+        out << "uint actual_instance_id = instance_id + base_instance;\n    ObjectData obj = "
+               "getObjectData(actual_instance_id);\n    GlobalData globals = getGlobalData();\n";
         out << "    Vertex vertex = getIndexedVertex(obj.vertex_buffer_id, obj.index_buffer_id, vertex_id);\n    "
                "float3 offset = float3(0.0f, 0.0f, 0.0f);\n\n";
 
@@ -118,7 +119,7 @@ namespace smol::shader_compiler
         out << "    float3x3 normal_mat = float3x3(obj.normal_matrix[0].xyz, obj.normal_matrix[1].xyz, "
                "obj.normal_matrix[2].xyz);\n";
         out << "    out_v.normal = normalize(mul(vertex.normal, normal_mat));\n    out_v.uv = vertex.uv;\n    "
-               "out_v.draw_id = draw_id;\n    return out_v;\n}\n\n";
+               "out_v.draw_id = actual_instance_id;\n    return out_v;\n}\n\n";
 
         out << "[RenderTargetsConfig]\nstruct FragmentOut\n{\n    [RenderTarget(\"RGBA16_FLOAT\")]\n    float4 color : "
                "SV_Target0;\n};\n\n";

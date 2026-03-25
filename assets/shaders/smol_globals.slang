@@ -20,14 +20,6 @@ public struct Vertex
     public float2 uv;
 };
 
-public struct DrawIndirectCommand
-{
-    public uint vertex_count;
-    public uint instance_count;
-    public uint first_vertex;
-    public uint first_instance;
-};
-
 public struct ObjectData
 {
     public float4x4 model_matrix;
@@ -61,7 +53,8 @@ public struct GlobalData
     public uint spot_light_buffer_id;
     public uint spot_light_count;
 
-    public uint indirect_buffer_id;
+    public uint indirect_buffer_ids[4];
+    public uint draw_count_ids[4];
     public uint object_count;
 };
 

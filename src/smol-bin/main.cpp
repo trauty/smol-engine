@@ -21,7 +21,7 @@ int main()
 #if SMOL_PLATFORM_WIN
     const char* lib_name = "smol-game-logic.dll";
 #elif SMOL_PLATFORM_LINUX || SMOL_PLATFORM_ANDROID
-    const char* lib_name = "libsmol-game-logic.so";
+    const char* lib_name = "./libsmol-game-logic.so";
 #endif
 
     smol::os::lib_handle_t game_lib = smol::os::load_lib(lib_name);

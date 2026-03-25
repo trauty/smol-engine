@@ -77,18 +77,17 @@ namespace smol::renderer
                 0,
             };
 
-            for (const render_batch_t& batch : frame_data.batches)
-            {
-                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, batch.pipeline);
-                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, batch.layout, 0, 1,
-                                        &res_system.global_set, 0, nullptr);
+            // opaque uber
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.opaque_uber_shader->pipeline);
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.opaque_uber_shader->pipeline_layout, 0, 1,
+                                    &res_system.global_set, 0, nullptr);
 
-                vkCmdPushConstants(cmd, batch.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-                                   sizeof(push_constants_t), &pc_data);
+            vkCmdPushConstants(cmd, ctx.opaque_uber_shader->pipeline_layout,
+                               VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push_constants_t),
+                               &pc_data);
 
-                vkCmdDrawIndirect(cmd, frame_data.indirect_buffer, batch.start_idx * sizeof(VkDrawIndirectCommand),
-                                  batch.count, sizeof(VkDrawIndirectCommand));
-            }
+            vkCmdDrawIndirectCount(cmd, frame_data.indirect_buffers[0], 0, frame_data.draw_count_buffers[0], 0,
+                                   frame_data.object_counter, sizeof(VkDrawIndirectCommand));
         };
 
         return pass;
@@ -372,38 +371,34 @@ namespace smol::renderer
             queue_infos.push_back(queue_info);
         }
 
-        // bindless descriptors
-        VkPhysicalDeviceDescriptorIndexingFeatures indexing_features = {
-            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES};
-        indexing_features.runtimeDescriptorArray = VK_TRUE;
-        indexing_features.descriptorBindingPartiallyBound = VK_TRUE;
-        indexing_features.descriptorBindingVariableDescriptorCount = VK_TRUE;
-
-        indexing_features.shaderSampledImageArrayNonUniformIndexing = VK_TRUE;
-        indexing_features.shaderStorageBufferArrayNonUniformIndexing = VK_TRUE;
-        indexing_features.shaderStorageImageArrayNonUniformIndexing = VK_TRUE;
-
-        indexing_features.descriptorBindingSampledImageUpdateAfterBind = VK_TRUE;
-        indexing_features.descriptorBindingStorageBufferUpdateAfterBind = VK_TRUE;
-        indexing_features.descriptorBindingStorageImageUpdateAfterBind = VK_TRUE;
-
-        indexing_features.descriptorBindingUpdateUnusedWhilePending = VK_TRUE;
-
-        VkPhysicalDeviceTimelineSemaphoreFeatures timeline_sem_features = {
-            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_TIMELINE_SEMAPHORE_FEATURES,
-            .pNext = &indexing_features,
-            .timelineSemaphore = VK_TRUE,
-        };
-
         VkPhysicalDeviceVulkan11Features vk11_features = {
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_1_FEATURES,
-            .pNext = &timeline_sem_features,
             .shaderDrawParameters = VK_TRUE,
+        };
+
+        VkPhysicalDeviceVulkan12Features vk12_features = {
+            .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_2_FEATURES,
+            .pNext = &vk11_features,
+
+            .drawIndirectCount = VK_TRUE,
+
+            .shaderSampledImageArrayNonUniformIndexing = VK_TRUE,
+            .shaderStorageBufferArrayNonUniformIndexing = VK_TRUE,
+            .shaderStorageImageArrayNonUniformIndexing = VK_TRUE,
+            .descriptorBindingSampledImageUpdateAfterBind = VK_TRUE,
+            .descriptorBindingStorageImageUpdateAfterBind = VK_TRUE,
+            .descriptorBindingStorageBufferUpdateAfterBind = VK_TRUE,
+            .descriptorBindingUpdateUnusedWhilePending = VK_TRUE,
+            .descriptorBindingPartiallyBound = VK_TRUE,
+            .descriptorBindingVariableDescriptorCount = VK_TRUE,
+
+            .runtimeDescriptorArray = VK_TRUE,
+            .timelineSemaphore = VK_TRUE,
         };
 
         VkPhysicalDeviceVulkan13Features vk13_features = {
             .sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_VULKAN_1_3_FEATURES,
-            .pNext = &vk11_features,
+            .pNext = &vk12_features,
             .synchronization2 = VK_TRUE,
             .dynamicRendering = VK_TRUE,
         };
@@ -412,6 +407,7 @@ namespace smol::renderer
         device_features_check.pNext = &vk13_features;
         device_features_check.features.samplerAnisotropy = VK_TRUE;
         device_features_check.features.multiDrawIndirect = VK_TRUE;
+        device_features_check.features.drawIndirectFirstInstance = VK_TRUE;
 
         std::vector<const char*> device_exts = config.required_device_exts;
         device_exts.push_back(VK_KHR_SWAPCHAIN_EXTENSION_NAME);
@@ -551,7 +547,7 @@ namespace smol::renderer
         }
 
         return true;
-    }
+    } // namespace smol::renderer
 
     void reset_assets()
     {
@@ -804,7 +800,6 @@ namespace smol::renderer
         frame_data.mapped_global_data->spot_light_count = spot_count;
         frame_data.mapped_global_data->spot_light_buffer_id = frame_data.spot_light_bindless_id;
 
-        frame_data.batches.clear();
         u32_t cur_object_id = 0;
 
         reg.sort<mesh_renderer_t>(
@@ -868,24 +863,19 @@ namespace smol::renderer
             f32 max_scale = std::max({scale_x, scale_y, scale_z});
             obj_data.bounding_sphere_radius = renderer.mesh->local_radius * max_scale;
 
-            VkPipeline cur_pipeline = renderer.material->shader->pipeline;
-            VkPipelineLayout cur_layout = renderer.material->shader->pipeline_layout;
-
-            if (frame_data.batches.empty() || frame_data.batches.back().pipeline != cur_pipeline)
-            {
-                frame_data.batches.push_back({cur_pipeline, cur_layout, cur_object_id, 1});
-            }
-            else
-            {
-                frame_data.batches.back().count++;
-            }
-
             cur_object_id++;
         }
 
         frame_data.object_counter = cur_object_id;
         frame_data.mapped_global_data->object_count = cur_object_id;
-        frame_data.mapped_global_data->indirect_buffer_id = frame_data.indirect_bindless_id;
+
+        for (u32_t i = 0; i < MAX_BINS; i++)
+        {
+            frame_data.mapped_global_data->indirect_buffer_ids[i] = frame_data.indirect_bindless_ids[i];
+            frame_data.mapped_global_data->draw_count_ids[i] = frame_data.draw_count_bindless_ids[i];
+
+            *frame_data.mapped_draw_counts[i] = 0;
+        }
 
         if (cur_object_id > 0)
         {
@@ -904,18 +894,35 @@ namespace smol::renderer
 
             vkCmdDispatch(cmd, (cur_object_id + 63) / 64, 1, 1);
 
-            VkBufferMemoryBarrier indirect_barrier = {
-                .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
-                .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
-                .dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT,
-                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                .buffer = frame_data.indirect_buffer,
-                .offset = 0,
-                .size = sizeof(VkDrawIndirectCommand) * cur_object_id,
-            };
+            std::vector<VkBufferMemoryBarrier> indirect_barriers;
+            for (u32_t i = 0; i < MAX_BINS; i++)
+            {
+                indirect_barriers.push_back({
+                    .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+                    .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+                    .dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT,
+                    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                    .buffer = frame_data.indirect_buffers[i],
+                    .offset = 0,
+                    .size = sizeof(VkDrawIndirectCommand) * cur_object_id,
+                });
+
+                indirect_barriers.push_back({
+                    .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+                    .srcAccessMask = VK_ACCESS_SHADER_WRITE_BIT,
+                    .dstAccessMask = VK_ACCESS_INDIRECT_COMMAND_READ_BIT,
+                    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                    .buffer = frame_data.draw_count_buffers[i],
+                    .offset = 0,
+                    .size = sizeof(u32_t),
+                });
+            }
+
             vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT, VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT, 0, 0,
-                                 nullptr, 1, &indirect_barrier, 0, nullptr);
+                                 nullptr, static_cast<u32_t>(indirect_barriers.size()), indirect_barriers.data(), 0,
+                                 nullptr);
         }
 
         rendergraph.clear();
@@ -943,8 +950,6 @@ namespace smol::renderer
         };
 
         rg_resource_id depth_res = rendergraph.create_image("SceneDepth", depth_desc);
-
-        frame_data.object_counter = 0;
 
         for (graph_builder_func_t& feature_builder : custom_renderer_features) { feature_builder(rendergraph, reg); }
 
@@ -1414,11 +1419,20 @@ namespace smol::renderer
                              (void*&)frame_data.mapped_object_data);
         make_bindless(frame_data.object_buffer, frame_data.object_bindless_id);
 
-        create_mapped_buffer(sizeof(VkDrawIndirectCommand) * ecs::MAX_ENTITIES,
-                             VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                             frame_data.indirect_buffer, frame_data.indirect_allocation,
-                             (void*&)frame_data.mapped_indirect_data);
-        make_bindless(frame_data.indirect_buffer, frame_data.indirect_bindless_id);
+        for (u32_t i = 0; i < MAX_BINS; i++)
+        {
+            create_mapped_buffer(sizeof(VkDrawIndirectCommand) * ecs::MAX_ENTITIES,
+                                 VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                                 frame_data.indirect_buffers[i], frame_data.indirect_allocations[i],
+                                 (void*&)frame_data.mapped_indirect_data[i]);
+            make_bindless(frame_data.indirect_buffers[i], frame_data.indirect_bindless_ids[i]);
+
+            create_mapped_buffer(sizeof(u32_t),
+                                 VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                                 frame_data.draw_count_buffers[i], frame_data.draw_count_allocations[i],
+                                 (void*&)frame_data.mapped_draw_counts[i]);
+            make_bindless(frame_data.draw_count_buffers[i], frame_data.draw_count_bindless_ids[i]);
+        }
 
         create_mapped_buffer(MAX_MATERIAL_BUFFER_SIZE, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, frame_data.material_buffer,
                              frame_data.material_allocation, (void*&)frame_data.mapped_material_data);
@@ -1477,10 +1491,18 @@ namespace smol::renderer
             res_system.buffer_heap.release(frame_data.object_bindless_id);
         }
 
-        if (frame_data.indirect_buffer != VK_NULL_HANDLE)
+        for (u32_t i = 0; i < MAX_BINS; i++)
         {
-            vmaDestroyBuffer(ctx.allocator, frame_data.indirect_buffer, frame_data.indirect_allocation);
-            res_system.buffer_heap.release(frame_data.indirect_bindless_id);
+            if (frame_data.indirect_buffers[i] != VK_NULL_HANDLE)
+            {
+                vmaDestroyBuffer(ctx.allocator, frame_data.indirect_buffers[i], frame_data.indirect_allocations[i]);
+                res_system.buffer_heap.release(frame_data.indirect_bindless_ids[i]);
+            }
+            if (frame_data.draw_count_buffers[i] != VK_NULL_HANDLE)
+            {
+                vmaDestroyBuffer(ctx.allocator, frame_data.draw_count_buffers[i], frame_data.draw_count_allocations[i]);
+                res_system.buffer_heap.release(frame_data.draw_count_bindless_ids[i]);
+            }
         }
 
         if (frame_data.material_buffer != VK_NULL_HANDLE)
