@@ -73,7 +73,15 @@ namespace smol::shader_compiler
 
                 if (content.find("\"Opaque\"") != std::string::npos) { mod.blend_mode = "Opaque"; }
                 else if (content.find("\"Cutout\"") != std::string::npos) { mod.blend_mode = "Cutout"; }
-                else if (content.find("\"Transparent\"") != std::string::npos) { mod.blend_mode = "Transparent"; }
+                else if (content.find("\"TransparentAlpha\"") != std::string::npos)
+                {
+                    mod.blend_mode = "TransparentAlpha";
+                }
+                else if (content.find("\"TransparentAdd\"") != std::string::npos) { mod.blend_mode = "TransparentAdd"; }
+                else if (content.find("\"TransparentMult\"") != std::string::npos)
+                {
+                    mod.blend_mode = "TransparentMult";
+                }
                 else
                 {
                     mod.blend_mode = "Opaque";
@@ -87,6 +95,8 @@ namespace smol::shader_compiler
             }
         }
 
+        if (shaders.empty()) { return {}; }
+
         std::ofstream out(output_path);
         out << "import smol_globals;\nimport shader_interface;\n\n";
 
@@ -98,7 +108,7 @@ namespace smol::shader_compiler
 
         out << "[shader(\"vertex\")]\nVertexOut vertexMain(uint vertex_id: SV_VertexID, uint instance_id: "
                "SV_InstanceID, uint base_instance: SV_StartInstanceLocation)\n{\n";
-        out << "uint actual_instance_id = instance_id + base_instance;\n    ObjectData obj = "
+        out << "    uint actual_instance_id = instance_id + base_instance;\n    ObjectData obj = "
                "getObjectData(actual_instance_id);\n    GlobalData globals = getGlobalData();\n";
         out << "    Vertex vertex = getIndexedVertex(obj.vertex_buffer_id, obj.index_buffer_id, vertex_id);\n    "
                "float3 offset = float3(0.0f, 0.0f, 0.0f);\n\n";

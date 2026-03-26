@@ -77,17 +77,54 @@ namespace smol::renderer
                 0,
             };
 
-            // opaque uber
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.opaque_uber_shader->pipeline);
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.opaque_uber_shader->pipeline_layout, 0, 1,
                                     &res_system.global_set, 0, nullptr);
-
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.opaque_uber_shader->pipeline);
             vkCmdPushConstants(cmd, ctx.opaque_uber_shader->pipeline_layout,
                                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push_constants_t),
                                &pc_data);
-
             vkCmdDrawIndirectCount(cmd, frame_data.indirect_buffers[0], 0, frame_data.draw_count_buffers[0], 0,
                                    frame_data.object_counter, sizeof(VkDrawIndirectCommand));
+
+            if (ctx.cutout_uber_shader)
+            {
+                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.cutout_uber_shader->pipeline);
+                vkCmdPushConstants(cmd, ctx.cutout_uber_shader->pipeline_layout,
+                                   VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                                   sizeof(push_constants_t), &pc_data);
+                vkCmdDrawIndirectCount(cmd, frame_data.indirect_buffers[1], 0, frame_data.draw_count_buffers[1], 0,
+                                       frame_data.object_counter, sizeof(VkDrawIndirectCommand));
+            }
+
+            if (ctx.transparent_alpha_uber_shader)
+            {
+                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.transparent_alpha_uber_shader->pipeline);
+                vkCmdPushConstants(cmd, ctx.transparent_alpha_uber_shader->pipeline_layout,
+                                   VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                                   sizeof(push_constants_t), &pc_data);
+                vkCmdDrawIndirectCount(cmd, frame_data.indirect_buffers[2], 0, frame_data.draw_count_buffers[2], 0,
+                                       frame_data.object_counter, sizeof(VkDrawIndirectCommand));
+            }
+
+            if (ctx.transparent_add_uber_shader)
+            {
+                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.transparent_add_uber_shader->pipeline);
+                vkCmdPushConstants(cmd, ctx.transparent_add_uber_shader->pipeline_layout,
+                                   VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                                   sizeof(push_constants_t), &pc_data);
+                vkCmdDrawIndirectCount(cmd, frame_data.indirect_buffers[3], 0, frame_data.draw_count_buffers[3], 0,
+                                       frame_data.object_counter, sizeof(VkDrawIndirectCommand));
+            }
+
+            if (ctx.transparent_mult_uber_shader)
+            {
+                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.transparent_mult_uber_shader->pipeline);
+                vkCmdPushConstants(cmd, ctx.transparent_mult_uber_shader->pipeline_layout,
+                                   VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                                   sizeof(push_constants_t), &pc_data);
+                vkCmdDrawIndirectCount(cmd, frame_data.indirect_buffers[4], 0, frame_data.draw_count_buffers[4], 0,
+                                       frame_data.object_counter, sizeof(VkDrawIndirectCommand));
+            }
         };
 
         return pass;
@@ -524,36 +561,84 @@ namespace smol::renderer
         vkDestroyCommandPool(ctx.device, tracy_pool, nullptr);
 #endif
 
+        auto register_modules = [](asset_t<shader_t> uber_shader, const std::vector<shader_module_info_t>& shaders,
+                                   const std::vector<shader_compiler::generated_shader_module_t>& modules)
+        {
+            for (const shader_module_info_t& module : shaders)
+            {
+                u32_t type_id = 0;
+                for (const shader_compiler::generated_shader_module_t& shader_type : modules)
+                {
+                    if (shader_type.shader_name == module.name)
+                    {
+                        type_id = shader_type.id;
+                        break;
+                    }
+                }
+
+                ctx.shader_registry[module.name] = {uber_shader, type_id};
+                SMOL_LOG_INFO("RENDERER", "Registered opaque shader module: {}", module.name);
+            }
+        };
+
         std::vector<shader_compiler::generated_shader_module_t> opaque_shaders =
             shader_compiler::generate_uber_shader("Opaque", "assets/shaders/.uber_opaque.slang");
+        std::vector<shader_compiler::generated_shader_module_t> cutout_shaders =
+            shader_compiler::generate_uber_shader("Cutout", "assets/shaders/.uber_cutout.slang");
+        std::vector<shader_compiler::generated_shader_module_t> transparent_alpha_shaders =
+            shader_compiler::generate_uber_shader("TransparentAlpha", "assets/shaders/.uber_transparent_alpha.slang");
+        std::vector<shader_compiler::generated_shader_module_t> transparent_add_shaders =
+            shader_compiler::generate_uber_shader("TransparentAdd", "assets/shaders/.uber_transparent_add.slang");
+        std::vector<shader_compiler::generated_shader_module_t> transparent_mult_shaders =
+            shader_compiler::generate_uber_shader("TransparentMult", "assets/shaders/.uber_transparent_mult.slang");
 
         ctx.culling_shader = smol::load_asset_sync<shader_t>("assets/shaders/culling.slang");
-        ctx.opaque_uber_shader = smol::load_asset_sync<shader_t>("assets/shaders/.uber_opaque.slang");
 
-        for (const shader_module_info_t& module : ctx.opaque_uber_shader->modules)
+        if (!opaque_shaders.empty())
         {
-            u32_t type_id = 0;
-            for (const shader_compiler::generated_shader_module_t& shader_type : opaque_shaders)
-            {
-                if (shader_type.shader_name == module.name)
-                {
-                    type_id = shader_type.id;
-                    break;
-                }
-            }
-
-            ctx.shader_registry[module.name] = {ctx.opaque_uber_shader, type_id};
-            SMOL_LOG_INFO("RENDERER", "Registered opaque shader module: {}", module.name);
+            ctx.opaque_uber_shader = smol::load_asset_sync<shader_t>("assets/shaders/.uber_opaque.slang");
+            register_modules(ctx.opaque_uber_shader, ctx.opaque_uber_shader->modules, opaque_shaders);
+        }
+        if (!cutout_shaders.empty())
+        {
+            ctx.cutout_uber_shader = smol::load_asset_sync<shader_t>("assets/shaders/.uber_cutout.slang");
+            register_modules(ctx.cutout_uber_shader, ctx.cutout_uber_shader->modules, cutout_shaders);
+        }
+        if (!transparent_alpha_shaders.empty())
+        {
+            ctx.transparent_alpha_uber_shader =
+                smol::load_asset_sync<shader_t>("assets/shaders/.uber_transparent_alpha.slang");
+            register_modules(ctx.transparent_alpha_uber_shader, ctx.transparent_alpha_uber_shader->modules,
+                             transparent_alpha_shaders);
+        }
+        if (!transparent_add_shaders.empty())
+        {
+            ctx.transparent_add_uber_shader =
+                smol::load_asset_sync<shader_t>("assets/shaders/.uber_transparent_add.slang");
+            register_modules(ctx.transparent_add_uber_shader, ctx.transparent_add_uber_shader->modules,
+                             transparent_add_shaders);
+        }
+        if (!transparent_mult_shaders.empty())
+        {
+            ctx.transparent_mult_uber_shader =
+                smol::load_asset_sync<shader_t>("assets/shaders/.uber_transparent_mult.slang");
+            register_modules(ctx.transparent_mult_uber_shader, ctx.transparent_mult_uber_shader->modules,
+                             transparent_mult_shaders);
         }
 
         return true;
-    } // namespace smol::renderer
+    }
 
     void reset_assets()
     {
         ctx.shader_registry.clear();
         ctx.culling_shader.release();
+
         ctx.opaque_uber_shader.release();
+        ctx.cutout_uber_shader.release();
+        ctx.transparent_alpha_uber_shader.release();
+        ctx.transparent_add_uber_shader.release();
+        ctx.transparent_mult_uber_shader.release();
 
         rendergraph.clear();
         custom_renderer_features.clear();
@@ -842,7 +927,27 @@ namespace smol::renderer
             obj_data.vertex_count = renderer.mesh->vertex_count;
 
             obj_data.material_type = renderer.material->type_id;
-            obj_data.bin_index = 0;
+
+            const std::string& blend_mode =
+                renderer.material->shader->modules[renderer.material->shader_module_idx].blend_mode;
+
+            if (blend_mode == "Cutout") { obj_data.bin_index = static_cast<u32_t>(render_bin_e::CUTOUT); }
+            else if (blend_mode == "TransparentAlpha")
+            {
+                obj_data.bin_index = static_cast<u32_t>(render_bin_e::TRANSPARENT_ALPHA);
+            }
+            else if (blend_mode == "TransparentAdd")
+            {
+                obj_data.bin_index = static_cast<u32_t>(render_bin_e::TRANSPARENT_ADD);
+            }
+            else if (blend_mode == "TransparentMult")
+            {
+                obj_data.bin_index = static_cast<u32_t>(render_bin_e::TRANSPARENT_MULT);
+            }
+            else
+            {
+                obj_data.bin_index = static_cast<u32_t>(render_bin_e::OPAQUE);
+            }
 
             vec3_t world_center;
             vec3_t local_c = renderer.mesh->local_center;
@@ -882,7 +987,7 @@ namespace smol::renderer
                 .srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
                 .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
                 .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                .dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_READ_BIT,
+                .dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
                 .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                 .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
                 .buffer = frame_data.draw_count_buffers[i],

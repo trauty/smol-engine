@@ -1,6 +1,7 @@
 #include "shader.h"
 
 #include "smol/defines.h"
+#include "smol/hash.h"
 #include "smol/log.h"
 #include "smol/rendering/renderer.h"
 #include "smol/rendering/renderer_resources.h"
@@ -136,7 +137,7 @@ namespace smol
                         member.name = field_layout->getVariable()->getName();
                         member.offset = static_cast<u32_t>(field_layout->getOffset());
                         member.size = static_cast<u32_t>(field_layout->getTypeLayout()->getSize());
-                        shader_info.members[member.name] = member;
+                        shader_info.members[smol::hash_string(member.name)] = member;
                     }
 
                     SMOL_LOG_INFO("SHADER", "Discovered shader module: {} (size: {} bytes)", shader_info.name,
@@ -372,17 +373,27 @@ namespace smol
             is_depth_test = shader.modules[0].depth_test;
         }
 
-        if (blend_mode == "Alpha")
+        if (blend_mode == "TransparentAlpha")
         {
             base_blend.blendEnable = VK_TRUE;
             base_blend.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
             base_blend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
         }
-        else if (blend_mode == "Additive")
+        else if (blend_mode == "TransparentAdd")
         {
             base_blend.blendEnable = VK_TRUE;
             base_blend.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
             base_blend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
+            base_blend.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+            base_blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+        }
+        else if (blend_mode == "TransparentMult")
+        {
+            base_blend.blendEnable = VK_TRUE;
+            base_blend.srcColorBlendFactor = VK_BLEND_FACTOR_DST_COLOR;
+            base_blend.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO;
+            base_blend.srcAlphaBlendFactor = VK_BLEND_FACTOR_DST_ALPHA;
+            base_blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
         }
 
         VkPipelineDepthStencilStateCreateInfo depth_stencil_info = {

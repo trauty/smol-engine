@@ -1,13 +1,11 @@
 #pragma once
 
-#include "smol/assets/mesh.h"
 #include "smol/defines.h"
 #include "smol/rendering/renderer_types.h"
 #include "vulkan/vulkan_core.h"
 
 #include <deque>
 #include <mutex>
-#include <span>
 #include <vector>
 
 namespace smol::renderer
@@ -92,6 +90,12 @@ namespace smol::renderer
 
     constexpr u32_t MATERIAL_HEAP_SIZE = 24 * 1024 * 1024;
 
+    struct free_block_t
+    {
+        u32_t offset;
+        u32_t size;
+    };
+
     struct material_heap_t
     {
         u32_t capacity;
@@ -103,10 +107,13 @@ namespace smol::renderer
 
         u32_t bindless_id = BINDLESS_NULL_HANDLE;
 
+        std::vector<free_block_t> free_blocks;
+
         void init(u32_t max_size);
         void shutdown();
 
         u32_t allocate(u32_t size);
+        void free(u32_t offset, u32_t size);
 
         void update(u32_t offset, const void* data, u32_t size);
     };

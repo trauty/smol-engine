@@ -1,12 +1,12 @@
 #include "renderer_resources.h"
 
-#include "smol/assets/mesh.h"
 #include "smol/defines.h"
 #include "smol/log.h"
 #include "smol/rendering/renderer.h"
 #include "smol/rendering/renderer_types.h"
 #include "smol/rendering/vulkan.h"
 
+#include <algorithm>
 #include <cstring>
 #include <mutex>
 
@@ -88,7 +88,24 @@ namespace smol::renderer
 
     u32_t material_heap_t::allocate(u32_t size)
     {
-        u32_t aligned_size = (size + 15) & ~15; // align to 16 bytes
+        u32_t aligned_size = (size + 255) & ~255;
+
+        for (auto it = free_blocks.begin(); it != free_blocks.end(); ++it)
+        {
+            if (it->size >= aligned_size)
+            {
+                u32_t offset = it->offset;
+
+                if (it->size == aligned_size) { free_blocks.erase(it); }
+                else
+                {
+                    it->offset += aligned_size;
+                    it->size -= aligned_size;
+                }
+
+                return offset;
+            }
+        }
 
         if (allocated_size + aligned_size > capacity)
         {
@@ -99,6 +116,32 @@ namespace smol::renderer
         u32_t offset = allocated_size;
         allocated_size += aligned_size;
         return offset;
+    }
+
+    void material_heap_t::free(u32_t offset, u32_t size)
+    {
+        u32_t aligned_size = (size + 255) & ~255;
+
+        free_blocks.push_back({offset, aligned_size});
+
+        std::sort(free_blocks.begin(), free_blocks.end(), [](const free_block_t& a_block, const free_block_t& b_block)
+                  { return a_block.offset < b_block.offset; });
+
+        for (size_t i = 0; i < free_blocks.size() - 1;)
+        {
+            u32_t cur_end = free_blocks[i].offset + free_blocks[i].size;
+            u32_t next_start = free_blocks[i + 1].offset;
+
+            if (cur_end == next_start)
+            {
+                free_blocks[i].size += free_blocks[i + 1].size;
+                free_blocks.erase(free_blocks.begin() + i + 1);
+            }
+            else
+            {
+                i++;
+            }
+        }
     }
 
     void material_heap_t::update(u32_t offset, const void* data, u32_t size)

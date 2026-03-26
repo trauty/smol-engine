@@ -37,7 +37,17 @@ namespace smol::renderer
 
     constexpr u32_t MAX_FRAMES_IN_FLIGHT = 2;
 
-    constexpr u32_t MAX_BINS = 3;
+    enum class render_bin_e : u32_t
+    {
+        OPAQUE = 0,
+        CUTOUT,
+        TRANSPARENT_ALPHA,
+        TRANSPARENT_ADD,
+        TRANSPARENT_MULT,
+        COUNT
+    };
+
+    constexpr u32_t MAX_BINS = static_cast<u32_t>(render_bin_e::COUNT);
 
     struct queue_family_indices_t
     {
@@ -144,8 +154,8 @@ namespace smol::renderer
         u32_t spot_light_buffer_id;
         u32_t spot_light_count;
 
-        u32_t indirect_buffer_ids[4];
-        u32_t draw_count_ids[4];
+        u32_t indirect_buffer_ids[MAX_BINS];
+        u32_t draw_count_ids[MAX_BINS];
         u32_t object_count;
     };
 
@@ -301,7 +311,12 @@ namespace smol::renderer
         std::vector<VkSampler> samplers;
 
         asset_t<shader_t> culling_shader;
+
         asset_t<shader_t> opaque_uber_shader;
+        asset_t<shader_t> cutout_uber_shader;
+        asset_t<shader_t> transparent_alpha_uber_shader;
+        asset_t<shader_t> transparent_add_uber_shader;
+        asset_t<shader_t> transparent_mult_uber_shader;
 
         std::unordered_map<std::string, registered_shader_t> shader_registry;
     };

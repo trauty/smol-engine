@@ -53,8 +53,8 @@ public struct GlobalData
     public uint spot_light_buffer_id;
     public uint spot_light_count;
 
-    public uint indirect_buffer_ids[4];
-    public uint draw_count_ids[4];
+    public uint indirect_buffer_ids[5];
+    public uint draw_count_ids[5];
     public uint object_count;
 };
 

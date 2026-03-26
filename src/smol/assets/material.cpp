@@ -22,16 +22,16 @@ namespace smol
         shader = it->second.shader;
         type_id = it->second.type_id;
 
-        for (shader_module_info_t& module : shader->modules)
+        for (u32_t idx = 0; idx < shader->modules.size(); idx++)
         {
-            if (module.name == shader_name)
+            if (shader->modules[idx].name == shader_name)
             {
-                shader_info = &module;
+                shader_module_idx = idx;
                 break;
             }
         }
 
-        data.resize(shader_info->size, 0);
+        if (shader_module_idx != NULL_SHADER_MODULE) { data.resize(shader->modules[shader_module_idx].size, 0); }
     }
 
     void material_t::sync()
@@ -51,14 +51,20 @@ namespace smol
     std::optional<material_t> asset_loader_t<material_t>::load(const std::string& path, const std::string& shader_name)
     {
         material_t mat(shader_name);
-        if (!mat.shader_info) { return std::nullopt; }
+        if (mat.shader_module_idx == NULL_SHADER_MODULE) { return std::nullopt; }
         return mat;
     }
 
     void asset_loader_t<material_t>::unload(material_t& mat)
     {
+        if (mat.heap_offset != renderer::BINDLESS_NULL_HANDLE)
+        {
+            renderer::res_system.material_heap.free(mat.heap_offset, mat.data.size());
+            mat.heap_offset = renderer::BINDLESS_NULL_HANDLE;
+        }
+
         mat.data.clear();
-        mat.heap_offset = renderer::BINDLESS_NULL_HANDLE;
         mat.bound_textures.clear();
+        mat.shader_module_idx = NULL_SHADER_MODULE;
     }
 }; // namespace smol

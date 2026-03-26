@@ -23,7 +23,7 @@ namespace smol
     {
         std::string name;
         u32_t size;
-        std::unordered_map<std::string, shader_member_t> members;
+        std::unordered_map<u32_t, shader_member_t> members;
 
         std::string target_pass = "MainForwardPass";
         std::string blend_mode = "Opaque";

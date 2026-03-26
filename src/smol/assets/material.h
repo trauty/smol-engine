@@ -7,44 +7,44 @@
 #include "smol/rendering/renderer_types.h"
 #include "smol/rendering/samplers.h"
 
+#include <climits>
 #include <cstring>
 #include <unordered_map>
 #include <vector>
 
 namespace smol
 {
+    constexpr u32_t NULL_SHADER_MODULE = UINT_MAX;
+
     struct SMOL_API material_t
     {
         asset_t<shader_t> shader;
         std::vector<u8> data;
 
-        std::vector<asset_t<texture_t>> bound_textures;
+        std::unordered_map<u32_t, asset_t<texture_t>> bound_textures;
         u32_t type_id;
-        shader_module_info_t* shader_info;
+        u32_t shader_module_idx = NULL_SHADER_MODULE;
 
         u32_t heap_offset = renderer::BINDLESS_NULL_HANDLE;
 
         bool is_dirty = true;
 
         material_t() = default;
-        material_t(material_t&&) noexcept = default;
-        material_t& operator=(material_t&&) noexcept = default;
-
         material_t(const std::string& shader_name);
 
         void sync();
 
         template <typename T>
-        void set_property(const std::string& name, const T& value)
+        void set_property(u32_t name_hash, const T& value)
         {
-            if (!shader) { return; }
+            if (!shader || shader_module_idx == NULL_SHADER_MODULE) { return; }
 
-            const std::unordered_map<std::string, shader_member_t>& members = shader_info->members;
-            auto it = members.find(name);
+            const std::unordered_map<u32_t, shader_member_t>& members = shader->modules[shader_module_idx].members;
+            auto it = members.find(name_hash);
 
             if (it == members.end())
             {
-                SMOL_LOG_WARN("MATERIAL", "Property '{}' not found in shader", name);
+                SMOL_LOG_WARN("MATERIAL", "Property '{}' not found in shader", name_hash);
                 return;
             }
 
@@ -52,7 +52,7 @@ namespace smol
 
             if (sizeof(T) != member.size)
             {
-                SMOL_LOG_ERROR("MATERIAL", "Size mismatch for '{}', Expected {} bytes, but got {} bytes", name,
+                SMOL_LOG_ERROR("MATERIAL", "Size mismatch for '{}', Expected {} bytes, but got {} bytes", name_hash,
                                member.size, sizeof(T));
                 return;
             }
@@ -61,17 +61,17 @@ namespace smol
             is_dirty = true;
         }
 
-        void set_texture(const std::string& name, const asset_t<texture_t>& tex)
+        void set_texture(u32_t name_hash, const asset_t<texture_t>& tex)
         {
             if (tex)
             {
-                set_property<u32_t>(name, tex->bindless_id);
-                bound_textures.push_back(tex);
+                set_property<u32_t>(name_hash, tex->bindless_id);
+                bound_textures[name_hash] = tex;
             }
         }
 
-        void set_sampler(const std::string& name, sampler_type_e sampler)
-        { set_property<u32_t>(name, static_cast<u32_t>(sampler)); }
+        void set_sampler(u32_t name_hash, sampler_type_e sampler)
+        { set_property<u32_t>(name_hash, static_cast<u32_t>(sampler)); }
     };
 
     template <>

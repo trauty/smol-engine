@@ -2,6 +2,7 @@
 
 #include "smol/defines.h"
 
+#include <cstddef>
 #include <string_view>
 
 namespace smol
@@ -29,4 +30,6 @@ namespace smol
         return hash;
     }
 
+    constexpr u32_t operator""_h(const char* str, size_t len) { return hash_string(std::string_view(str, len)); }
+    constexpr u64_t operator""_h64(const char* str, size_t len) { return hash_string64(std::string_view(str, len)); }
 } // namespace smol
