@@ -4,6 +4,8 @@
 #include "smol/engine.h"
 
 #include <atomic>
+#include <filesystem>
+#include <string>
 #include <thread>
 
 namespace smol
@@ -110,5 +112,20 @@ namespace smol
         typename asset_pool_t<T>::slot_t* slot = asset_reg.load_sync<T>(path, std::forward<Args>(args)...);
 
         return asset_t<T>(&asset_reg, slot);
+    }
+
+    // i need a real vfs for this, but this will work for now
+    inline std::string get_cooked_path(const std::string& raw_path, const std::string& extension)
+    {
+        std::filesystem::path path(raw_path);
+        std::string path_str = path.string();
+
+        if (path_str.starts_with("assets/")) { path_str.replace(0, 7, ".smol/"); }
+        else if (path_str.starts_with("assets\\")) { path_str.replace(0, 7, ".smol\\"); }
+
+        std::filesystem::path cooked_path(path_str);
+        cooked_path.replace_extension(extension);
+
+        return cooked_path.string();
     }
 } // namespace smol

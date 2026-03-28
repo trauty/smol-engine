@@ -110,7 +110,6 @@ target("smol-engine")
 
     add_undefines("JPH_FLOATING_POINT_EXCEPTIONS_ENABLED")
 
-    add_packages("slang", {public = true})
     add_packages("tracy", {public = true})
 
     add_files("src/smol/**.cpp")
@@ -123,21 +122,13 @@ target("smol-engine")
 
     after_build(function (target) 
         local dest_dir = target:targetdir()
-
-        local slang_dir = target:pkg("slang")
-        if slang_dir then
-            if is_plat("linux") then 
-                os.trycp(path.join(slang_dir:installdir(), "lib", "libslang-compiler.so.0.*"), dest_dir)
-            elseif is_plat("windows") then 
-                os.trycp(path.join(slang_dir:installdir(), "bin", "slang-compiler.dll"), dest_dir)
-            end
-        end 
-
+        local out_assets = path.join(dest_dir, "assets")
+        
         local engine_assets_dir = path.join(os.scriptdir(), "assets")
         if os.isdir(engine_assets_dir) then 
-            os.cp(path.join(engine_assets_dir, "*"), path.join(dest_dir, "assets"))
+            os.cp(path.join(engine_assets_dir, "*"), out_assets)
             print("Copied core engine assets")
-        end 
+        end
     end)
 target_end()
 
@@ -190,4 +181,30 @@ target("smol-bin")
             end
         end)
     end
+target_end()
+
+target("smol-cooker")
+    set_kind("binary")
+    
+    add_deps("smol-engine")
+
+    add_packages("slang", {public = true})
+
+    add_files("src/smol-cooker/**.cpp")
+
+    add_includedirs("include", {public = true})
+    add_includedirs("src", {public = true})
+
+    after_build(function (target)
+        local dest_dir = target:targetdir()
+        local slang_dir = target:pkg("slang")
+
+        if slang_dir then
+            if is_plat("linux") then 
+                os.trycp(path.join(slang_dir:installdir(), "lib", "libslang-compiler.so.0.*"), dest_dir)
+            elseif is_plat("windows") then 
+                os.trycp(path.join(slang_dir:installdir(), "bin", "slang-compiler.dll"), dest_dir)
+            end
+        end  
+    end)
 target_end()

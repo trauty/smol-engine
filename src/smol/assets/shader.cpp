@@ -1,47 +1,28 @@
 #include "shader.h"
 
+#include "smol/asset.h"
+#include "smol/assets/shader_format.h"
 #include "smol/defines.h"
-#include "smol/hash.h"
 #include "smol/log.h"
 #include "smol/rendering/renderer.h"
 #include "smol/rendering/renderer_resources.h"
 #include "smol/rendering/renderer_types.h"
-#include "smol/rendering/shader_compiler.h"
 #include "smol/rendering/vulkan.h"
 #include "vulkan/vulkan_core.h"
 
-#include <cstddef>
+#include <fstream>
 #include <mutex>
 #include <optional>
-#include <slang-com-ptr.h>
 #include <slang.h>
 #include <string>
-#include <utility>
 #include <vector>
 
 namespace smol
 {
     namespace
     {
-        struct slang_compilation_res_t
-        {
-            std::vector<u32> vert_spirv;
-            std::vector<u32> frag_spirv;
-            std::vector<u32> compute_spirv;
-            std::vector<shader_module_info_t> shader_types;
-            bool is_compute = false;
 
-            bool success = false;
-
-            std::string target_pass = "MainForwardPass";
-            std::string blend_mode = "Opaque";
-            bool depth_write = true;
-            bool depth_test = true;
-
-            std::vector<VkFormat> target_formats;
-        };
-
-        VkShaderModule create_shader_module(const std::vector<u32>& code)
+        VkShaderModule create_shader_module(const std::vector<u32_t>& code)
         {
             VkShaderModuleCreateInfo shader_module_info = {VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
             shader_module_info.codeSize = code.size() * 4;
@@ -57,261 +38,76 @@ namespace smol
             return module;
         }
 
-        VkFormat map_alias_to_format(const std::string& alias)
-        {
-            if (alias == "Swapchain") { return renderer::ctx.swapchain.format; }
-            if (alias == "RGBA8_SRGB") { return VK_FORMAT_R8G8B8A8_SRGB; }
-            if (alias == "RGBA8_UNORM") { return VK_FORMAT_R8G8B8A8_UNORM; }
-            if (alias == "RGBA16_FLOAT") { return VK_FORMAT_R16G16B16A16_SFLOAT; }
-            if (alias == "RG16_FLOAT") { return VK_FORMAT_R16G16_SFLOAT; }
-            if (alias == "R8_UNORM") { return VK_FORMAT_R8_UNORM; }
-
-            SMOL_LOG_ERROR("SHADER", "Unkown format alias: {}", alias);
-
-            return renderer::ctx.swapchain.format;
-        }
-
-        std::vector<shader_module_info_t> reflect_slang_layout(slang::ProgramLayout* layout)
-        {
-            std::vector<shader_module_info_t> res;
-
-            u32_t param_count = layout->getParameterCount();
-            for (u32_t i = 0; i < param_count; i++)
-            {
-                slang::VariableLayoutReflection* param = layout->getParameterByIndex(i);
-                if (!param) { continue; }
-
-                slang::TypeLayoutReflection* param_type_layout = param->getTypeLayout();
-                if (!param_type_layout) { continue; }
-
-                slang::TypeLayoutReflection* element_layout = param_type_layout->getElementTypeLayout();
-
-                slang::TypeReflection* target_type =
-                    element_layout ? element_layout->getType() : param_type_layout->getType();
-                if (!target_type) { continue; }
-
-                if (target_type->getKind() != slang::TypeReflection::Kind::Struct) { continue; }
-
-                bool is_material = false;
-                shader_module_info_t shader_info;
-                shader_info.name = target_type->getName() ? target_type->getName() : "Unknown";
-
-                for (u32_t attr_idx = 0; attr_idx < target_type->getUserAttributeCount(); attr_idx++)
-                {
-                    slang::UserAttribute* attr = target_type->getUserAttributeByIndex(attr_idx);
-                    std::string attr_name = attr->getName();
-
-                    if (attr_name == "ShaderConfig" || attr_name == "ShaderConfigAttribute")
-                    {
-                        is_material = true;
-                        size_t len = 0;
-                        if (const char* pass_str = attr->getArgumentValueString(0, &len))
-                        {
-                            shader_info.target_pass = std::string(pass_str, len);
-                        }
-
-                        if (const char* blend_str = attr->getArgumentValueString(1, &len))
-                        {
-                            shader_info.blend_mode = std::string(blend_str, len);
-                        }
-
-                        i32 dw = 1, dt = 1;
-                        attr->getArgumentValueInt(2, &dw);
-                        shader_info.depth_write = dw != 0;
-                        attr->getArgumentValueInt(3, &dt);
-                        shader_info.depth_test = dt != 0;
-
-                        break;
-                    }
-                }
-
-                if (is_material)
-                {
-                    slang::TypeLayoutReflection* struct_layout = layout->getTypeLayout(target_type);
-                    shader_info.size = struct_layout->getSize();
-
-                    for (u32_t field_idx = 0; field_idx < struct_layout->getFieldCount(); field_idx++)
-                    {
-                        slang::VariableLayoutReflection* field_layout = struct_layout->getFieldByIndex(field_idx);
-                        shader_member_t member;
-                        member.name = field_layout->getVariable()->getName();
-                        member.offset = static_cast<u32_t>(field_layout->getOffset());
-                        member.size = static_cast<u32_t>(field_layout->getTypeLayout()->getSize());
-                        shader_info.members[smol::hash_string(member.name)] = member;
-                    }
-
-                    SMOL_LOG_INFO("SHADER", "Discovered shader module: {} (size: {} bytes)", shader_info.name,
-                                  shader_info.size);
-                    res.push_back(shader_info);
-                }
-            }
-
-            return res;
-        }
-
-        slang_compilation_res_t compile_slang_to_spirv(const std::string& path)
-        {
-            slang_compilation_res_t res;
-
-            slang::IGlobalSession* global_session = smol::shader_compiler::get_global_session();
-
-            const char* include_paths[] = {"assets"};
-
-            slang::SessionDesc session_desc = {};
-            session_desc.searchPaths = include_paths;
-            session_desc.searchPathCount = 1;
-
-            slang::TargetDesc target_descs[1] = {};
-            target_descs[0].format = SLANG_SPIRV;
-            target_descs[0].profile = global_session->findProfile("sm_6_2");
-            session_desc.targets = target_descs;
-            session_desc.targetCount = 1;
-
-            Slang::ComPtr<slang::ISession> session;
-            global_session->createSession(session_desc, session.writeRef());
-
-            Slang::ComPtr<slang::IBlob> diag_blob;
-            slang::IModule* module = session->loadModule(path.c_str(), diag_blob.writeRef());
-
-            if (diag_blob) { SMOL_LOG_ERROR("SHADER", "Diagnostics: {}", (const char*)diag_blob->getBufferPointer()); }
-            if (!module) { return res; }
-
-            std::vector<slang::IComponentType*> components;
-            components.push_back(module);
-
-            Slang::ComPtr<slang::IEntryPoint> comp_entry;
-            module->findEntryPointByName("computeMain", comp_entry.writeRef());
-
-            if (comp_entry)
-            {
-                res.is_compute = true;
-                components.push_back(comp_entry);
-            }
-            else
-            {
-                Slang::ComPtr<slang::IEntryPoint> vert_entry;
-                module->findEntryPointByName("vertexMain", vert_entry.writeRef());
-                components.push_back(vert_entry);
-
-                Slang::ComPtr<slang::IEntryPoint> frag_entry;
-                module->findEntryPointByName("fragmentMain", frag_entry.writeRef());
-                components.push_back(frag_entry);
-            }
-
-            Slang::ComPtr<slang::IComponentType> composed_program;
-            session->createCompositeComponentType(components.data(), components.size(), composed_program.writeRef());
-
-            Slang::ComPtr<slang::IComponentType> linked_program;
-            {
-                SlangResult link_res = composed_program->link(linked_program.writeRef(), diag_blob.writeRef());
-
-                if (diag_blob && diag_blob->getBufferSize() > 0)
-                {
-                    SMOL_LOG_ERROR("SHADER", "Linking of shader program failed: {}",
-                                   (const char*)diag_blob->getBufferPointer());
-                }
-
-                if (SLANG_FAILED(link_res) || !linked_program) { return res; }
-            }
-
-            slang::ProgramLayout* layout = linked_program->getLayout();
-            std::vector<shader_module_info_t> info = reflect_slang_layout(layout);
-            res.shader_types = std::move(info);
-
-            // extraction of render config for pipeline creation
-            for (u32 ep_idx = 0; ep_idx < layout->getEntryPointCount(); ep_idx++)
-            {
-                slang::EntryPointReflection* entry_point = layout->getEntryPointByIndex(ep_idx);
-                std::string ep_name = entry_point->getName() ? entry_point->getName() : "";
-
-                if (ep_name == "fragmentMain")
-                {
-                    slang::VariableLayoutReflection* result_var = entry_point->getResultVarLayout();
-                    if (!result_var) { continue; }
-
-                    slang::TypeReflection* result_type = result_var->getTypeLayout()->getType();
-
-                    for (u32 field_idx = 0; field_idx < result_type->getFieldCount(); field_idx++)
-                    {
-                        slang::VariableReflection* field = result_type->getFieldByIndex(field_idx);
-
-                        for (u32 attr_idx = 0; attr_idx < field->getUserAttributeCount(); attr_idx++)
-                        {
-                            slang::UserAttribute* attr_reflection = field->getUserAttributeByIndex(attr_idx);
-                            std::string attr_name = attr_reflection->getName();
-
-                            if (attr_name == "RenderTarget" || attr_name == "RenderTargetAttribute")
-                            {
-                                size_t len = 0;
-                                const char* alias_str = attr_reflection->getArgumentValueString(0, &len);
-                                if (alias_str)
-                                {
-                                    res.target_formats.push_back(map_alias_to_format(std::string(alias_str, len)));
-                                }
-
-                                SMOL_LOG_INFO("SHADER",
-                                              "Found target format of target '{} - SV_Target{}' of shader '{}': {}",
-                                              result_type->getName(), attr_idx, path, alias_str);
-                            }
-                        }
-                    }
-                }
-            }
-
-            if (res.target_formats.empty()) { res.target_formats.push_back(renderer::ctx.swapchain.format); }
-
-            if (res.is_compute)
-            {
-                Slang::ComPtr<slang::IBlob> kernel_blob;
-                linked_program->getEntryPointCode(0, 0, kernel_blob.writeRef(), diag_blob.writeRef());
-                if (kernel_blob)
-                {
-                    res.compute_spirv.assign((u32*)kernel_blob->getBufferPointer(),
-                                             (u32*)kernel_blob->getBufferPointer() + kernel_blob->getBufferSize() / 4);
-                }
-
-                res.success = !res.compute_spirv.empty();
-            }
-            else
-            {
-                Slang::ComPtr<slang::IBlob> kernel_blob;
-                linked_program->getEntryPointCode(0, 0, kernel_blob.writeRef(), diag_blob.writeRef());
-                if (kernel_blob)
-                {
-                    res.vert_spirv.assign((u32*)kernel_blob->getBufferPointer(),
-                                          (u32*)kernel_blob->getBufferPointer() + kernel_blob->getBufferSize() / 4);
-                }
-
-                kernel_blob = nullptr;
-
-                linked_program->getEntryPointCode(1, 0, kernel_blob.writeRef(), diag_blob.writeRef());
-                if (kernel_blob)
-                {
-                    res.frag_spirv.assign((u32*)kernel_blob->getBufferPointer(),
-                                          (u32*)kernel_blob->getBufferPointer() + kernel_blob->getBufferSize() / 4);
-                }
-
-                res.success = !res.vert_spirv.empty() && !res.frag_spirv.empty();
-            }
-
-            return res;
-        }
     } // namespace
 
     std::optional<shader_t> smol::asset_loader_t<shader_t>::load(const std::string& path)
     {
-        slang_compilation_res_t compiled_shader = compile_slang_to_spirv(path);
+        std::string cooked_path = get_cooked_path(path, ".smolshader");
 
-        if (!compiled_shader.success)
+        std::ifstream file(cooked_path, std::ios::binary);
+        if (!file.is_open())
         {
-            SMOL_LOG_ERROR("SHADER", "Failed to compile slang file: {}", path);
+            SMOL_LOG_ERROR("SHADER", "Shader not found: {}", cooked_path);
+            return std::nullopt;
+        }
+
+        shader_header_t header;
+        file.read(reinterpret_cast<char*>(&header), sizeof(shader_header_t));
+
+        if (header.magic != SMOL_SHADER_MAGIC)
+        {
+            SMOL_LOG_ERROR("SHADER", "Invalid .smolshader file");
             return std::nullopt;
         }
 
         shader_t shader;
-        shader.modules = compiled_shader.shader_types;
-        shader.target_formats = compiled_shader.target_formats;
-        shader.is_compute = compiled_shader.is_compute;
+        shader.is_compute = header.is_compute;
+
+        shader.target_formats.resize(header.target_format_count);
+        file.read(reinterpret_cast<char*>(shader.target_formats.data()), header.target_format_count * sizeof(VkFormat));
+
+        for (u32_t i = 0; i < header.module_count; i++)
+        {
+            shader_module_header_t mod_header;
+            file.read(reinterpret_cast<char*>(&mod_header), sizeof(shader_module_header_t));
+
+            shader_module_info_t info = {
+                .name = mod_header.name,
+                .size = mod_header.size,
+                .target_pass = mod_header.target_pass,
+                .blend_mode = mod_header.blend_mode,
+                .depth_write = mod_header.depth_write,
+                .depth_test = mod_header.depth_test,
+            };
+
+            for (u32_t j = 0; j < mod_header.member_count; j++)
+            {
+                shader_member_header_t member_header;
+                file.read(reinterpret_cast<char*>(&member_header), sizeof(shader_member_header_t));
+                info.members[member_header.name_hash] = {"", member_header.offset, member_header.size};
+            }
+
+            shader.modules.push_back(info);
+        }
+
+        std::vector<u32_t> vert_spirv(header.vert_spirv_size);
+        std::vector<u32_t> frag_spirv(header.frag_spirv_size);
+        std::vector<u32_t> comp_spirv(header.comp_spirv_size);
+
+        if (header.vert_spirv_size > 0)
+        {
+            file.read(reinterpret_cast<char*>(vert_spirv.data()), header.vert_spirv_size * 4);
+        }
+
+        if (header.frag_spirv_size > 0)
+        {
+            file.read(reinterpret_cast<char*>(frag_spirv.data()), header.frag_spirv_size * 4);
+        }
+
+        if (header.comp_spirv_size > 0)
+        {
+            file.read(reinterpret_cast<char*>(comp_spirv.data()), header.comp_spirv_size * 4);
+        }
 
         VkPipelineVertexInputStateCreateInfo vertex_input_info = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
@@ -451,7 +247,7 @@ namespace smol
 
         if (shader.is_compute)
         {
-            VkShaderModule comp_module = create_shader_module(compiled_shader.compute_spirv);
+            VkShaderModule comp_module = create_shader_module(comp_spirv);
 
             VkPipelineShaderStageCreateInfo comp_stage_info = {
                 .sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO,
@@ -476,8 +272,8 @@ namespace smol
         }
         else
         {
-            VkShaderModule vert_mod = create_shader_module(compiled_shader.vert_spirv);
-            VkShaderModule frag_mod = create_shader_module(compiled_shader.frag_spirv);
+            VkShaderModule vert_mod = create_shader_module(vert_spirv);
+            VkShaderModule frag_mod = create_shader_module(frag_spirv);
 
             if (!vert_mod || !frag_mod)
             {

@@ -7,7 +7,6 @@
 #include "smol/log.h"
 #include "smol/rendering/renderer.h"
 #include "smol/rendering/renderer_types.h"
-#include "smol/rendering/shader_compiler.h"
 #include "smol/systems/camera.h"
 #include "smol/systems/events.h"
 #include "smol/systems/transform.h"
@@ -56,7 +55,6 @@ namespace smol::engine
         SDL_Init(SDL_INIT_VIDEO);
 
         smol::input::detail::init();
-        smol::shader_compiler::init();
 
         if (volkInitialize() != VK_SUCCESS) {}
 

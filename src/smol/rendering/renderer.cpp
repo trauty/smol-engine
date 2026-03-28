@@ -18,7 +18,6 @@
 #include "smol/rendering/renderer_types.h"
 #include "smol/rendering/rendergraph.h"
 #include "smol/rendering/samplers.h"
-#include "smol/rendering/shader_compiler.h"
 #include "smol/rendering/vulkan.h"
 #include "smol/systems/camera.h"
 #include "smol/time.h"
@@ -561,70 +560,37 @@ namespace smol::renderer
         vkDestroyCommandPool(ctx.device, tracy_pool, nullptr);
 #endif
 
-        auto register_modules = [](asset_t<shader_t> uber_shader, const std::vector<shader_module_info_t>& shaders,
-                                   const std::vector<shader_compiler::generated_shader_module_t>& modules)
+        auto register_modules = [](asset_t<shader_t> uber_shader)
         {
-            for (const shader_module_info_t& module : shaders)
-            {
-                u32_t type_id = 0;
-                for (const shader_compiler::generated_shader_module_t& shader_type : modules)
-                {
-                    if (shader_type.shader_name == module.name)
-                    {
-                        type_id = shader_type.id;
-                        break;
-                    }
-                }
+            if (!uber_shader) return;
 
-                ctx.shader_registry[module.name] = {uber_shader, type_id};
-                SMOL_LOG_INFO("RENDERER", "Registered opaque shader module: {}", module.name);
+            for (u32_t i = 0; i < uber_shader->modules.size(); i++)
+            {
+                const shader_module_info_t& module = uber_shader->modules[i];
+
+                ctx.shader_registry[module.name] = {uber_shader, i};
+                SMOL_LOG_INFO("RENDERER", "Registered shader module: {} (ID: {})", module.name, i);
             }
         };
 
-        std::vector<shader_compiler::generated_shader_module_t> opaque_shaders =
-            shader_compiler::generate_uber_shader("Opaque", "assets/shaders/.uber_opaque.slang");
-        std::vector<shader_compiler::generated_shader_module_t> cutout_shaders =
-            shader_compiler::generate_uber_shader("Cutout", "assets/shaders/.uber_cutout.slang");
-        std::vector<shader_compiler::generated_shader_module_t> transparent_alpha_shaders =
-            shader_compiler::generate_uber_shader("TransparentAlpha", "assets/shaders/.uber_transparent_alpha.slang");
-        std::vector<shader_compiler::generated_shader_module_t> transparent_add_shaders =
-            shader_compiler::generate_uber_shader("TransparentAdd", "assets/shaders/.uber_transparent_add.slang");
-        std::vector<shader_compiler::generated_shader_module_t> transparent_mult_shaders =
-            shader_compiler::generate_uber_shader("TransparentMult", "assets/shaders/.uber_transparent_mult.slang");
-
         ctx.culling_shader = smol::load_asset_sync<shader_t>("assets/shaders/culling.slang");
 
-        if (!opaque_shaders.empty())
-        {
-            ctx.opaque_uber_shader = smol::load_asset_sync<shader_t>("assets/shaders/.uber_opaque.slang");
-            register_modules(ctx.opaque_uber_shader, ctx.opaque_uber_shader->modules, opaque_shaders);
-        }
-        if (!cutout_shaders.empty())
-        {
-            ctx.cutout_uber_shader = smol::load_asset_sync<shader_t>("assets/shaders/.uber_cutout.slang");
-            register_modules(ctx.cutout_uber_shader, ctx.cutout_uber_shader->modules, cutout_shaders);
-        }
-        if (!transparent_alpha_shaders.empty())
-        {
-            ctx.transparent_alpha_uber_shader =
-                smol::load_asset_sync<shader_t>("assets/shaders/.uber_transparent_alpha.slang");
-            register_modules(ctx.transparent_alpha_uber_shader, ctx.transparent_alpha_uber_shader->modules,
-                             transparent_alpha_shaders);
-        }
-        if (!transparent_add_shaders.empty())
-        {
-            ctx.transparent_add_uber_shader =
-                smol::load_asset_sync<shader_t>("assets/shaders/.uber_transparent_add.slang");
-            register_modules(ctx.transparent_add_uber_shader, ctx.transparent_add_uber_shader->modules,
-                             transparent_add_shaders);
-        }
-        if (!transparent_mult_shaders.empty())
-        {
-            ctx.transparent_mult_uber_shader =
-                smol::load_asset_sync<shader_t>("assets/shaders/.uber_transparent_mult.slang");
-            register_modules(ctx.transparent_mult_uber_shader, ctx.transparent_mult_uber_shader->modules,
-                             transparent_mult_shaders);
-        }
+        ctx.opaque_uber_shader = smol::load_asset_sync<shader_t>("assets/shaders/uber_opaque.slang");
+        register_modules(ctx.opaque_uber_shader);
+
+        ctx.cutout_uber_shader = smol::load_asset_sync<shader_t>("assets/shaders/uber_cutout.slang");
+        register_modules(ctx.cutout_uber_shader);
+
+        ctx.transparent_alpha_uber_shader =
+            smol::load_asset_sync<shader_t>("assets/shaders/uber_transparent_alpha.slang");
+        register_modules(ctx.transparent_alpha_uber_shader);
+
+        ctx.transparent_add_uber_shader = smol::load_asset_sync<shader_t>("assets/shaders/uber_transparent_add.slang");
+        register_modules(ctx.transparent_add_uber_shader);
+
+        ctx.transparent_mult_uber_shader =
+            smol::load_asset_sync<shader_t>("assets/shaders/uber_transparent_mult.slang");
+        register_modules(ctx.transparent_mult_uber_shader);
 
         return true;
     }
