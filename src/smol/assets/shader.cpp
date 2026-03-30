@@ -66,6 +66,11 @@ namespace smol
         shader.target_formats.resize(header.target_format_count);
         file.read(reinterpret_cast<char*>(shader.target_formats.data()), header.target_format_count * sizeof(VkFormat));
 
+        for (VkFormat& format : shader.target_formats)
+        {
+            if (format == VK_FORMAT_UNDEFINED) { format = renderer::ctx.swapchain.format; }
+        }
+
         for (u32_t i = 0; i < header.module_count; i++)
         {
             shader_module_header_t mod_header;

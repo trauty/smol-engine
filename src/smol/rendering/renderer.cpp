@@ -888,9 +888,8 @@ namespace smol::renderer
             obj_data.vertex_buffer_id = renderer.mesh->vertex_bindless_id;
             obj_data.index_buffer_id = renderer.mesh->index_bindless_id;
 
-            obj_data.index_count =
-                renderer.mesh->uses_indices ? renderer.mesh->index_count : renderer.mesh->vertex_count;
             obj_data.vertex_count = renderer.mesh->vertex_count;
+            obj_data.index_count = renderer.mesh->index_count;
 
             obj_data.material_type = renderer.material->type_id;
 

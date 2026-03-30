@@ -19,9 +19,8 @@ namespace smol
 
     struct SMOL_API mesh_t
     {
-        i32 vertex_count = 0;
-        i32 index_count = 0;
-        bool uses_indices = false;
+        u32_t vertex_count = 0;
+        u32_t index_count = 0;
 
         vec3_t local_center;
         f32 local_radius;

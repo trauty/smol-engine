@@ -4,7 +4,7 @@
 #include "smol/assets/shader_format.h"
 #include "smol/hash.h"
 #include "smol/log.h"
-#include "smol/rendering/vulkan.h"
+#include "vulkan/vulkan_core.h"
 
 #include <algorithm>
 #include <cctype>
@@ -33,7 +33,7 @@ namespace smol::cooker::shader
 
     VkFormat map_alias_to_format(const std::string& alias)
     {
-        if (alias == "Swapchain") { return VK_FORMAT_R8G8B8A8_SRGB; } // need to make it dependent on swapchain again
+        if (alias == "Swapchain") { return VK_FORMAT_UNDEFINED; }
         if (alias == "RGBA8_SRGB") { return VK_FORMAT_R8G8B8A8_SRGB; }
         if (alias == "RGBA8_UNORM") { return VK_FORMAT_R8G8B8A8_UNORM; }
         if (alias == "RGBA16_FLOAT") { return VK_FORMAT_R16G16B16A16_SFLOAT; }
@@ -42,7 +42,7 @@ namespace smol::cooker::shader
 
         SMOL_LOG_ERROR("SHADER", "Unkown format alias: {}", alias);
 
-        return VK_FORMAT_R8G8B8A8_SRGB; // need to make it dependent on swapchain again
+        return VK_FORMAT_UNDEFINED;
     }
 
     std::string extract_struct_name(const std::string& code)
@@ -71,8 +71,6 @@ namespace smol::cooker::shader
         for (const std::filesystem::directory_entry& entry : std::filesystem::recursive_directory_iterator("assets"))
         {
             if (!entry.is_regular_file() || entry.path().extension() != ".slang") { continue; }
-
-            SMOL_LOG_INFO("SHADER_COMPILER", "Found shader: {}", entry.path().string());
 
             std::string filename = entry.path().stem().string();
             if (filename.find("uber_") != std::string::npos) { continue; }
@@ -244,7 +242,7 @@ namespace smol::cooker::shader
                     shader_info.members[smol::hash_string(member.name)] = member;
                 }
 
-                SMOL_LOG_INFO("SHADER", "Discovered shader module: {} (size: {} bytes)", shader_info.name,
+                SMOL_LOG_INFO("SHADER_COOKER", "Discovered shader module: {} (size: {} bytes)", shader_info.name,
                               shader_info.size);
                 res.push_back(shader_info);
             }
@@ -275,7 +273,10 @@ namespace smol::cooker::shader
         Slang::ComPtr<slang::IBlob> diag_blob;
         slang::IModule* module = session->loadModule(path.c_str(), diag_blob.writeRef());
 
-        if (diag_blob) { SMOL_LOG_ERROR("SHADER", "Diagnostics: {}", (const char*)diag_blob->getBufferPointer()); }
+        if (diag_blob)
+        {
+            SMOL_LOG_ERROR("SHADER_COOKER", "Diagnostics: {}", (const char*)diag_blob->getBufferPointer());
+        }
         if (!module) { return res; }
 
         std::vector<slang::IComponentType*> components;
@@ -309,7 +310,7 @@ namespace smol::cooker::shader
 
             if (diag_blob && diag_blob->getBufferSize() > 0)
             {
-                SMOL_LOG_ERROR("SHADER", "Linking of shader program failed: {}",
+                SMOL_LOG_ERROR("SHADER_COOKER", "Linking of shader program failed: {}",
                                (const char*)diag_blob->getBufferPointer());
             }
 
@@ -351,7 +352,7 @@ namespace smol::cooker::shader
                                 res.target_formats.push_back(map_alias_to_format(std::string(alias_str, len)));
                             }
 
-                            SMOL_LOG_INFO("SHADER",
+                            SMOL_LOG_INFO("SHADER_COOKER",
                                           "Found target format of target '{} - SV_Target{}' of shader '{}': {}",
                                           result_type->getName(), attr_idx, path, alias_str);
                         }
@@ -464,7 +465,7 @@ namespace smol::cooker::shader
 
     void cook_shader(const std::string& input_path, const std::string& output_path)
     {
-        SMOL_LOG_INFO("SHADER_COOKER", "Cooking: {} -> {}", input_path, output_path);
+        SMOL_LOG_INFO("SHADER_COOKER", "Cooking Shader: {} -> {}", input_path, output_path);
 
         slang_compilation_res_t res = compile_slang_to_spirv(input_path);
 

@@ -4,7 +4,7 @@
 namespace smol
 {
     // SMSH
-    constexpr u32_t SMOL_SHADER_MAGIC = 0x48534D53;
+    constexpr u32_t SMOL_SHADER_MAGIC = 0x48534d53;
 
     struct shader_header_t
     {

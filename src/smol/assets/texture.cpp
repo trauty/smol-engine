@@ -7,10 +7,11 @@
 #include "smol/rendering/renderer_resources.h"
 #include "smol/rendering/renderer_types.h"
 #include "smol/rendering/vulkan.h"
+#include "vulkan/vulkan_core.h"
 
 #include <cstddef>
-#include <cstdint>
 #include <cstring>
+#include <ktx.h>
 #include <mutex>
 #include <optional>
 #include <stb/stb_image.h>
@@ -20,19 +21,52 @@ namespace smol
 {
     std::optional<texture_t> asset_loader_t<texture_t>::load(const std::string& path, texture_format_e type)
     {
-        texture_t tex;
-        tex.type = type;
+        std::string cooked_path = get_cooked_path(path, ".ktx2");
 
-        i32 channels;
-        stbi_uc* pixels = stbi_load(path.c_str(), &tex.width, &tex.height, &channels, STBI_rgb_alpha);
-
-        if (!pixels)
+        ktxTexture2* k_tex;
+        if (ktxTexture_CreateFromNamedFile(cooked_path.c_str(), KTX_TEXTURE_CREATE_NO_FLAGS, (ktxTexture**)&k_tex) !=
+            KTX_SUCCESS)
         {
-            SMOL_LOG_ERROR("TEXTURE", "Failed to load texture: {}", path);
+            SMOL_LOG_ERROR("TEXTURE", "Texture not found: {}", cooked_path);
             return std::nullopt;
         }
 
-        VkDeviceSize image_size = tex.width * tex.height * 4;
+        if (ktxTexture2_NeedsTranscoding(k_tex))
+        {
+            char* smol_type = nullptr;
+            u32_t smol_type_len = 0;
+            ktxHashList_FindValue(&k_tex->kvDataHead, "smol_tex_type", &smol_type_len, (void**)&smol_type);
+            std::string type_str = smol_type ? std::string(smol_type) : "color";
+
+            char* channels = nullptr;
+            ktx_uint32_t chan_len = 0;
+            ktxHashList_FindValue(&k_tex->kvDataHead, "smol_tex_channels", &chan_len, (void**)&channels);
+            i32 num_channels = channels ? std::stoi(channels) : 4;
+
+            ktx_transcode_fmt_e target_format = KTX_TTF_BC7_RGBA;
+
+            if (type_str == "normal") { target_format = KTX_TTF_BC5_RG; }
+            else if (type_str == "data")
+            {
+                if (num_channels == 1) { target_format = KTX_TTF_BC4_R; }
+            }
+
+            if (ktxTexture2_TranscodeBasis(k_tex, target_format, 0) != KTX_SUCCESS)
+            {
+                SMOL_LOG_ERROR("TEXTURE", "Failed to transcode ktx texture: {}", cooked_path);
+                ktxTexture_Destroy(ktxTexture(k_tex));
+                return std::nullopt;
+            }
+        }
+
+        texture_t tex;
+        tex.width = k_tex->baseWidth;
+        tex.height = k_tex->baseHeight;
+        tex.type = type;
+
+        VkFormat format = (VkFormat)k_tex->vkFormat;
+        VkDeviceSize image_size = ktxTexture_GetDataSize(ktxTexture(k_tex));
+        u8* ktx_data = ktxTexture_GetData(ktxTexture(k_tex));
 
         VkBuffer staging_buf;
         VmaAllocation staging_alloc;
@@ -56,17 +90,14 @@ namespace smol
             return std::nullopt;
         }
 
-        std::memcpy(staging_alloc_info.pMappedData, pixels, static_cast<size_t>(image_size));
-        stbi_image_free(pixels);
-
-        VkFormat format = (type == texture_format_e::SRGB) ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM;
+        std::memcpy(staging_alloc_info.pMappedData, ktx_data, static_cast<size_t>(image_size));
 
         VkImageCreateInfo image_info = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
             .imageType = VK_IMAGE_TYPE_2D,
             .format = format,
             .extent = {static_cast<u32_t>(tex.width), static_cast<u32_t>(tex.height), 1},
-            .mipLevels = 1,
+            .mipLevels = k_tex->numLevels,
             .arrayLayers = 1,
             .samples = VK_SAMPLE_COUNT_1_BIT,
             .tiling = VK_IMAGE_TILING_OPTIMAL,
@@ -90,7 +121,7 @@ namespace smol
             .format = format,
             .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
                                  .baseMipLevel = 0,
-                                 .levelCount = 1,
+                                 .levelCount = k_tex->numLevels,
                                  .baseArrayLayer = 0,
                                  .layerCount = 1},
         };
@@ -120,14 +151,11 @@ namespace smol
 
         VkBufferImageCopy copy_region = {
             .bufferOffset = 0,
-            .bufferRowLength = 0,
-            .bufferImageHeight = 0,
             .imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
                                  .mipLevel = 0,
                                  .baseArrayLayer = 0,
                                  .layerCount = 1},
-            .imageOffset = {0, 0, 0},
-            .imageExtent = {static_cast<u32_t>(tex.width), static_cast<u32_t>(tex.height), 1},
+            .imageExtent = image_info.extent,
         };
 
         vkCmdCopyBufferToImage(cmd_buf, staging_buf, tex.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy_region);

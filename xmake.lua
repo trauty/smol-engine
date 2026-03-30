@@ -59,11 +59,11 @@ package("slang")
     end)
 package_end()
 
-add_requires("volk", {system = false, configs = {shared = false}})
+add_requires("volk 1.4.*", {system = false, configs = {shared = false}})
 add_requires("vulkan-headers")
-add_requires("libsdl3", {system = false, configs = {shared = false}})
+add_requires("libsdl3 3.4.2", {system = false, configs = {shared = false}})
 
-add_requires("joltphysics", 
+add_requires("joltphysics 5.5.0", 
     {
         system = false, 
         configs = {
@@ -74,11 +74,14 @@ add_requires("joltphysics",
     }
 )
 
-add_requires("cglm", {system = false, configs = {shared = false}})
-add_requires("fmt", {system = false, configs = {shared = false}})
-add_requires("entt", {system = false, configs = {shared = false}})
-add_requires("tracy", {system = false, configs = {shared = false}})
+add_requires("cglm 0.9.6", {system = false, configs = {shared = false}})
+add_requires("fmt 12.1.0", {system = false, configs = {shared = false}})
+add_requires("entt 3.16.0", {system = false, configs = {shared = false}})
+add_requires("tracy 0.13.1", {system = false, configs = {shared = false}})
 add_requires("slang " .. slang_version)
+
+add_requires("meshoptimizer 1.0.1", {system = false, configs = {shared = false}})
+add_requires("ktx 4.4.2", {system = false, configs = {shared = false}})
 
 target("smol-interface")
     set_kind("headeronly")
@@ -107,14 +110,11 @@ target("smol-engine")
     add_deps("smol-interface")
 
     add_packages("joltphysics", {public = true})
-
     add_undefines("JPH_FLOATING_POINT_EXCEPTIONS_ENABLED")
-
     add_packages("tracy", {public = true})
+    add_packages("ktx", {public = true})
 
     add_files("src/smol/**.cpp")
-    add_files("lib/stb/*.cpp", {warnings = "none"})
-    add_files("lib/tinygltf/tiny_gltf.cpp", {warnings = "none"})
     add_files("lib/vma/vk_mem_alloc.cpp", {warnings = "none"})
 
     add_includedirs("include", {public = true})
@@ -185,12 +185,15 @@ target_end()
 
 target("smol-cooker")
     set_kind("binary")
-    
+
     add_deps("smol-engine")
 
     add_packages("slang", {public = true})
+    add_packages("meshoptimizer", {public = true})
 
     add_files("src/smol-cooker/**.cpp")
+    add_files("lib/tinygltf/tiny_gltf.cpp", {warnings = "none"})
+    add_files("lib/stb/*.cpp", {warnings = "none"})
 
     add_includedirs("include", {public = true})
     add_includedirs("src", {public = true})
