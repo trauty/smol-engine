@@ -22,10 +22,6 @@ if is_standalone then
         add_cxflags("/GR-", {force = true})
         set_runtimes("MD")
     end
-
-    if is_mode("debug") then
-        set_policy("build.sanitizer.address", true)
-    end
 end
 
 option("profiling")
@@ -99,6 +95,14 @@ target("smol-engine")
     add_cxflags("-march=x86-64-v3")
     add_options("profiling", {public = true})
 
+    if is_mode("debug") then
+        set_policy("build.sanitizer.address", true)
+
+        if is_plat("windows") then
+            add_defines("_DISABLE_STRING_ANNOTATION", "_DISABLE_VECTOR_ANNOTATION", {public = true})
+        end
+    end
+
     if is_mode("release") then 
         set_optimize("fastest")
         set_strip("all")
@@ -136,6 +140,14 @@ target("smol-bin")
     set_kind("binary")
     set_basename(game_name)
     add_cxflags("-march=x86-64-v3")
+
+    if is_mode("debug") then
+        set_policy("build.sanitizer.address", true)
+
+        if is_plat("windows") then
+            add_defines("_DISABLE_STRING_ANNOTATION", "_DISABLE_VECTOR_ANNOTATION", {public = true})
+        end
+    end
 
     add_defines(format('SMOL_GAME_NAME="%s"', game_name))
     add_defines(format('SMOL_LIB_NAME="%s"', game_lib_name))
@@ -185,6 +197,14 @@ target_end()
 
 target("smol-cooker")
     set_kind("binary")
+
+    if is_mode("debug") then
+        set_policy("build.sanitizer.address", true)
+
+        if is_plat("windows") then
+            add_defines("_DISABLE_STRING_ANNOTATION", "_DISABLE_VECTOR_ANNOTATION", {public = true})
+        end
+    end
 
     add_deps("smol-engine")
 

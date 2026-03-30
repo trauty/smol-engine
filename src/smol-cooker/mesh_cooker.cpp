@@ -140,7 +140,7 @@ namespace smol::cooker::mesh
 
         f32 local_radius = std::sqrt(max_sq_dist);
 
-        std::filesystem::create_directory(std::filesystem::path(output_path).parent_path());
+        std::filesystem::create_directories(std::filesystem::path(output_path).parent_path());
         std::ofstream out(output_path, std::ios::binary);
 
         mesh_header_t header = {

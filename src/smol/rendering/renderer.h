@@ -66,5 +66,5 @@ namespace smol::renderer
 
     VkSampler create_sampler(VkFilter filter, VkSamplerAddressMode address_mode);
 
-    void register_custom_shader(asset_t<shader_t> shader);
+    SMOL_API void register_custom_shader(asset_t<shader_t> shader);
 } // namespace smol::renderer

@@ -39,7 +39,7 @@ namespace smol::cooker::texture
 
         ktxTexture2* tex;
         ktxTextureCreateInfo tex_create_info = {
-            .vkFormat = is_color ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM,
+            .vkFormat = static_cast<u32_t>(is_color ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM),
             .baseWidth = static_cast<u32_t>(width),
             .baseHeight = static_cast<u32_t>(height),
             .baseDepth = 1,

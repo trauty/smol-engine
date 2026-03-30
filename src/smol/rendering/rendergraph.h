@@ -14,7 +14,7 @@ namespace smol::renderer
     using rg_resource_id = u32_t;
     constexpr rg_resource_id RG_NULL_ID = 0xffffffff;
 
-    struct rg_resource_t
+    struct SMOL_API rg_resource_t
     {
         std::string name;
         image_desc_t desc;
@@ -29,7 +29,7 @@ namespace smol::renderer
 
     using pass_callback_t = std::function<void(VkCommandBuffer, ecs::registry_t&)>;
 
-    struct rg_pass_t
+    struct SMOL_API rg_pass_t
     {
         std::string name;
         std::vector<rg_resource_id> color_writes;
@@ -40,7 +40,7 @@ namespace smol::renderer
         pass_callback_t execute_callback;
     };
 
-    class rendergraph_t
+    class SMOL_API rendergraph_t
     {
       public:
         void clear();

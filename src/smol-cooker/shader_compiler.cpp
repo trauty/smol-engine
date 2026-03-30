@@ -9,6 +9,7 @@
 #include <algorithm>
 #include <cctype>
 #include <cstddef>
+#include <cstdio>
 #include <cstring>
 #include <filesystem>
 #include <fstream>
@@ -426,9 +427,9 @@ namespace smol::cooker::shader
         for (const shader_module_info_t& module : res.shader_types)
         {
             shader_module_header_t mod_header = {};
-            std::strncpy(mod_header.name, module.name.c_str(), 63);
-            std::strncpy(mod_header.target_pass, module.target_pass.c_str(), 63);
-            std::strncpy(mod_header.blend_mode, module.blend_mode.c_str(), 31);
+            std::snprintf(mod_header.name, sizeof(mod_header.name), "%s", module.name.c_str());
+            std::snprintf(mod_header.target_pass, sizeof(mod_header.target_pass), "%s", module.target_pass.c_str());
+            std::snprintf(mod_header.blend_mode, sizeof(mod_header.blend_mode), "%s", module.blend_mode.c_str());
             mod_header.size = module.size;
             mod_header.depth_write = module.depth_write;
             mod_header.depth_test = module.depth_test;

@@ -13,7 +13,6 @@
 #include <fstream>
 #include <mutex>
 #include <optional>
-#include <slang.h>
 #include <string>
 #include <vector>
 

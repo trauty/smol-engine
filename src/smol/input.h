@@ -1,5 +1,6 @@
 #pragma once
 
+#include "defines.h"
 #include "smol/defines.h"
 
 #include <functional>
@@ -102,7 +103,7 @@ namespace smol::input
         HOLDING
     };
 
-    struct input_context_t
+    struct SMOL_API input_context_t
     {
         action_id_t actionId;
         input_state_t state;
@@ -111,35 +112,35 @@ namespace smol::input
 
     using input_callback_t = std::function<void(const input_context_t&)>;
 
-    bool get_key(key_t key);
+    SMOL_API bool get_key(key_t key);
 
-    bool get_key_down(key_t key);
+    SMOL_API bool get_key_down(key_t key);
 
-    bool get_key_up(key_t key);
+    SMOL_API bool get_key_up(key_t key);
 
-    bool get_mouse_button(mouse_button_t button);
+    SMOL_API bool get_mouse_button(mouse_button_t button);
 
-    bool get_mouse_button_down(mouse_button_t button);
+    SMOL_API bool get_mouse_button_down(mouse_button_t button);
 
-    bool get_mouse_button_up(mouse_button_t button);
+    SMOL_API bool get_mouse_button_up(mouse_button_t button);
 
-    void get_mouse_position(float* x, float* y);
+    SMOL_API void get_mouse_position(float* x, float* y);
 
-    float get_mouse_x();
+    SMOL_API float get_mouse_x();
 
-    float get_mouse_y();
+    SMOL_API float get_mouse_y();
 
-    float get_scroll_delta();
+    SMOL_API float get_scroll_delta();
 
-    void bind_button(const std::string& action_name, key_t key);
+    SMOL_API void bind_button(const std::string& action_name, key_t key);
 
-    listener_id_t on_action(const std::string& action_name, input_state_t state, input_callback_t callback);
+    SMOL_API listener_id_t on_action(const std::string& action_name, input_state_t state, input_callback_t callback);
 
-    void remove_listener(listener_id_t id);
+    SMOL_API void remove_listener(listener_id_t id);
 
-    void unbind_button(const std::string& action_name, key_t key);
+    SMOL_API void unbind_button(const std::string& action_name, key_t key);
 
-    void unbind_all_buttons(const std::string& action_name);
+    SMOL_API void unbind_all_buttons(const std::string& action_name);
 
     namespace detail
     {
