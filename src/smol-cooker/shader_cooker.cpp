@@ -1,4 +1,4 @@
-#include "shader_compiler.h"
+#include "shader_cooker.h"
 
 #include "smol/assets/shader.h"
 #include "smol/assets/shader_format.h"
@@ -17,18 +17,18 @@
 #include <slang-com-ptr.h>
 #include <slang.h>
 #include <string>
+#include <system_error>
+#include <vector>
 
 namespace smol::cooker::shader
 {
     namespace { Slang::ComPtr<slang::IGlobalSession> global_session; }
 
-    slang::IGlobalSession* get_global_session() { return global_session.get(); }
-
     void init()
     {
         SlangGlobalSessionDesc global_desc = {};
         global_desc.enableGLSL = true;
-        SMOL_LOG_INFO("SHADER", "Slang global instance: {}",
+        SMOL_LOG_INFO("SHADER_COOKER", "Slang global instance: {}",
                       slang::createGlobalSession(&global_desc, global_session.writeRef()));
     }
 
@@ -63,115 +63,130 @@ namespace smol::cooker::shader
         return code.substr(start, pos - start);
     }
 
-    std::vector<generated_shader_module_t> generate_uber_shader(const std::string& target_blend_mode,
-                                                                const std::string& output_path)
+    std::string generate_uber_shader(const std::string& target_blend_mode, const std::vector<std::string>& input_dirs)
     {
         std::vector<generated_shader_module_t> shaders;
-        u32_t next_id = 0;
 
-        for (const std::filesystem::directory_entry& entry : std::filesystem::recursive_directory_iterator("assets"))
+        for (const std::string& dir : input_dirs)
         {
-            if (!entry.is_regular_file() || entry.path().extension() != ".slang") { continue; }
+            if (!std::filesystem::exists(dir)) { continue; }
 
-            std::string filename = entry.path().stem().string();
-            if (filename.find("uber_") != std::string::npos) { continue; }
-
-            std::filesystem::path rel_path = std::filesystem::relative(entry.path(), "assets");
-            std::string module_name = rel_path.replace_extension("").generic_string();
-            std::replace(module_name.begin(), module_name.end(), '/', '.');
-
-            std::ifstream file(entry.path());
-            std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-
-            if (content.find("IShaderModule") != std::string::npos && content.find("ShaderConfig") != std::string::npos)
+            for (const std::filesystem::directory_entry& entry : std::filesystem::recursive_directory_iterator(dir))
             {
-                generated_shader_module_t mod;
-                mod.module_name = module_name;
-                mod.shader_name = extract_struct_name(content);
+                if (!entry.is_regular_file() || entry.path().extension() != ".slang") { continue; }
 
-                if (content.find("\"Opaque\"") != std::string::npos) { mod.blend_mode = "Opaque"; }
-                else if (content.find("\"Cutout\"") != std::string::npos) { mod.blend_mode = "Cutout"; }
-                else if (content.find("\"TransparentAlpha\"") != std::string::npos)
-                {
-                    mod.blend_mode = "TransparentAlpha";
-                }
-                else if (content.find("\"TransparentAdd\"") != std::string::npos) { mod.blend_mode = "TransparentAdd"; }
-                else if (content.find("\"TransparentMult\"") != std::string::npos)
-                {
-                    mod.blend_mode = "TransparentMult";
-                }
-                else
-                {
-                    mod.blend_mode = "Opaque";
-                }
+                std::string filename = entry.path().stem().string();
+                if (filename.find("uber_") != std::string::npos) { continue; }
 
-                if (mod.blend_mode == target_blend_mode)
+                std::filesystem::path rel_path = std::filesystem::relative(entry.path(), dir);
+                std::string module_name = rel_path.replace_extension("").generic_string();
+                std::replace(module_name.begin(), module_name.end(), '/', '.');
+
+                std::ifstream file(entry.path());
+                std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+
+                if (content.find("IShaderModule") != std::string::npos &&
+                    content.find("ShaderConfig") != std::string::npos)
                 {
-                    mod.id = next_id++;
-                    shaders.push_back(mod);
+                    generated_shader_module_t mod;
+                    mod.module_name = module_name;
+                    mod.shader_name = extract_struct_name(content);
+
+                    if (content.find("\"Opaque\"") != std::string::npos) { mod.blend_mode = "Opaque"; }
+                    else if (content.find("\"Cutout\"") != std::string::npos) { mod.blend_mode = "Cutout"; }
+                    else if (content.find("\"TransparentAlpha\"") != std::string::npos)
+                    {
+                        mod.blend_mode = "TransparentAlpha";
+                    }
+                    else if (content.find("\"TransparentAdd\"") != std::string::npos)
+                    {
+                        mod.blend_mode = "TransparentAdd";
+                    }
+                    else if (content.find("\"TransparentMult\"") != std::string::npos)
+                    {
+                        mod.blend_mode = "TransparentMult";
+                    }
+                    else
+                    {
+                        mod.blend_mode = "Opaque";
+                    }
+
+                    if (mod.blend_mode == target_blend_mode) { shaders.push_back(mod); }
                 }
             }
         }
 
         if (shaders.empty()) { return {}; }
 
-        std::ofstream out(output_path);
-        out << "import smol_globals;\nimport shader_interface;\n\n";
+        std::sort(shaders.begin(), shaders.end(),
+                  [](const generated_shader_module_t& mod_a, const generated_shader_module_t& mod_b)
+                  { return mod_a.module_name < mod_b.module_name; });
 
-        for (generated_shader_module_t& mod : shaders) { out << "import " << mod.module_name << ";\n"; }
+        u32_t next_id = 0;
+        for (generated_shader_module_t& mod : shaders) { mod.id = next_id++; }
 
-        out << "\npublic struct VertexOut\n{\n";
-        out << "    public float4 position : SV_Position;\n    public float3 world_pos;\n    public float3 normal;\n   "
-               " public float2 uv;\n    public uint draw_id;\n};\n\n";
+        std::string new_source = "import smol_globals;\nimport shader_interface;\n\n";
 
-        out << "[shader(\"vertex\")]\nVertexOut vertexMain(uint vertex_id: SV_VertexID, uint instance_id: "
-               "SV_InstanceID, uint base_instance: SV_StartInstanceLocation)\n{\n";
-        out << "    uint actual_instance_id = instance_id + base_instance;\n    ObjectData obj = "
-               "getObjectData(actual_instance_id);\n    GlobalData globals = getGlobalData();\n";
-        out << "    Vertex vertex = getIndexedVertex(obj.vertex_buffer_id, obj.index_buffer_id, vertex_id);\n    "
-               "float3 offset = float3(0.0f, 0.0f, 0.0f);\n\n";
+        for (generated_shader_module_t& mod : shaders) { new_source += "import " + mod.module_name + ";\n"; }
 
-        out << "    switch (obj.material_type)\n    {\n";
+        new_source += "\npublic struct VertexOut\n{\n";
+        new_source +=
+            "    public float4 position : SV_Position;\n    public float3 world_pos;\n    public float3 normal;\n   "
+            " public float2 uv;\n    public uint draw_id;\n};\n\n";
+
+        new_source += "[shader(\"vertex\")]\nVertexOut vertexMain(uint vertex_id: SV_VertexID, uint instance_id: "
+                      "SV_InstanceID, uint base_instance: SV_StartInstanceLocation)\n{\n";
+        new_source += "    uint actual_instance_id = instance_id + base_instance;\n    ObjectData obj = "
+                      "getObjectData(actual_instance_id);\n    GlobalData globals = getGlobalData();\n";
+        new_source +=
+            "    Vertex vertex = getIndexedVertex(obj.vertex_buffer_id, obj.index_buffer_id, vertex_id);\n    "
+            "float3 offset = float3(0.0f, 0.0f, 0.0f);\n\n";
+
+        new_source += "    switch (obj.material_type)\n    {\n";
         for (generated_shader_module_t& mod : shaders)
         {
-            out << "    case " << mod.id << ": {\n        " << mod.shader_name
-                << " m = getBuffer(pc.material_buffer_id).Load<" << mod.shader_name << ">(obj.material_offset);\n";
-            out << "        offset = m.vertex(vertex.position, vertex.normal, globals.time);\n        break; }\n";
+            new_source += "    case " + std::to_string(mod.id) + ": {\n        " + mod.shader_name +
+                          " m = getBuffer(pc.material_buffer_id).Load<" + mod.shader_name + ">(obj.material_offset);\n";
+            new_source +=
+                "        offset = m.vertex(vertex.position, vertex.normal, globals.time);\n        break; }\n";
         }
-        out << "    default: break;\n    }\n\n";
+        new_source += "    default: break;\n    }\n\n";
 
-        out << "    float3 local_pos = vertex.position + offset;\n    float4 world_pos = mul(float4(local_pos, 1.0f), "
-               "obj.model_matrix);\n";
-        out << "    VertexOut out_v;\n    out_v.position = mul(world_pos, globals.view_proj);\n    out_v.world_pos = "
-               "world_pos.xyz;\n";
-        out << "    float3x3 normal_mat = float3x3(obj.normal_matrix[0].xyz, obj.normal_matrix[1].xyz, "
-               "obj.normal_matrix[2].xyz);\n";
-        out << "    out_v.normal = normalize(mul(vertex.normal, normal_mat));\n    out_v.uv = vertex.uv;\n    "
-               "out_v.draw_id = actual_instance_id;\n    return out_v;\n}\n\n";
+        new_source +=
+            "    float3 local_pos = vertex.position + offset;\n    float4 world_pos = mul(float4(local_pos, 1.0f), "
+            "obj.model_matrix);\n";
+        new_source +=
+            "    VertexOut out_v;\n    out_v.position = mul(world_pos, globals.view_proj);\n    out_v.world_pos = "
+            "world_pos.xyz;\n";
+        new_source += "    float3x3 normal_mat = float3x3(obj.normal_matrix[0].xyz, obj.normal_matrix[1].xyz, "
+                      "obj.normal_matrix[2].xyz);\n";
+        new_source += "    out_v.normal = normalize(mul(vertex.normal, normal_mat));\n    out_v.uv = vertex.uv;\n    "
+                      "out_v.draw_id = actual_instance_id;\n    return out_v;\n}\n\n";
 
-        out << "[RenderTargetsConfig]\nstruct FragmentOut\n{\n    [RenderTarget(\"RGBA16_FLOAT\")]\n    float4 color : "
-               "SV_Target0;\n};\n\n";
-        out << "[shader(\"fragment\")]\nFragmentOut fragmentMain(VertexOut in_f)\n{\n";
-        out << "    ObjectData obj = getObjectData(in_f.draw_id);\n    float4 color = float4(1.0f, 0.0f, 1.0f, "
-               "1.0f);\n\n";
+        new_source +=
+            "[RenderTargetsConfig]\nstruct FragmentOut\n{\n    [RenderTarget(\"RGBA16_FLOAT\")]\n    float4 color : "
+            "SV_Target0;\n};\n\n";
+        new_source += "[shader(\"fragment\")]\nFragmentOut fragmentMain(VertexOut in_f)\n{\n";
+        new_source += "    ObjectData obj = getObjectData(in_f.draw_id);\n    float4 color = float4(1.0f, 0.0f, 1.0f, "
+                      "1.0f);\n\n";
 
-        out << "    switch (obj.material_type)\n    {\n";
+        new_source += "    switch (obj.material_type)\n    {\n";
         for (generated_shader_module_t& mod : shaders)
         {
-            out << "    case " << mod.id << ": {\n        " << mod.shader_name
-                << " m = getBuffer(pc.material_buffer_id).Load<" << mod.shader_name << ">(obj.material_offset);\n";
-            out << "        color = m.fragment(in_f.uv, in_f.world_pos, in_f.normal);\n        break; }\n";
+            new_source += "    case " + std::to_string(mod.id) + ": {\n        " + mod.shader_name +
+                          " m = getBuffer(pc.material_buffer_id).Load<" + mod.shader_name + ">(obj.material_offset);\n";
+            new_source += "        color = m.fragment(in_f.uv, in_f.world_pos, in_f.normal);\n        break; }\n";
         }
-        out << "    default: break;\n    }\n\n";
-        out << "    FragmentOut out_frag;\n    out_frag.color = color;\n    return out_frag;\n}\n\n";
+        new_source += "    default: break;\n    }\n\n";
+        new_source += "    FragmentOut out_frag;\n    out_frag.color = color;\n    return out_frag;\n}\n\n";
 
-        out << "// --- REFLECTION HOOKS ---\n";
+        new_source += "// --- REFLECTION HOOKS ---\n";
         for (generated_shader_module_t& mod : shaders)
         {
-            out << "StructuredBuffer<" << mod.shader_name << "> _reflect_" << mod.shader_name << ";\n";
+            new_source += "StructuredBuffer<" + mod.shader_name + "> _reflect_" + mod.shader_name + ";\n";
         }
 
-        return shaders;
+        return new_source;
     }
 
     std::vector<shader_module_info_t> reflect_slang_layout(slang::ProgramLayout* layout)
@@ -252,15 +267,39 @@ namespace smol::cooker::shader
         return res;
     }
 
-    slang_compilation_res_t compile_slang_to_spirv(const std::string& path)
+    slang_compilation_res_t compile_slang_to_spirv(const std::string& module_name, const std::string& file_path,
+                                                   const std::string& source_code,
+                                                   const std::vector<std::string>& input_dirs)
     {
         slang_compilation_res_t res;
 
-        const char* include_paths[] = {"assets"};
+        std::vector<std::string> actual_include_paths;
+        for (const std::string& dir : input_dirs)
+        {
+            actual_include_paths.push_back(dir.c_str());
+            if (!std::filesystem::exists(dir)) { continue; }
+
+            for (const auto& entry : std::filesystem::recursive_directory_iterator(dir))
+            {
+                if (entry.is_regular_file() && entry.path().extension() == ".slang")
+                {
+                    std::string parent_dir = entry.path().parent_path().generic_string();
+
+                    if (std::find(actual_include_paths.begin(), actual_include_paths.end(), parent_dir) ==
+                        actual_include_paths.end())
+                    {
+                        actual_include_paths.push_back(parent_dir.c_str());
+                    }
+                }
+            }
+        }
+
+        std::vector<const char*> include_paths;
+        for (const std::string& dir : actual_include_paths) { include_paths.push_back(dir.c_str()); }
 
         slang::SessionDesc session_desc = {};
-        session_desc.searchPaths = include_paths;
-        session_desc.searchPathCount = 1;
+        session_desc.searchPaths = include_paths.data();
+        session_desc.searchPathCount = include_paths.size();
 
         slang::TargetDesc target_descs[1] = {};
         target_descs[0].format = SLANG_SPIRV;
@@ -272,7 +311,9 @@ namespace smol::cooker::shader
         global_session->createSession(session_desc, session.writeRef());
 
         Slang::ComPtr<slang::IBlob> diag_blob;
-        slang::IModule* module = session->loadModule(path.c_str(), diag_blob.writeRef());
+
+        slang::IModule* module = session->loadModuleFromSourceString(module_name.c_str(), file_path.c_str(),
+                                                                     source_code.c_str(), diag_blob.writeRef());
 
         if (diag_blob)
         {
@@ -355,7 +396,7 @@ namespace smol::cooker::shader
 
                             SMOL_LOG_INFO("SHADER_COOKER",
                                           "Found target format of target '{} - SV_Target{}' of shader '{}': {}",
-                                          result_type->getName(), attr_idx, path, alias_str);
+                                          result_type->getName(), attr_idx, file_path, alias_str);
                         }
                     }
                 }
@@ -464,11 +505,35 @@ namespace smol::cooker::shader
         }
     }
 
-    void cook_shader(const std::string& input_path, const std::string& output_path)
+    void cook_shader(const std::string& input_path, const std::string& output_path,
+                     const std::vector<std::string>& input_dirs)
     {
         SMOL_LOG_INFO("SHADER_COOKER", "Cooking Shader: {} -> {}", input_path, output_path);
 
-        slang_compilation_res_t res = compile_slang_to_spirv(input_path);
+        std::ifstream file(input_path, std::ios::binary);
+        if (!file.is_open())
+        {
+            SMOL_LOG_ERROR("SHADER_COOKER", "Failed to open shader file: {}", input_path);
+            return;
+        }
+
+        std::string source((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+        std::string module_name = std::filesystem::path(input_path).stem().string();
+
+        for (const std::string& dir : input_dirs)
+        {
+            std::error_code ec;
+            std::filesystem::path rel_path = std::filesystem::relative(input_path, dir, ec);
+
+            if (!ec && !rel_path.empty() && rel_path.string().find("..") == std::string::npos)
+            {
+                module_name = rel_path.replace_extension("").generic_string();
+                std::replace(module_name.begin(), module_name.end(), '/', '.');
+                break;
+            }
+        }
+
+        slang_compilation_res_t res = compile_slang_to_spirv(module_name, input_path, source, input_dirs);
 
         if (res.success) { write_smolshader(output_path, res); }
         else
@@ -485,5 +550,59 @@ namespace smol::cooker::shader
         std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 
         return content.find("vertexMain") != std::string::npos || content.find("computeMain") != std::string::npos;
+    }
+
+    shader_timestamps_t scan_shader_deps(const std::vector<std::string>& input_dirs)
+    {
+        shader_timestamps_t stamps;
+        for (const std::string& dir : input_dirs)
+        {
+            if (!std::filesystem::exists(dir)) { continue; }
+
+            for (const auto& entry : std::filesystem::recursive_directory_iterator(dir))
+            {
+                if (entry.is_regular_file() && entry.path().extension() == ".slang")
+                {
+                    std::string filename = entry.path().filename().string();
+
+                    if (filename.find("uber_") != std::string::npos) { continue; }
+
+                    std::ifstream file(entry.path());
+                    std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
+                    auto time = std::filesystem::last_write_time(entry.path());
+
+                    bool is_pipeline = content.find("vertexMain") != std::string::npos ||
+                                       content.find("computeMain") != std::string::npos;
+                    bool is_module = content.find("ShaderConfig") != std::string::npos;
+
+                    if (is_module)
+                    {
+                        std::string blend_mode = "Opaque";
+
+                        if (content.find("\"Cutout\"") != std::string::npos) { blend_mode = "Cutout"; }
+                        else if (content.find("\"TransparentAlpha\"") != std::string::npos)
+                        {
+                            blend_mode = "TransparentAlpha";
+                        }
+                        else if (content.find("\"TransparentAdd\"") != std::string::npos)
+                        {
+                            blend_mode = "TransparentAdd";
+                        }
+                        else if (content.find("\"TransparentMult\"") != std::string::npos)
+                        {
+                            blend_mode = "TransparentMult";
+                        }
+
+                        if (time > stamps.module_newest[blend_mode]) { stamps.module_newest[blend_mode] = time; }
+                    }
+                    else if (!is_pipeline)
+                    {
+                        if (time > stamps.core_newest) { stamps.core_newest = time; }
+                    }
+                }
+            }
+        }
+
+        return stamps;
     }
 } // namespace smol::cooker::shader

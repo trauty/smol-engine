@@ -3,15 +3,14 @@
 #include "smol/assets/shader.h"
 #include "smol/defines.h"
 
+#include <filesystem>
 #include <string>
+#include <unordered_map>
 #include <vector>
-
-namespace slang { struct IGlobalSession; }
 
 namespace smol::cooker::shader
 {
     void init();
-    slang::IGlobalSession* get_global_session();
 
     struct generated_shader_module_t
     {
@@ -39,13 +38,23 @@ namespace smol::cooker::shader
         std::vector<VkFormat> target_formats;
     };
 
-    std::vector<generated_shader_module_t> generate_uber_shader(const std::string& target_blend_mode,
-                                                                const std::string& output_path);
+    struct shader_timestamps_t
+    {
+        std::filesystem::file_time_type core_newest = std::filesystem::file_time_type::min();
+        std::unordered_map<std::string, std::filesystem::file_time_type> module_newest;
+    };
 
-    slang_compilation_res_t compile_slang_to_spirv(const std::string& path);
+    std::string generate_uber_shader(const std::string& target_blend_mode, const std::vector<std::string>& input_dirs);
+
+    slang_compilation_res_t compile_slang_to_spirv(const std::string& module_name, const std::string& file_path,
+                                                   const std::string& source_code,
+                                                   const std::vector<std::string>& input_dirs);
     void write_smolshader(const std::string& output_path, const slang_compilation_res_t& res);
 
-    void cook_shader(const std::string& input_path, const std::string& output_path);
+    void cook_shader(const std::string& input_path, const std::string& output_path,
+                     const std::vector<std::string>& input_dirs);
 
     bool is_compilable_pipeline(const std::string& path);
+
+    shader_timestamps_t scan_shader_deps(const std::vector<std::string>& input_dirs);
 } // namespace smol::cooker::shader

@@ -123,17 +123,6 @@ target("smol-engine")
 
     add_includedirs("include", {public = true})
     add_includedirs("src", {public = true})
-
-    after_build(function (target) 
-        local dest_dir = target:targetdir()
-        local out_assets = path.join(dest_dir, "assets")
-        
-        local engine_assets_dir = path.join(os.scriptdir(), "assets")
-        if os.isdir(engine_assets_dir) then 
-            os.cp(path.join(engine_assets_dir, "*"), out_assets)
-            print("Copied core engine assets")
-        end
-    end)
 target_end()
 
 target("smol-bin")
