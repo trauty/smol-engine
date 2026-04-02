@@ -139,7 +139,6 @@ target("smol-bin")
     end
 
     add_defines(format('SMOL_GAME_NAME="%s"', game_name))
-    add_defines(format('SMOL_LIB_NAME="%s"', game_lib_name))
 
     add_deps("smol-engine")
 
@@ -218,5 +217,44 @@ target("smol-cooker")
                 os.trycp(path.join(slang_dir:installdir(), "bin", "slang-compiler.dll"), dest_dir)
             end
         end  
+    end)
+target_end()
+
+target("smol-editor")
+    set_kind("binary")
+
+    add_cxflags("-march=x86-64-v3")
+
+    add_defines(format('SMOL_GAME_NAME="%s"', game_name))
+
+    if is_mode("debug") then
+        set_policy("build.sanitizer.address", true)
+
+        if is_plat("windows") then
+            add_defines("_DISABLE_STRING_ANNOTATION", "_DISABLE_VECTOR_ANNOTATION", {public = true})
+        end
+    end
+
+    if is_plat("windows") then
+        if is_mode("release") then
+            add_ldflags("/subsystem:windows", "/entry:mainCRTStartup", {force = true})
+        end
+    end
+
+    add_deps("smol-engine")
+    add_deps("smol-game", {inherit = false})
+
+    add_files("src/smol-editor/**.cpp")
+    add_includedirs("src")
+
+    on_config(function (target)
+        import("core.project.project")
+
+        local game_target = project.target("smol-game")
+        local game_lib_path = path.absolute(game_target:targetfile())
+
+        game_lib_path = game_lib_path:gsub("\\", "/")
+
+        target:add("defines", "SMOL_LIB_PATH=\"" .. game_lib_path .. "\"")
     end)
 target_end()

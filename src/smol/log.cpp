@@ -172,6 +172,8 @@ namespace smol::log
 
     void init()
     {
+        if (is_running) { return; }
+
         is_running = true;
 #if SMOL_PLATFORM_WIN
         setup_ansi_console_colors_windows();

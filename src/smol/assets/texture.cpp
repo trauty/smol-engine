@@ -220,6 +220,8 @@ namespace smol
             });
         }
 
+        ktxTexture_Destroy(ktxTexture(k_tex));
+
         return tex;
     }
 
