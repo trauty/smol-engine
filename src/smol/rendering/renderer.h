@@ -56,8 +56,8 @@ namespace smol::renderer
     void transition_image(VkCommandBuffer cmd, VkImage image, VkImageLayout old_layout, VkImageLayout new_layout,
                           VkImageAspectFlags aspect_mask = VK_IMAGE_ASPECT_COLOR_BIT);
 
-    void create_buffer(VkDeviceSize size, VkBufferUsageFlags usage, VkMemoryPropertyFlags mem_props, VkBuffer& buffer,
-                       VkDeviceMemory& buffer_memory);
+    void create_buffer(VkDeviceSize size, VkBufferUsageFlags buffer_usage, VmaMemoryUsage mem_usage, VkBuffer& buffer,
+                       VmaAllocation& allocation);
     void create_image(u32 width, u32 height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage,
                       VkMemoryPropertyFlags props, VkImage& image, VkDeviceMemory& image_mem);
 
@@ -67,4 +67,9 @@ namespace smol::renderer
     VkSampler create_sampler(VkFilter filter, VkSamplerAddressMode address_mode);
 
     SMOL_API void register_custom_shader(asset_t<shader_t> shader);
+
+    SMOL_API void set_render_resolution(u32_t width, u32_t height);
+    SMOL_API u32_t get_viewport_texture_id();
+
+    SMOL_API void set_use_offscreen_viewport(bool value);
 } // namespace smol::renderer

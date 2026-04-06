@@ -1,14 +1,18 @@
 #include "rendergraph.h"
 
 #include "smol/defines.h"
+#include "smol/log.h"
 #include "smol/rendering/renderer.h"
-#include "smol/rendering/renderer_resources.h"
 #include "smol/rendering/renderer_types.h"
 #include "smol/rendering/vulkan.h"
 #include "vulkan/vulkan_core.h"
 
+#include <cstddef>
+#include <queue>
 #include <tracy/Tracy.hpp>
 #include <tracy/TracyVulkan.hpp>
+#include <unordered_map>
+#include <unordered_set>
 #include <vector>
 
 namespace smol::renderer
@@ -17,6 +21,7 @@ namespace smol::renderer
     {
         resources.clear();
         passes.clear();
+        sorted_passes.clear();
     }
 
     rg_resource_id rendergraph_t::create_image(const std::string& name, const image_desc_t& desc)
@@ -44,6 +49,76 @@ namespace smol::renderer
 
     void rendergraph_t::compile(per_frame_t& frame_data)
     {
+        std::vector<std::unordered_set<size_t>> adjacency_list(passes.size());
+        std::vector<size_t> in_degree(passes.size(), 0);
+        std::unordered_map<rg_resource_id, size_t> latest_writer;
+
+        for (size_t i = 0; i < passes.size(); i++)
+        {
+            rg_pass_t& pass = passes[i];
+
+            auto add_dep = [&](rg_resource_id res)
+            {
+                if (latest_writer.count(res))
+                {
+                    size_t writer_idx = latest_writer[res];
+                    if (writer_idx != i)
+                    {
+                        if (adjacency_list[writer_idx].insert(i).second) { in_degree[i]++; }
+                    }
+                }
+
+                latest_writer[res] = i;
+            };
+
+            for (rg_resource_id res : pass.color_writes) { add_dep(res); }
+            for (rg_resource_id res : pass.storage_writes) { add_dep(res); }
+            if (pass.depth_stencil != RG_NULL_ID) { add_dep(pass.depth_stencil); }
+        }
+
+        for (size_t i = 0; i < passes.size(); i++)
+        {
+            rg_pass_t& pass = passes[i];
+
+            for (rg_resource_id res : pass.texture_reads)
+            {
+                if (latest_writer.count(res))
+                {
+                    size_t writer_idx = latest_writer[res];
+                    if (writer_idx != i)
+                    {
+                        if (adjacency_list[writer_idx].insert(i).second) { in_degree[i]++; }
+                    }
+                }
+            }
+        }
+
+        std::queue<size_t> queue;
+        for (size_t i = 0; i < passes.size(); i++)
+        {
+            if (in_degree[i] == 0) { queue.push(i); }
+        }
+
+        sorted_passes.clear();
+        while (!queue.empty())
+        {
+            size_t cur_idx = queue.front();
+            queue.pop();
+            sorted_passes.push_back(cur_idx);
+
+            for (size_t neighbor_idx : adjacency_list[cur_idx])
+            {
+                in_degree[neighbor_idx]--;
+                if (in_degree[neighbor_idx] == 0) { queue.push(neighbor_idx); }
+            }
+        }
+
+        if (sorted_passes.size() != passes.size())
+        {
+            SMOL_LOG_FATAL("RENDERGRAPH", "Circular dependency detected");
+            abort();
+        }
+
         for (rg_resource_t& res : resources)
         {
             if (res.is_imported) { continue; }
@@ -57,8 +132,9 @@ namespace smol::renderer
 
     void rendergraph_t::execute(VkCommandBuffer cmd, ecs::registry_t& reg)
     {
-        for (const rg_pass_t& pass : passes)
+        for (size_t pass_idx : sorted_passes)
         {
+            const rg_pass_t& pass = passes[pass_idx];
 #ifdef SMOL_ENABLE_PROFILING
             TracyVkZone(tracy_vk_ctx, cmd, pass.name.c_str());
 #endif

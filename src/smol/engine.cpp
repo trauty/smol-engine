@@ -1,10 +1,13 @@
 #include "engine.h"
 
+#include "imgui/imgui.h"
+#include "imgui/imgui_impl_sdl3.h"
 #include "smol/asset_registry.h"
 #include "smol/defines.h"
 #include "smol/input.h"
 #include "smol/jobs.h"
 #include "smol/log.h"
+#include "smol/rendering/imgui_backend.h"
 #include "smol/rendering/renderer.h"
 #include "smol/rendering/renderer_types.h"
 #include "smol/systems/camera.h"
@@ -79,6 +82,10 @@ namespace smol::engine
             return false;
         }
 
+        ImGui::CreateContext();
+        ImGui_ImplSDL3_InitForVulkan(window);
+        smol::renderer::imgui::init();
+
         return true;
     }
 
@@ -114,6 +121,7 @@ namespace smol::engine
                 }
 
                 smol::input::detail::process(event);
+                ImGui_ImplSDL3_ProcessEvent(&event);
             }
 
             while (accumulator >= fixed_timestep)
@@ -147,6 +155,10 @@ namespace smol::engine
             active_scene->shutdown();
             active_scene.reset();
         }
+
+        smol::renderer::imgui::shutdown();
+        ImGui_ImplSDL3_Shutdown();
+        ImGui::DestroyContext();
 
         smol::renderer::reset_assets();
         engine_assets.shutdown();

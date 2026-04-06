@@ -5,6 +5,7 @@
 #include "smol/defines.h"
 #include "smol/log.h"
 #include "smol/rendering/vulkan.h"
+#include "vulkan/vulkan_core.h"
 
 #include <deque>
 #include <mutex>
@@ -319,6 +320,10 @@ namespace smol::renderer
         asset_t<shader_t> transparent_mult_uber_shader;
 
         std::unordered_map<std::string, registered_shader_t> shader_registry;
+
+        VkExtent2D render_extent = {0, 0};
+        u32_t viewport_bindless_id = BINDLESS_NULL_HANDLE;
+        bool use_offscreen_viewport = false;
     };
 
     struct context_config_t

@@ -36,31 +36,43 @@ namespace smol
 
     void material_t::sync()
     {
-        if (!is_dirty || data.empty()) { return; }
+        if (dirty_frames == 0 || data.empty()) { return; }
 
-        if (heap_offset == renderer::BINDLESS_NULL_HANDLE)
+        u32_t cur_frame = renderer::ctx.cur_frame;
+
+        if (heap_offset[cur_frame] == renderer::BINDLESS_NULL_HANDLE)
         {
-            heap_offset = renderer::res_system.material_heap.allocate(data.size());
+            heap_offset[cur_frame] = renderer::res_system.material_heap.allocate(data.size());
         }
 
-        renderer::res_system.material_heap.update(heap_offset, data.data(), data.size());
+        renderer::res_system.material_heap.update(heap_offset[cur_frame], data.data(), data.size());
 
-        is_dirty = false;
+        if (last_synced_frame != cur_frame)
+        {
+            dirty_frames--;
+            last_synced_frame = cur_frame;
+        }
     }
 
     std::optional<material_t> asset_loader_t<material_t>::load(const std::string& path, const std::string& shader_name)
     {
         material_t mat(shader_name);
+        for (u32_t i = 0; i < renderer::MAX_FRAMES_IN_FLIGHT; i++)
+        {
+            mat.heap_offset[i] = renderer::BINDLESS_NULL_HANDLE;
+        }
         if (mat.shader_module_idx == NULL_SHADER_MODULE) { return std::nullopt; }
         return mat;
     }
 
     void asset_loader_t<material_t>::unload(material_t& mat)
     {
-        if (mat.heap_offset != renderer::BINDLESS_NULL_HANDLE)
+        for (u32_t i = 0; i < renderer::MAX_FRAMES_IN_FLIGHT; i++)
         {
-            renderer::res_system.material_heap.free(mat.heap_offset, mat.data.size());
-            mat.heap_offset = renderer::BINDLESS_NULL_HANDLE;
+            if (mat.heap_offset[i] != renderer::BINDLESS_NULL_HANDLE)
+            {
+                renderer::res_system.material_heap.free(mat.heap_offset[i], mat.data.size());
+            }
         }
 
         mat.data.clear();

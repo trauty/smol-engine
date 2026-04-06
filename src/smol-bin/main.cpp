@@ -19,9 +19,9 @@ int main()
     if (!smol::engine::init("smol-engine", 1280, 720)) { return -1; }
 
 #if SMOL_PLATFORM_WIN
-    const char* lib_name = "smol-game-logic.dll";
+    const char* lib_name = "smol-game.dll";
 #elif SMOL_PLATFORM_LINUX || SMOL_PLATFORM_ANDROID
-    const char* lib_name = "./libsmol-game-logic.so";
+    const char* lib_name = "./libsmol-game.so";
 #endif
 
     smol::os::lib_handle_t game_lib = smol::os::load_lib(lib_name);

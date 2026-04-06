@@ -9,6 +9,58 @@
 
 namespace smol
 {
+    struct SMOL_API vec2_t
+    {
+        float x, y;
+
+        vec2_t() : x(0.0f), y(0.0f) {}
+        vec2_t(f32 x, f32 y) : x(x), y(y) {}
+        vec2_t(const float* v) : x(v[0]), y(v[1]) {}
+
+        operator float*() { return &x; }
+        operator float*() const { return const_cast<float*>(&x); }
+
+        static vec2_t normalize(vec2_t v)
+        {
+            glm_vec2_normalize(v);
+            return v;
+        }
+
+        static float dot(vec2_t a, vec2_t b) { return glm_vec2_dot(a, b); }
+
+        static float cross(vec2_t a, vec2_t b) { return glm_vec2_cross(a, b); }
+
+        float length() const { return glm_vec2_norm(const_cast<float*>(&x)); }
+        float length_squared() const { return glm_vec2_norm2(const_cast<float*>(&x)); }
+
+        vec2_t operator+(vec2_t other) const { return {x + other.x, y + other.y}; }
+        vec2_t operator-(vec2_t other) const { return {x - other.x, y - other.y}; }
+        vec2_t operator*(vec2_t other) const { return {x * other.x, y * other.y}; }
+        vec2_t operator*(float scalar) const { return {x * scalar, y * scalar}; }
+        vec2_t operator/(float scalar) const { return {x / scalar, y / scalar}; }
+
+        vec2_t& operator+=(vec2_t other)
+        {
+            x += other.x;
+            y += other.y;
+            return *this;
+        }
+        vec2_t& operator-=(vec2_t other)
+        {
+            x -= other.x;
+            y -= other.y;
+            return *this;
+        }
+        vec2_t& operator*=(float scalar)
+        {
+            x *= scalar;
+            y *= scalar;
+            return *this;
+        }
+    };
+
+    inline vec2_t operator*(float scalar, vec2_t v) { return v * scalar; }
+
     struct SMOL_API vec3_t
     {
         float x, y, z;

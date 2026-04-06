@@ -18,9 +18,17 @@ namespace smol::input
         bool cur_mouse[(size_t)key_t::Count];
         bool prev_mouse[(size_t)key_t::Count];
 
+        float raw_mouse_x = 0.0f;
+        float raw_mouse_y = 0.0f;
+
         float mouse_x = 0.0f;
         float mouse_y = 0.0f;
         float scroll_delta = 0.0f;
+
+        float viewport_offset_x = 0.0f;
+        float viewport_offset_y = 0.0f;
+        float viewport_width = 0.0f;
+        float viewport_height = 0.0f;
     };
 
     struct action_listener_t
@@ -220,6 +228,29 @@ namespace smol::input
         }
     }
 
+    void set_viewport_offset(float x, float y)
+    {
+        input_state.viewport_offset_x = x;
+        input_state.viewport_offset_y = y;
+
+        input_state.mouse_x = input_state.raw_mouse_x - input_state.viewport_offset_x;
+        input_state.mouse_y = input_state.raw_mouse_y - input_state.viewport_offset_y;
+    }
+
+    void set_viewport_size(float width, float height)
+    {
+        input_state.viewport_width = width;
+        input_state.viewport_height = height;
+    }
+
+    bool is_mouse_in_viewport()
+    {
+        if (input_state.viewport_width == 0.0f || input_state.viewport_height == 0.0f) { return true; }
+
+        return input_state.mouse_x >= 0.0f && input_state.mouse_x <= input_state.viewport_width &&
+               input_state.mouse_y >= 0.0f && input_state.mouse_y <= input_state.viewport_height;
+    }
+
     namespace detail
     {
         void init()
@@ -281,8 +312,11 @@ namespace smol::input
                 break;
 
             case SDL_EVENT_MOUSE_MOTION:
-                input_state.mouse_x = event.motion.x;
-                input_state.mouse_y = event.motion.y;
+                input_state.raw_mouse_x = event.motion.x;
+                input_state.raw_mouse_y = event.motion.y;
+
+                input_state.mouse_x = input_state.raw_mouse_x - input_state.viewport_offset_x;
+                input_state.mouse_y = input_state.raw_mouse_y - input_state.viewport_offset_y;
                 break;
 
             case SDL_EVENT_MOUSE_WHEEL: input_state.scroll_delta = event.wheel.y; break;

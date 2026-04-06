@@ -142,6 +142,10 @@ namespace smol::input
 
     SMOL_API void unbind_all_buttons(const std::string& action_name);
 
+    SMOL_API void set_viewport_offset(float x, float y);
+    SMOL_API void set_viewport_size(float width, float height);
+    SMOL_API bool is_mouse_in_viewport();
+
     namespace detail
     {
         void init();

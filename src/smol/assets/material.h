@@ -25,9 +25,9 @@ namespace smol
         u32_t type_id;
         u32_t shader_module_idx = NULL_SHADER_MODULE;
 
-        u32_t heap_offset = renderer::BINDLESS_NULL_HANDLE;
-
-        bool is_dirty = true;
+        u32_t heap_offset[renderer::MAX_FRAMES_IN_FLIGHT];
+        u32_t dirty_frames = renderer::MAX_FRAMES_IN_FLIGHT;
+        u32_t last_synced_frame = renderer::BINDLESS_NULL_HANDLE;
 
         material_t() = default;
         material_t(const std::string& shader_name);
@@ -58,7 +58,7 @@ namespace smol
             }
 
             std::memcpy(data.data() + member.offset, &value, sizeof(T));
-            is_dirty = true;
+            dirty_frames = renderer::MAX_FRAMES_IN_FLIGHT;
         }
 
         void set_texture(u32_t name_hash, const asset_t<texture_t>& tex)

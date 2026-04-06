@@ -120,8 +120,10 @@ target("smol-engine")
 
     add_files("src/smol/**.cpp")
     add_files("lib/vma/vk_mem_alloc.cpp", {warnings = "none"})
+    add_files("lib/imgui/**.cpp", {warnings = "none"})
 
     add_includedirs("include", {public = true})
+    add_includedirs("include/imgui", {public = true})
     add_includedirs("src", {public = true})
 target_end()
 

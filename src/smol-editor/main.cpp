@@ -1,9 +1,16 @@
 
+#include "imgui/imgui.h"
+#include "imgui/imgui_impl_sdl3.h"
+#include "imgui_impl_vulkan.h"
 #include "smol/ecs_fwd.h"
 #include "smol/engine.h"
 #include "smol/game.h"
+#include "smol/input.h"
 #include "smol/log.h"
 #include "smol/os.h"
+#include "smol/rendering/imgui_backend.h"
+#include "smol/rendering/renderer.h"
+#include "smol/rendering/renderer_types.h"
 #include "smol/world.h"
 
 #include "json/json.hpp"
@@ -147,6 +154,8 @@ int main(i32 argc, char** argv)
 
     if (!smol::engine::init("smol-editor", 1280, 720)) { return -1; }
 
+    smol::renderer::set_use_offscreen_viewport(true);
+
     smol::engine::create_scene();
     smol::world_t& cur_world = smol::engine::get_active_world();
 
@@ -155,6 +164,9 @@ int main(i32 argc, char** argv)
         SMOL_LOG_ERROR("EDITOR", "Initial load of game lib failed. Exiting...");
         return -1;
     }
+
+    ImGuiIO& io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
 
     cur_world.register_update_system(
         [](smol::ecs::registry_t& reg)
@@ -175,6 +187,43 @@ int main(i32 argc, char** argv)
                     load_game_dll(true);
                 }
             }
+
+            ImGui_ImplSDL3_NewFrame();
+            ImGui::NewFrame();
+
+            ImGuiDockNodeFlags dockspace_flags = ImGuiDockNodeFlags_None;
+            ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(), dockspace_flags);
+            ImGui::ShowDemoWindow();
+
+            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{0, 0});
+            if (ImGui::Begin("Scene Viewport"))
+            {
+                ImVec2 viewport_size = ImGui::GetContentRegionAvail();
+                ImVec2 viewport_pos = ImGui::GetCursorScreenPos();
+
+                static ImVec2 last_size = viewport_size;
+
+                if (viewport_size.x > 0.0f && viewport_size.y > 0.0f &&
+                    (viewport_size.x != last_size.x || viewport_size.y != last_size.y))
+                {
+                    smol::renderer::set_render_resolution((u32_t)viewport_size.x, (u32_t)viewport_size.y);
+                    last_size = viewport_size;
+                }
+
+                smol::input::set_viewport_offset(viewport_pos.x, viewport_pos.y);
+                smol::input::set_viewport_size(viewport_size.x, viewport_size.y);
+
+                u32_t tex_id = smol::renderer::get_viewport_texture_id();
+                if (tex_id != smol::renderer::BINDLESS_NULL_HANDLE)
+                {
+                    ImGui::Image((ImTextureID)(intptr_t)(tex_id + 1), viewport_size);
+                }
+            }
+            ImGui::End();
+            ImGui::PopStyleVar();
+
+            ImGui::Render();
+            smol::renderer::imgui::submit(ImGui::GetDrawData());
 
             if (game_update) { game_update(&smol::engine::get_active_world()); }
         });

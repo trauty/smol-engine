@@ -1,6 +1,5 @@
 #pragma once
 
-#include "smol/assets/shader.h"
 #include "smol/defines.h"
 #include "smol/ecs_fwd.h"
 #include "smol/rendering/renderer_types.h"
@@ -61,5 +60,6 @@ namespace smol::renderer
       private:
         std::vector<rg_resource_t> resources;
         std::vector<rg_pass_t> passes;
+        std::vector<size_t> sorted_passes;
     };
 } // namespace smol::renderer

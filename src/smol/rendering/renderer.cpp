@@ -156,7 +156,7 @@ namespace smol::renderer
                 frame_data.global_bindless_id,
                 frame_data.object_bindless_id,
                 res_system.material_heap.bindless_id,
-                material->heap_offset,
+                material->heap_offset[ctx.cur_frame],
             };
 
             vkCmdPushConstants(cmd, material->shader->pipeline_layout,
@@ -197,7 +197,7 @@ namespace smol::renderer
                 frame_data.global_bindless_id,
                 frame_data.object_bindless_id,
                 res_system.material_heap.bindless_id,
-                material->heap_offset,
+                material->heap_offset[ctx.cur_frame],
             };
 
             vkCmdPushConstants(cmd, material->shader->pipeline_layout,
@@ -482,6 +482,9 @@ namespace smol::renderer
         init_resources();
 
         init_swapchain();
+
+        ctx.per_frame_objects.resize(MAX_FRAMES_IN_FLIGHT);
+        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) { init_per_frame(ctx.per_frame_objects[i]); }
 
         VkCommandPoolCreateInfo transfer_pool_info = {
             .sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO,
@@ -884,7 +887,7 @@ namespace smol::renderer
             glm_mat4_transpose(normal_mat);
             std::memcpy(obj_data.normal_matrix.data, &normal_mat, sizeof(mat4_t));
 
-            obj_data.material_offset = renderer.material->heap_offset;
+            obj_data.material_offset = renderer.material->heap_offset[ctx.cur_frame];
             obj_data.vertex_buffer_id = renderer.mesh->vertex_bindless_id;
             obj_data.index_buffer_id = renderer.mesh->index_bindless_id;
 
@@ -1031,9 +1034,11 @@ namespace smol::renderer
             rendergraph.import_image("Swapchain", ctx.swapchain.images[index], ctx.swapchain.views[index],
                                      ctx.swapchain.format, ctx.swapchain.extent.width, ctx.swapchain.extent.height);
 
+        if (!ctx.use_offscreen_viewport) { ctx.render_extent = ctx.swapchain.extent; }
+
         image_desc_t color_desc = {
-            .width = ctx.swapchain.extent.width,
-            .height = ctx.swapchain.extent.height,
+            .width = ctx.render_extent.width,
+            .height = ctx.render_extent.height,
             .format = VK_FORMAT_R16G16B16A16_SFLOAT,
             .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
             .aspect = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -1042,8 +1047,8 @@ namespace smol::renderer
         rg_resource_id color_res = rendergraph.create_image("SceneColor", color_desc);
 
         image_desc_t depth_desc = {
-            .width = ctx.swapchain.extent.width,
-            .height = ctx.swapchain.extent.height,
+            .width = ctx.render_extent.width,
+            .height = ctx.render_extent.height,
             .format = ctx.swapchain.depth_format,
             .usage = VK_IMAGE_USAGE_DEPTH_STENCIL_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
             .aspect = VK_IMAGE_ASPECT_DEPTH_BIT,
@@ -1051,9 +1056,28 @@ namespace smol::renderer
 
         rg_resource_id depth_res = rendergraph.create_image("SceneDepth", depth_desc);
 
+        if (ctx.use_offscreen_viewport)
+        {
+            image_desc_t viewport_desc = {
+                .width = ctx.render_extent.width,
+                .height = ctx.render_extent.height,
+                .format = ctx.swapchain.format,
+                .usage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT | VK_IMAGE_USAGE_SAMPLED_BIT,
+                .aspect = VK_IMAGE_ASPECT_COLOR_BIT,
+            };
+
+            rendergraph.create_image("ViewportColor", viewport_desc);
+        }
+
         for (graph_builder_func_t& feature_builder : custom_renderer_features) { feature_builder(rendergraph, reg); }
 
         rendergraph.compile(frame_data);
+
+        if (ctx.use_offscreen_viewport)
+        {
+            ctx.viewport_bindless_id = rendergraph.get_bindless_id(rendergraph.get_resource("ViewportColor"));
+        }
+
         rendergraph.execute(cmd, reg);
 
         VkImageLayout final_layout = rendergraph.get_layout(swapchain_res);
@@ -1222,9 +1246,26 @@ namespace smol::renderer
             barrier.dstStageMask = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
             barrier.dstAccessMask = 0;
         }
+        else if (old_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL &&
+                 new_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
+        {
+            barrier.srcStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+            barrier.srcAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
+            barrier.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+            barrier.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+        }
+        else if (old_layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR &&
+                 new_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
+        {
+            barrier.srcStageMask = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
+            barrier.srcAccessMask = 0;
+            barrier.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
+            barrier.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
+        }
         else
         {
-            SMOL_LOG_WARN("VULKAN", "transition_image: using fallback barrier for image transition");
+            SMOL_LOG_WARN("VULKAN", "transition_image: using fallback barrier for image transition. From: {}, To: {}",
+                          (u32_t)old_layout, (u32_t)new_layout);
         }
 
         VkDependencyInfo dep_info = {
@@ -1265,9 +1306,9 @@ namespace smol::renderer
             smol::window::get_window_size(&w, &h);
 
             swapchain_extent.width =
-                std::clamp(static_cast<u32>(w), surface_caps.minImageExtent.width, surface_caps.maxImageExtent.width);
-            swapchain_extent.height =
-                std::clamp(static_cast<u32>(h), surface_caps.minImageExtent.height, surface_caps.maxImageExtent.height);
+                std::clamp(static_cast<u32_t>(w), surface_caps.minImageExtent.width, surface_caps.maxImageExtent.width);
+            swapchain_extent.height = std::clamp(static_cast<u32_t>(h), surface_caps.minImageExtent.height,
+                                                 surface_caps.maxImageExtent.height);
         }
 
         ctx.swapchain.extent = swapchain_extent;
@@ -1329,8 +1370,6 @@ namespace smol::renderer
         if (old_swapchain != VK_NULL_HANDLE)
         {
             for (VkImageView view : ctx.swapchain.views) { vkDestroyImageView(ctx.device, view, nullptr); }
-
-            for (per_frame_t& frame_data : ctx.per_frame_objects) { shutdown_per_frame(frame_data); }
 
             vkDestroyImageView(ctx.device, ctx.swapchain.depth_view, nullptr);
             vmaDestroyImage(ctx.allocator, ctx.swapchain.depth_image, ctx.swapchain.depth_allocation);
@@ -1403,11 +1442,6 @@ namespace smol::renderer
             VkSemaphoreCreateInfo sem_info = {.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
             VK_CHECK(vkCreateSemaphore(ctx.device, &sem_info, nullptr, &ctx.swapchain.release_semaphores[i]));
         }
-
-        ctx.per_frame_objects.clear();
-        ctx.per_frame_objects.resize(MAX_FRAMES_IN_FLIGHT);
-
-        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++) { init_per_frame(ctx.per_frame_objects[i]); }
 
         for (size_t i = 0; i < image_count; i++)
         {
@@ -1780,5 +1814,25 @@ namespace smol::renderer
     void register_custom_shader(asset_t<shader_t> shader)
     {
         for (const shader_module_info_t& module : shader->modules) { ctx.shader_registry[module.name] = {shader, 0}; }
+    }
+
+    void set_render_resolution(u32_t width, u32_t height)
+    {
+        if (width > 0 && height > 0)
+        {
+            ctx.render_extent.width = width;
+            ctx.render_extent.height = height;
+        }
+    }
+
+    u32_t get_viewport_texture_id() { return ctx.viewport_bindless_id; }
+
+    void set_use_offscreen_viewport(bool value)
+    {
+        ctx.use_offscreen_viewport = value;
+        if (value && (ctx.render_extent.width == 0 || ctx.render_extent.height == 0))
+        {
+            ctx.render_extent = ctx.swapchain.extent;
+        }
     }
 } // namespace smol::renderer

@@ -113,43 +113,6 @@ namespace smol
             file.read(reinterpret_cast<char*>(comp_spirv.data()), header.comp_spirv_size * 4);
         }
 
-        VkPipelineVertexInputStateCreateInfo vertex_input_info = {
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
-            .vertexBindingDescriptionCount = 0,
-            .pVertexBindingDescriptions = nullptr,
-            .vertexAttributeDescriptionCount = 0,
-            .pVertexAttributeDescriptions = nullptr,
-        };
-
-        VkPipelineInputAssemblyStateCreateInfo input_assembly = {
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
-            .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
-            .primitiveRestartEnable = VK_FALSE,
-        };
-
-        VkPipelineViewportStateCreateInfo viewport_state = {
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
-            .viewportCount = 1,
-            .scissorCount = 1,
-        };
-
-        VkPipelineRasterizationStateCreateInfo rasterizer_info = {
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
-            .depthClampEnable = VK_FALSE,
-            .rasterizerDiscardEnable = VK_FALSE,
-            .polygonMode = VK_POLYGON_MODE_FILL,
-            .cullMode = VK_CULL_MODE_BACK_BIT,
-            .frontFace = VK_FRONT_FACE_CLOCKWISE,
-            .depthBiasEnable = VK_FALSE,
-            .lineWidth = 1.0f,
-        };
-
-        VkPipelineMultisampleStateCreateInfo multisampling_info = {
-            .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
-            .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
-            .sampleShadingEnable = VK_FALSE,
-        };
-
         VkPipelineColorBlendAttachmentState base_blend = {
             .blendEnable = VK_FALSE,
             .srcColorBlendFactor = VK_BLEND_FACTOR_ONE,
@@ -178,6 +141,8 @@ namespace smol
             base_blend.blendEnable = VK_TRUE;
             base_blend.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
             base_blend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+            base_blend.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+            base_blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
         }
         else if (blend_mode == "TransparentAdd")
         {
@@ -195,6 +160,43 @@ namespace smol
             base_blend.srcAlphaBlendFactor = VK_BLEND_FACTOR_DST_ALPHA;
             base_blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
         }
+
+        VkPipelineVertexInputStateCreateInfo vertex_input_info = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO,
+            .vertexBindingDescriptionCount = 0,
+            .pVertexBindingDescriptions = nullptr,
+            .vertexAttributeDescriptionCount = 0,
+            .pVertexAttributeDescriptions = nullptr,
+        };
+
+        VkPipelineInputAssemblyStateCreateInfo input_assembly = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO,
+            .topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST,
+            .primitiveRestartEnable = VK_FALSE,
+        };
+
+        VkPipelineViewportStateCreateInfo viewport_state = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO,
+            .viewportCount = 1,
+            .scissorCount = 1,
+        };
+
+        VkPipelineRasterizationStateCreateInfo rasterizer_info = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO,
+            .depthClampEnable = VK_FALSE,
+            .rasterizerDiscardEnable = VK_FALSE,
+            .polygonMode = VK_POLYGON_MODE_FILL,
+            .cullMode = is_depth_test ? VK_CULL_MODE_BACK_BIT : VK_CULL_MODE_NONE,
+            .frontFace = VK_FRONT_FACE_CLOCKWISE,
+            .depthBiasEnable = VK_FALSE,
+            .lineWidth = 1.0f,
+        };
+
+        VkPipelineMultisampleStateCreateInfo multisampling_info = {
+            .sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO,
+            .rasterizationSamples = VK_SAMPLE_COUNT_1_BIT,
+            .sampleShadingEnable = VK_FALSE,
+        };
 
         VkPipelineDepthStencilStateCreateInfo depth_stencil_info = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
@@ -305,7 +307,7 @@ namespace smol
                 .pColorAttachmentFormats = shader.target_formats.empty() ? nullptr : shader.target_formats.data(),
             };
 
-            if (shader.modules[0].depth_test || shader.modules[0].depth_write)
+            if (is_depth_test || is_depth_write)
             {
                 pipeline_rendering_info.depthAttachmentFormat = renderer::ctx.swapchain.depth_format;
             }
