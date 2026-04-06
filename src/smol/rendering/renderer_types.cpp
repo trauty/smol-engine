@@ -14,6 +14,7 @@ namespace smol::renderer
             if (!img.in_use && img.desc == desc)
             {
                 img.in_use = true;
+                img.frames_unused = 0;
                 return &img;
             }
         }
@@ -21,6 +22,7 @@ namespace smol::renderer
         transient_image_t new_img;
         new_img.desc = desc;
         new_img.in_use = true;
+        new_img.frames_unused = 0;
 
         VkImageCreateInfo image_info = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
@@ -87,7 +89,31 @@ namespace smol::renderer
 
     void transient_pool_t::reset()
     {
-        for (transient_image_t& img : images) { img.in_use = false; }
+        constexpr u32_t MAX_FRAMES_UNUSED = 8;
+
+        for (auto it = images.begin(); it != images.end();)
+        {
+            if (!it->in_use)
+            {
+                it->frames_unused++;
+                if (it->frames_unused > MAX_FRAMES_UNUSED)
+                {
+                    if (it->view) { vkDestroyImageView(ctx.device, it->view, nullptr); }
+                    if (it->image) { vmaDestroyImage(ctx.allocator, it->image, it->allocation); }
+                    if (it->bindless_id != BINDLESS_NULL_HANDLE) { res_system.texture_heap.release(it->bindless_id); }
+
+                    it = images.erase(it);
+                    continue;
+                }
+            }
+            else
+            {
+                it->in_use = false;
+                it->frames_unused = 0;
+            }
+
+            it++;
+        }
     }
 
     void transient_pool_t::shutdown()

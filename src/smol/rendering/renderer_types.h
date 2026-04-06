@@ -198,6 +198,7 @@ namespace smol::renderer
         VmaAllocation allocation = VK_NULL_HANDLE;
         u32_t bindless_id = BINDLESS_NULL_HANDLE;
         bool in_use = false;
+        u32_t frames_unused = 0;
     };
 
     struct transient_pool_t
@@ -207,14 +208,6 @@ namespace smol::renderer
         transient_image_t* acquire(const image_desc_t& desc);
         void reset();
         void shutdown();
-    };
-
-    struct render_batch_t
-    {
-        VkPipeline pipeline;
-        VkPipelineLayout layout;
-        u32_t start_idx;
-        u32_t count;
     };
 
     struct per_frame_t
