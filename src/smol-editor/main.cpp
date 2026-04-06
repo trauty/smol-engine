@@ -1,7 +1,6 @@
 
 #include "imgui/imgui.h"
 #include "imgui/imgui_impl_sdl3.h"
-#include "imgui_impl_vulkan.h"
 #include "smol/ecs_fwd.h"
 #include "smol/engine.h"
 #include "smol/game.h"

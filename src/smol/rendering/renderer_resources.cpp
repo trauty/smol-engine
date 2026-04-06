@@ -258,7 +258,7 @@ namespace smol::renderer
             {
                 if (del.handle.texture.view) { vkDestroyImageView(ctx.device, del.handle.texture.view, nullptr); }
                 vmaDestroyImage(ctx.allocator, del.handle.texture.image, del.handle.texture.allocation);
-                texture_heap.release(del.bindless_id);
+                if (del.bindless_id != BINDLESS_NULL_HANDLE) { texture_heap.release(del.bindless_id); }
                 break;
             }
 
@@ -296,6 +296,24 @@ namespace smol::renderer
                 {
                     vkDestroyPipelineLayout(ctx.device, del.handle.pipeline.layout, nullptr);
                 }
+                break;
+            }
+
+            case smol::renderer::resource_type_e::SWAPCHAIN:
+            {
+                vkDestroySwapchainKHR(ctx.device, del.handle.swapchain, nullptr);
+                break;
+            }
+
+            case smol::renderer::resource_type_e::IMAGE_VIEW:
+            {
+                vkDestroyImageView(ctx.device, del.handle.image_view, nullptr);
+                break;
+            }
+
+            case smol::renderer::resource_type_e::SEMAPHORE:
+            {
+                vkDestroySemaphore(ctx.device, del.handle.semaphore, nullptr);
                 break;
             }
             }

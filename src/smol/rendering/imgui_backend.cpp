@@ -25,6 +25,10 @@ namespace smol::renderer::imgui
     {
         asset_t<shader_t> shader;
         asset_t<material_t> material;
+
+        VkImage font_image = VK_NULL_HANDLE;
+        VmaAllocation font_alloc = VK_NULL_HANDLE;
+        VkImageView font_view = VK_NULL_HANDLE;
         u32_t font_tex_bindless_id = BINDLESS_NULL_HANDLE;
 
         VkBuffer vertex_buffer[renderer::MAX_FRAMES_IN_FLIGHT] = {VK_NULL_HANDLE};
@@ -93,14 +97,12 @@ namespace smol::renderer::imgui
         };
         VmaAllocationCreateInfo img_alloc_info = {.usage = VMA_MEMORY_USAGE_AUTO};
 
-        VkImage font_image;
-        VmaAllocation font_alloc;
-        VK_CHECK(
-            vmaCreateImage(renderer::ctx.allocator, &image_info, &img_alloc_info, &font_image, &font_alloc, nullptr));
+        VK_CHECK(vmaCreateImage(renderer::ctx.allocator, &image_info, &img_alloc_info, &ctx.font_image, &ctx.font_alloc,
+                                nullptr));
 
         VkImageViewCreateInfo view_info = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO,
-            .image = font_image,
+            .image = ctx.font_image,
             .viewType = VK_IMAGE_VIEW_TYPE_2D,
             .format = VK_FORMAT_R8G8B8A8_UNORM,
             .subresourceRange = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
@@ -109,8 +111,8 @@ namespace smol::renderer::imgui
                                  .baseArrayLayer = 0,
                                  .layerCount = 1},
         };
-        VkImageView font_view;
-        VK_CHECK(vkCreateImageView(renderer::ctx.device, &view_info, nullptr, &font_view));
+
+        VK_CHECK(vkCreateImageView(renderer::ctx.device, &view_info, nullptr, &ctx.font_view));
 
         VkCommandBuffer cmd = renderer::begin_transfer_commands();
 
@@ -122,7 +124,7 @@ namespace smol::renderer::imgui
             .newLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
             .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
             .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .image = font_image,
+            .image = ctx.font_image,
             .subresourceRange = view_info.subresourceRange,
         };
         vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr, 0,
@@ -136,7 +138,7 @@ namespace smol::renderer::imgui
                                  .layerCount = 1},
             .imageExtent = image_info.extent,
         };
-        vkCmdCopyBufferToImage(cmd, staging_buf, font_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy_region);
+        vkCmdCopyBufferToImage(cmd, staging_buf, ctx.font_image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy_region);
 
         VkImageMemoryBarrier release_barrier = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
@@ -146,7 +148,7 @@ namespace smol::renderer::imgui
             .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
             .srcQueueFamilyIndex = smol::renderer::ctx.queue_fam_indices.transfer_family.value(),
             .dstQueueFamilyIndex = smol::renderer::ctx.queue_fam_indices.graphics_family.value(),
-            .image = font_image,
+            .image = ctx.font_image,
             .subresourceRange = view_info.subresourceRange,
         };
         vkCmdPipelineBarrier(cmd, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0, nullptr,
@@ -162,7 +164,7 @@ namespace smol::renderer::imgui
 
             renderer::res_system.pending_acquires.push_back({
                 .type = renderer::resource_type_e::TEXTURE,
-                .handle = {.image = font_image},
+                .handle = {.image = ctx.font_image},
                 .barrier = {.image_barrier = acquire_barrier},
             });
         }
@@ -171,7 +173,7 @@ namespace smol::renderer::imgui
 
         VkDescriptorImageInfo image_desc_info = {
             .sampler = VK_NULL_HANDLE,
-            .imageView = font_view,
+            .imageView = ctx.font_view,
             .imageLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
         };
 
@@ -389,12 +391,28 @@ namespace smol::renderer::imgui
     {
         for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
         {
-            vmaDestroyBuffer(renderer::ctx.allocator, ctx.vertex_buffer[i], ctx.vertex_alloc[i]);
+            if (ctx.vertex_buffer[i])
+            {
+                vmaDestroyBuffer(renderer::ctx.allocator, ctx.vertex_buffer[i], ctx.vertex_alloc[i]);
+            }
+
+            if (ctx.index_buffer[i])
+            {
+                vmaDestroyBuffer(renderer::ctx.allocator, ctx.index_buffer[i], ctx.index_alloc[i]);
+            }
+
+            if (ctx.vertex_buffer_bindless_id[i] != BINDLESS_NULL_HANDLE)
+            {
+                res_system.buffer_heap.release(ctx.vertex_buffer_bindless_id[i]);
+            }
         }
 
-        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+        if (ctx.font_view) { vkDestroyImageView(renderer::ctx.device, ctx.font_view, nullptr); }
+        if (ctx.font_image) { vmaDestroyImage(renderer::ctx.allocator, ctx.font_image, ctx.font_alloc); }
+
+        if (ctx.font_tex_bindless_id != BINDLESS_NULL_HANDLE)
         {
-            vmaDestroyBuffer(renderer::ctx.allocator, ctx.index_buffer[i], ctx.index_alloc[i]);
+            res_system.texture_heap.release(ctx.font_tex_bindless_id);
         }
 
         ctx.material.release();

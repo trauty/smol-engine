@@ -16,7 +16,10 @@ namespace smol::renderer
         BUFFER,
         STORAGE_IMAGE,
         COMMAND_BUFFER,
-        PIPELINE
+        PIPELINE,
+        SWAPCHAIN,
+        IMAGE_VIEW,
+        SEMAPHORE
     };
 
     constexpr u32_t SAMPLERS_BINDING_POINT = 0;
@@ -71,6 +74,10 @@ namespace smol::renderer
                 VkPipeline pipeline;
                 VkPipelineLayout layout;
             } pipeline;
+
+            VkSwapchainKHR swapchain;
+            VkImageView image_view;
+            VkSemaphore semaphore;
         } handle;
 
         u32_t bindless_id;

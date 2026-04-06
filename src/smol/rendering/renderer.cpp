@@ -681,10 +681,16 @@ namespace smol::renderer
     {
         ZoneScoped;
 
+        bool needs_resize = false;
+        u32_t new_width, new_height;
         for (auto [entity, event] : reg.view<window::window_size_changed_event>().each())
         {
-            resize(event.width, event.height);
+            needs_resize = true;
+            new_width = event.width;
+            new_height = event.height;
         }
+
+        if (needs_resize) { resize(new_width, new_height); }
 
         u64_t gpu_timeline_value = 0;
         vkGetSemaphoreCounterValue(ctx.device, res_system.timeline_semaphore, &gpu_timeline_value);
@@ -1284,8 +1290,6 @@ namespace smol::renderer
 
         if (surface_caps.currentExtent.width == 0 && surface_caps.currentExtent.height == 0) { return false; }
 
-        vkDeviceWaitIdle(ctx.device);
-
         init_swapchain();
 
         return true;
@@ -1369,13 +1373,36 @@ namespace smol::renderer
 
         if (old_swapchain != VK_NULL_HANDLE)
         {
-            for (VkImageView view : ctx.swapchain.views) { vkDestroyImageView(ctx.device, view, nullptr); }
+            std::scoped_lock lock(res_system.deletion_mutex);
 
-            vkDestroyImageView(ctx.device, ctx.swapchain.depth_view, nullptr);
-            vmaDestroyImage(ctx.allocator, ctx.swapchain.depth_image, ctx.swapchain.depth_allocation);
+            u64_t safe_timeline = ctx.timeline_value;
+
+            for (VkImageView view : ctx.swapchain.views)
+            {
+                res_system.deletion_queue.push_back({
+                    .type = resource_type_e::IMAGE_VIEW,
+                    .handle = {.image_view = view},
+                    .bindless_id = BINDLESS_NULL_HANDLE,
+                    .gpu_timeline_value = safe_timeline,
+                });
+            }
 
             ctx.swapchain.views.clear();
-            vkDestroySwapchainKHR(ctx.device, old_swapchain, nullptr);
+
+            res_system.deletion_queue.push_back({
+                .type = resource_type_e::TEXTURE,
+                .handle = {.texture = {ctx.swapchain.depth_image, ctx.swapchain.depth_allocation,
+                                       ctx.swapchain.depth_view}},
+                .bindless_id = BINDLESS_NULL_HANDLE,
+                .gpu_timeline_value = safe_timeline,
+            });
+
+            res_system.deletion_queue.push_back({
+                .type = resource_type_e::SWAPCHAIN,
+                .handle = {.swapchain = old_swapchain},
+                .bindless_id = BINDLESS_NULL_HANDLE,
+                .gpu_timeline_value = safe_timeline,
+            });
         }
 
         ctx.swapchain.extent = {swapchain_extent.width, swapchain_extent.height};
@@ -1432,7 +1459,24 @@ namespace smol::renderer
         VK_CHECK(vkGetSwapchainImagesKHR(ctx.device, ctx.swapchain.handle, &image_count, swapchain_images.data()));
         ctx.swapchain.images = swapchain_images;
 
-        for (VkSemaphore sem : ctx.swapchain.release_semaphores) { vkDestroySemaphore(ctx.device, sem, nullptr); }
+        if (!ctx.swapchain.release_semaphores.empty())
+        {
+            std::scoped_lock lock(res_system.deletion_mutex);
+
+            u64_t safe_timeline = ctx.timeline_value;
+
+            for (VkSemaphore sem : ctx.swapchain.release_semaphores)
+            {
+                res_system.deletion_queue.push_back({
+                    .type = resource_type_e::SEMAPHORE,
+                    .handle = {.semaphore = sem},
+                    .bindless_id = BINDLESS_NULL_HANDLE,
+                    .gpu_timeline_value = safe_timeline,
+                });
+            }
+
+            ctx.swapchain.release_semaphores.clear();
+        }
 
         ctx.swapchain.release_semaphores.clear();
         ctx.swapchain.release_semaphores.resize(image_count);
