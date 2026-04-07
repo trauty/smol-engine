@@ -6,6 +6,8 @@
 #include "vulkan/vulkan_core.h"
 
 #include <functional>
+#include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace smol::renderer
@@ -57,9 +59,13 @@ namespace smol::renderer
         VkImageLayout get_layout(rg_resource_id id) const;
         u32_t get_bindless_id(rg_resource_id id) const;
 
+        void add_alias(const std::string& alias_name, const std::string& target_name);
+
       private:
         std::vector<rg_resource_t> resources;
         std::vector<rg_pass_t> passes;
         std::vector<size_t> sorted_passes;
+
+        std::unordered_map<std::string, std::string> aliases;
     };
 } // namespace smol::renderer

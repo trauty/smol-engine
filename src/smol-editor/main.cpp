@@ -1,18 +1,20 @@
 
 #include "imgui/imgui.h"
 #include "imgui/imgui_impl_sdl3.h"
-#include "smol/ecs_fwd.h"
+#include "imgui_backend.h"
 #include "smol/engine.h"
 #include "smol/game.h"
 #include "smol/input.h"
 #include "smol/log.h"
 #include "smol/os.h"
-#include "smol/rendering/imgui_backend.h"
 #include "smol/rendering/renderer.h"
 #include "smol/rendering/renderer_types.h"
+#include "smol/rendering/vulkan.h"
+#include "smol/window.h"
 #include "smol/world.h"
 
 #include "json/json.hpp"
+#include <SDL3/SDL_events.h>
 #include <chrono>
 #include <exception>
 #include <filesystem>
@@ -105,6 +107,84 @@ bool load_game_dll(bool is_reload)
     return true;
 }
 
+struct editor_t
+{
+    std::chrono::steady_clock::time_point last_check_time = std::chrono::steady_clock::now();
+
+    bool process_event(const SDL_Event& event)
+    {
+        ImGui_ImplSDL3_ProcessEvent(&event);
+        ImGuiIO& io = ImGui::GetIO();
+
+        bool ignore_mouse = io.WantCaptureMouse &&
+                            (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN || event.type == SDL_EVENT_MOUSE_BUTTON_UP ||
+                             event.type == SDL_EVENT_MOUSE_MOTION || event.type == SDL_EVENT_MOUSE_WHEEL);
+
+        bool ignore_keyboard =
+            io.WantCaptureKeyboard &&
+            (event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP || event.type == SDL_EVENT_TEXT_INPUT);
+
+        return ignore_mouse || ignore_keyboard;
+    }
+
+    void update(smol::world_t& world)
+    {
+        auto now = std::chrono::steady_clock::now();
+        if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_check_time).count() > 250)
+        {
+            last_check_time = now;
+
+            std::error_code ec;
+            auto cur_time = std::filesystem::last_write_time(trigger_path, ec);
+
+            if (!ec && cur_time > last_reload_time)
+            {
+                SMOL_LOG_INFO("EDITOR", "Build system signaled completion. Attempting hot reload...");
+                load_game_dll(true);
+            }
+        }
+
+        ImGui_ImplSDL3_NewFrame();
+        ImGui::NewFrame();
+
+        ImGuiDockNodeFlags dockspace_flags = ImGuiDockNodeFlags_None;
+        ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(), dockspace_flags);
+
+        ImGui::ShowDemoWindow();
+
+        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{0, 0});
+        if (ImGui::Begin("Scene Viewport"))
+        {
+            ImVec2 viewport_size = ImGui::GetContentRegionAvail();
+            ImVec2 viewport_pos = ImGui::GetCursorScreenPos();
+
+            static ImVec2 last_size = {0.0f, 0.0f};
+            if (viewport_size.x > 0.0f && viewport_size.y > 0.0f &&
+                (viewport_size.x != last_size.x || viewport_size.y != last_size.y))
+            {
+                smol::renderer::set_render_resolution((u32_t)viewport_size.x, (u32_t)viewport_size.y);
+                last_size = viewport_size;
+            }
+
+            smol::input::set_viewport_offset(viewport_pos.x, viewport_pos.y);
+            smol::input::set_viewport_size(viewport_size.x, viewport_size.y);
+
+            u32_t tex_id = smol::renderer::get_viewport_texture_id();
+            if (tex_id != smol::renderer::BINDLESS_NULL_HANDLE)
+            {
+                ImGui::Image((ImTextureID)(intptr_t)(tex_id + 1), viewport_size);
+            }
+        }
+        ImGui::End();
+        ImGui::PopStyleVar();
+
+        ImGui::Render();
+        smol::editor::imgui::submit(ImGui::GetDrawData());
+
+        if (game_update) { game_update(&smol::engine::get_active_world()); }
+    }
+};
+
 int main(i32 argc, char** argv)
 {
     smol::log::init();
@@ -153,7 +233,17 @@ int main(i32 argc, char** argv)
 
     if (!smol::engine::init("smol-editor", 1280, 720)) { return -1; }
 
+    volkInitialize();
+    volkLoadInstance(smol::renderer::ctx.instance);
+    volkLoadDevice(smol::renderer::ctx.device);
+
     smol::renderer::set_use_offscreen_viewport(true);
+
+    ImGui::CreateContext();
+    ImGuiIO& io = ImGui::GetIO();
+    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    ImGui_ImplSDL3_InitForVulkan(smol::window::get_window());
+    smol::editor::imgui::init();
 
     smol::engine::create_scene();
     smol::world_t& cur_world = smol::engine::get_active_world();
@@ -164,73 +254,22 @@ int main(i32 argc, char** argv)
         return -1;
     }
 
-    ImGuiIO& io = ImGui::GetIO();
-    io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    static editor_t editor;
 
-    cur_world.register_update_system(
-        [](smol::ecs::registry_t& reg)
-        {
-            static auto last_check_time = std::chrono::steady_clock::now();
-            auto now = std::chrono::steady_clock::now();
-
-            if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_check_time).count() > 250)
-            {
-                last_check_time = now;
-
-                std::error_code ec;
-                auto cur_time = std::filesystem::last_write_time(trigger_path, ec);
-
-                if (!ec && cur_time > last_reload_time)
-                {
-                    SMOL_LOG_INFO("EDITOR", "Build system signaled completion. Attempting hot reload...");
-                    load_game_dll(true);
-                }
-            }
-
-            ImGui_ImplSDL3_NewFrame();
-            ImGui::NewFrame();
-
-            ImGuiDockNodeFlags dockspace_flags = ImGuiDockNodeFlags_None;
-            ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(), dockspace_flags);
-            ImGui::ShowDemoWindow();
-
-            ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{0, 0});
-            if (ImGui::Begin("Scene Viewport"))
-            {
-                ImVec2 viewport_size = ImGui::GetContentRegionAvail();
-                ImVec2 viewport_pos = ImGui::GetCursorScreenPos();
-
-                static ImVec2 last_size = viewport_size;
-
-                if (viewport_size.x > 0.0f && viewport_size.y > 0.0f &&
-                    (viewport_size.x != last_size.x || viewport_size.y != last_size.y))
-                {
-                    smol::renderer::set_render_resolution((u32_t)viewport_size.x, (u32_t)viewport_size.y);
-                    last_size = viewport_size;
-                }
-
-                smol::input::set_viewport_offset(viewport_pos.x, viewport_pos.y);
-                smol::input::set_viewport_size(viewport_size.x, viewport_size.y);
-
-                u32_t tex_id = smol::renderer::get_viewport_texture_id();
-                if (tex_id != smol::renderer::BINDLESS_NULL_HANDLE)
-                {
-                    ImGui::Image((ImTextureID)(intptr_t)(tex_id + 1), viewport_size);
-                }
-            }
-            ImGui::End();
-            ImGui::PopStyleVar();
-
-            ImGui::Render();
-            smol::renderer::imgui::submit(ImGui::GetDrawData());
-
-            if (game_update) { game_update(&smol::engine::get_active_world()); }
-        });
+    smol::engine::set_event_callback([](const SDL_Event& event) { return editor.process_event(event); });
+    smol::engine::set_ui_callback([]() { editor.update(smol::engine::get_active_world()); });
 
     cur_world.init();
     smol::engine::run();
 
     if (game_shutdown) { game_shutdown(&smol::engine::get_active_world()); }
+
+    vkDeviceWaitIdle(smol::renderer::ctx.device);
+
+    smol::editor::imgui::shutdown();
+    ImGui_ImplSDL3_Shutdown();
+    ImGui::DestroyContext();
+
     smol::engine::shutdown();
 
     if (game_lib) { smol::os::free_lib(game_lib); }

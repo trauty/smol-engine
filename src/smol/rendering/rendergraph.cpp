@@ -9,6 +9,7 @@
 
 #include <cstddef>
 #include <queue>
+#include <string>
 #include <tracy/Tracy.hpp>
 #include <tracy/TracyVulkan.hpp>
 #include <unordered_map>
@@ -22,6 +23,7 @@ namespace smol::renderer
         resources.clear();
         passes.clear();
         sorted_passes.clear();
+        aliases.clear();
     }
 
     rg_resource_id rendergraph_t::create_image(const std::string& name, const image_desc_t& desc)
@@ -49,6 +51,22 @@ namespace smol::renderer
 
     void rendergraph_t::compile(per_frame_t& frame_data)
     {
+        for (const rg_pass_t& pass : passes)
+        {
+            for (rg_resource_id id : pass.color_writes)
+            {
+                if (id == RG_NULL_ID) { SMOL_LOG_FATAL("RENDERGRAPH", "Pass '{}' has invalid color write", pass.name); }
+            }
+
+            for (rg_resource_id id : pass.texture_reads)
+            {
+                if (id == RG_NULL_ID)
+                {
+                    SMOL_LOG_FATAL("RENDERGRAPH", "Pass '{}' has invalid texture read", pass.name);
+                }
+            }
+        }
+
         std::vector<std::unordered_set<size_t>> adjacency_list(passes.size());
         std::vector<size_t> in_degree(passes.size(), 0);
         std::unordered_map<rg_resource_id, size_t> latest_writer;
@@ -275,9 +293,14 @@ namespace smol::renderer
 
     rg_resource_id rendergraph_t::get_resource(const std::string& name) const
     {
+        std::string search_name = name;
+
+        auto it = aliases.find(name);
+        if (it != aliases.end()) { search_name = it->second; }
+
         for (u32_t i = 0; i < resources.size(); i++)
         {
-            if (resources[i].name == name) { return i; }
+            if (resources[i].name == search_name) { return i; }
         }
 
         return RG_NULL_ID;
@@ -286,4 +309,7 @@ namespace smol::renderer
     VkImageLayout rendergraph_t::get_layout(rg_resource_id id) const { return resources[id].cur_layout; }
 
     u32_t rendergraph_t::get_bindless_id(rg_resource_id id) const { return resources[id].bindless_id; }
+
+    void rendergraph_t::add_alias(const std::string& alias_name, const std::string& target_name)
+    { aliases[alias_name] = target_name; }
 } // namespace smol::renderer

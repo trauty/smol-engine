@@ -13,13 +13,12 @@
 #include "smol/rendering/renderer_types.h"
 #include "smol/rendering/rendergraph.h"
 #include "smol/rendering/vulkan.h"
-#include "vulkan/vulkan_core.h"
 
 #include <cstdint>
 #include <cstring>
 #include <mutex>
 
-namespace smol::renderer::imgui
+namespace smol::editor::imgui
 {
     struct imgui_ctx_t
     {
@@ -29,7 +28,7 @@ namespace smol::renderer::imgui
         VkImage font_image = VK_NULL_HANDLE;
         VmaAllocation font_alloc = VK_NULL_HANDLE;
         VkImageView font_view = VK_NULL_HANDLE;
-        u32_t font_tex_bindless_id = BINDLESS_NULL_HANDLE;
+        u32_t font_tex_bindless_id = renderer::BINDLESS_NULL_HANDLE;
 
         VkBuffer vertex_buffer[renderer::MAX_FRAMES_IN_FLIGHT] = {VK_NULL_HANDLE};
         VmaAllocation vertex_alloc[renderer::MAX_FRAMES_IN_FLIGHT] = {VK_NULL_HANDLE};
@@ -51,7 +50,7 @@ namespace smol::renderer::imgui
     {
         for (u32_t i = 0; i < renderer::MAX_FRAMES_IN_FLIGHT; i++)
         {
-            ctx.vertex_buffer_bindless_id[i] = BINDLESS_NULL_HANDLE;
+            ctx.vertex_buffer_bindless_id[i] = renderer::BINDLESS_NULL_HANDLE;
         }
 
         ctx.shader = smol::load_asset_sync<shader_t>("assets/shaders/imgui.slang");
@@ -206,11 +205,7 @@ namespace smol::renderer::imgui
                 renderer::rg_pass_t& pass = graph.add_pass("ImGuiPass");
 
                 pass.color_writes = {graph.get_resource("Swapchain")};
-
-                if (renderer::ctx.use_offscreen_viewport)
-                {
-                    pass.texture_reads.push_back(graph.get_resource("ViewportColor"));
-                }
+                pass.texture_reads.push_back(graph.get_resource("FinalOutput"));
 
                 pass.execute_callback = [](VkCommandBuffer cmd, ecs::registry_t& reg)
                 {
@@ -249,16 +244,16 @@ namespace smol::renderer::imgui
                         ctx.vertex_mapped[cur_frame] = vma_alloc_info.pMappedData;
                         ctx.vertex_buffer_size[cur_frame] = vertex_size + 5000;
 
-                        if (ctx.vertex_buffer_bindless_id[cur_frame] == BINDLESS_NULL_HANDLE)
+                        if (ctx.vertex_buffer_bindless_id[cur_frame] == renderer::BINDLESS_NULL_HANDLE)
                         {
-                            ctx.vertex_buffer_bindless_id[cur_frame] = res_system.buffer_heap.acquire();
+                            ctx.vertex_buffer_bindless_id[cur_frame] = renderer::res_system.buffer_heap.acquire();
                         }
 
                         VkDescriptorBufferInfo dbi = {ctx.vertex_buffer[cur_frame], 0, VK_WHOLE_SIZE};
                         VkWriteDescriptorSet write_desc = {
                             .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                            .dstSet = res_system.global_set,
-                            .dstBinding = STORAGE_BUFFERS_BINDING_POINT,
+                            .dstSet = renderer::res_system.global_set,
+                            .dstBinding = renderer::STORAGE_BUFFERS_BINDING_POINT,
                             .dstArrayElement = ctx.vertex_buffer_bindless_id[cur_frame],
                             .descriptorCount = 1,
                             .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
@@ -330,11 +325,11 @@ namespace smol::renderer::imgui
                     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.shader->pipeline);
 
                     vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.shader->pipeline_layout, 0, 1,
-                                            &res_system.global_set, 0, nullptr);
+                                            &renderer::res_system.global_set, 0, nullptr);
 
                     vkCmdBindIndexBuffer(cmd, ctx.index_buffer[cur_frame], 0, VK_INDEX_TYPE_UINT32);
 
-                    push_constants_t pc = {
+                    renderer::push_constants_t pc = {
                         .global_buffer_id = renderer::ctx.per_frame_objects[renderer::ctx.cur_frame].global_bindless_id,
                         .material_buffer_id = renderer::res_system.material_heap.bindless_id,
                         .custom_data = ctx.material->heap_offset[cur_frame],
@@ -376,7 +371,7 @@ namespace smol::renderer::imgui
                             pc.object_buffer_id = (u32_t)(intptr_t)cmd_ptr->GetTexID() - 1;
                             vkCmdPushConstants(cmd, ctx.shader->pipeline_layout,
                                                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-                                               sizeof(push_constants_t), &pc);
+                                               sizeof(renderer::push_constants_t), &pc);
                             vkCmdDrawIndexed(cmd, cmd_ptr->ElemCount, 1, cmd_ptr->IdxOffset + global_index_offset, 0,
                                              0);
                         }
@@ -389,7 +384,7 @@ namespace smol::renderer::imgui
 
     void shutdown()
     {
-        for (size_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+        for (size_t i = 0; i < renderer::MAX_FRAMES_IN_FLIGHT; i++)
         {
             if (ctx.vertex_buffer[i])
             {
@@ -401,18 +396,18 @@ namespace smol::renderer::imgui
                 vmaDestroyBuffer(renderer::ctx.allocator, ctx.index_buffer[i], ctx.index_alloc[i]);
             }
 
-            if (ctx.vertex_buffer_bindless_id[i] != BINDLESS_NULL_HANDLE)
+            if (ctx.vertex_buffer_bindless_id[i] != renderer::BINDLESS_NULL_HANDLE)
             {
-                res_system.buffer_heap.release(ctx.vertex_buffer_bindless_id[i]);
+                renderer::res_system.buffer_heap.release(ctx.vertex_buffer_bindless_id[i]);
             }
         }
 
         if (ctx.font_view) { vkDestroyImageView(renderer::ctx.device, ctx.font_view, nullptr); }
         if (ctx.font_image) { vmaDestroyImage(renderer::ctx.allocator, ctx.font_image, ctx.font_alloc); }
 
-        if (ctx.font_tex_bindless_id != BINDLESS_NULL_HANDLE)
+        if (ctx.font_tex_bindless_id != renderer::BINDLESS_NULL_HANDLE)
         {
-            res_system.texture_heap.release(ctx.font_tex_bindless_id);
+            renderer::res_system.texture_heap.release(ctx.font_tex_bindless_id);
         }
 
         ctx.material.release();
@@ -420,4 +415,4 @@ namespace smol::renderer::imgui
     }
 
     void submit(ImDrawData* draw_data) { ctx.draw_data = draw_data; }
-} // namespace smol::renderer::imgui
+} // namespace smol::editor::imgui

@@ -1,13 +1,10 @@
 #include "engine.h"
 
-#include "imgui/imgui.h"
-#include "imgui/imgui_impl_sdl3.h"
 #include "smol/asset_registry.h"
 #include "smol/defines.h"
 #include "smol/input.h"
 #include "smol/jobs.h"
 #include "smol/log.h"
-#include "smol/rendering/imgui_backend.h"
 #include "smol/rendering/renderer.h"
 #include "smol/rendering/renderer_types.h"
 #include "smol/systems/camera.h"
@@ -43,6 +40,9 @@ namespace smol::engine
         std::unique_ptr<world_t> active_scene;
         asset_registry_t engine_assets;
         bool is_running = true;
+
+        event_callback_t user_event_cb;
+        ui_callback_t user_ui_cb;
     } // namespace
 
     bool init(const std::string& game_name, i32 init_window_width, i32 init_window_height)
@@ -59,7 +59,11 @@ namespace smol::engine
 
         smol::input::detail::init();
 
-        if (volkInitialize() != VK_SUCCESS) {}
+        if (volkInitialize() != VK_SUCCESS)
+        {
+            SMOL_LOG_FATAL("ENGINE", "volk initialization failed");
+            return false;
+        }
 
         SDL_Window* window = SDL_CreateWindow(game_name.c_str(), init_window_width, init_window_height,
                                               SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
@@ -81,10 +85,6 @@ namespace smol::engine
             SMOL_LOG_FATAL("ENGINE", "Failed to initialize renderer, aborting...");
             return false;
         }
-
-        ImGui::CreateContext();
-        ImGui_ImplSDL3_InitForVulkan(window);
-        smol::renderer::imgui::init();
 
         return true;
     }
@@ -111,6 +111,9 @@ namespace smol::engine
             static SDL_Event event;
             while (SDL_PollEvent(&event))
             {
+                bool handled_by_user = false;
+                if (user_event_cb) { handled_by_user = user_event_cb(event); }
+
                 switch (event.type)
                 {
                 case SDL_EVENT_QUIT: is_running = false; break;
@@ -120,8 +123,7 @@ namespace smol::engine
                 default: break;
                 }
 
-                smol::input::detail::process(event);
-                ImGui_ImplSDL3_ProcessEvent(&event);
+                if (!handled_by_user) { smol::input::detail::process(event); }
             }
 
             while (accumulator >= fixed_timestep)
@@ -135,6 +137,8 @@ namespace smol::engine
 
             smol::transform_system::update(active_scene->registry);
             smol::camera_system::update(active_scene->registry);
+
+            if (user_ui_cb) { user_ui_cb(); }
 
             smol::renderer::render(active_scene->registry);
 
@@ -155,10 +159,6 @@ namespace smol::engine
             active_scene->shutdown();
             active_scene.reset();
         }
-
-        smol::renderer::imgui::shutdown();
-        ImGui_ImplSDL3_Shutdown();
-        ImGui::DestroyContext();
 
         smol::renderer::reset_assets();
         engine_assets.shutdown();
@@ -197,4 +197,7 @@ namespace smol::engine
     world_t& get_active_world() { return *active_scene; }
 
     asset_registry_t& get_asset_registry() { return engine_assets; }
+
+    void set_event_callback(event_callback_t cb) { user_event_cb = cb; }
+    void set_ui_callback(ui_callback_t cb) { user_ui_cb = cb; }
 } // namespace smol::engine

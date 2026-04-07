@@ -1073,6 +1073,11 @@ namespace smol::renderer
             };
 
             rendergraph.create_image("ViewportColor", viewport_desc);
+            rendergraph.add_alias("FinalOutput", "ViewportColor");
+        }
+        else
+        {
+            rendergraph.add_alias("FinalOutput", "Swapchain");
         }
 
         for (graph_builder_func_t& feature_builder : custom_renderer_features) { feature_builder(rendergraph, reg); }

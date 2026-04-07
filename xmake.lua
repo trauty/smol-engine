@@ -32,6 +32,14 @@ option("profiling")
     add_defines("TRACY_ENABLE")
 option_end()
 
+option("standalone")
+    set_default(false)
+    set_showmenu(true)
+    set_description("Build static standalone game (no editor)")
+option_end()
+
+local is_standalone = has_config("standalone")
+
 package("slang")
     set_homepage("https://github.com/shader-slang/slang")
     set_description("Slang Shader Language Compiler")
@@ -55,7 +63,7 @@ package("slang")
     end)
 package_end()
 
-add_requires("volk 1.4.*", {system = false, configs = {shared = false}})
+add_requires("volk 1.4.*", {system = false})
 add_requires("vulkan-headers")
 add_requires("libsdl3 3.4.2", {system = false, configs = {shared = false}})
 
@@ -91,7 +99,19 @@ target("smol-interface")
 target_end()
 
 target("smol-engine")
-    set_kind("shared")
+    if is_standalone then 
+        set_kind("static")
+        set_optimize("fastest")
+        set_strip("all")
+        set_policy("build.optimization.lto", true)
+        add_defines("SMOL_STATIC_LINK", {public = true})
+    else 
+        set_kind("shared")
+        if is_plat("linux") then 
+            add_shflags("-Wl,-Bsymbolic")
+        end 
+    end
+
     add_cxflags("-march=x86-64-v3")
     add_options("profiling", {public = true})
 
@@ -101,12 +121,6 @@ target("smol-engine")
         if is_plat("windows") then
             add_defines("_DISABLE_STRING_ANNOTATION", "_DISABLE_VECTOR_ANNOTATION", {public = true})
         end
-    end
-
-    if is_mode("release") then 
-        set_optimize("fastest")
-        set_strip("all")
-        set_policy("build.optimization.lto", true)
     end
 
     add_defines("SMOL_EXPORT", "CGLM_FORCE_LEFT_HANDED")
@@ -143,6 +157,10 @@ target("smol-bin")
     add_defines(format('SMOL_GAME_NAME="%s"', game_name))
 
     add_deps("smol-engine")
+
+    if is_standalone then
+        add_deps("smol-game") 
+    end
 
     add_files("src/smol-bin/**.cpp")
 
@@ -183,10 +201,25 @@ target("smol-bin")
             end
         end)
     end
+
+    on_config(function (target)
+        import("core.project.project")
+
+        local game_target = project.target("smol-game")
+        local game_lib_path = path.absolute(game_target:targetfile())
+
+        game_lib_path = game_lib_path:gsub("\\", "/")
+
+        target:add("defines", "SMOL_LIB_PATH=\"" .. game_lib_path .. "\"")
+    end)
 target_end()
 
 target("smol-cooker")
     set_kind("binary")
+
+    if is_plat("linux") then 
+        add_rpathdirs("@loader_path")
+    end
 
     if is_mode("debug") then
         set_policy("build.sanitizer.address", true)
@@ -222,10 +255,14 @@ target("smol-cooker")
     end)
 target_end()
 
+if not is_standalone then
 target("smol-editor")
     set_kind("binary")
-
     add_cxflags("-march=x86-64-v3")
+
+    if is_plat("linux") then 
+        add_rpathdirs("@loader_path")
+    end
 
     add_defines(format('SMOL_GAME_NAME="%s"', game_name))
 
@@ -260,3 +297,4 @@ target("smol-editor")
         target:add("defines", "SMOL_LIB_PATH=\"" .. game_lib_path .. "\"")
     end)
 target_end()
+end
