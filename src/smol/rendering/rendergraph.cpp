@@ -2,6 +2,7 @@
 
 #include "smol/defines.h"
 #include "smol/log.h"
+#include "smol/profiling.h"
 #include "smol/rendering/renderer.h"
 #include "smol/rendering/renderer_types.h"
 #include "smol/rendering/vulkan.h"
@@ -10,8 +11,9 @@
 #include <cstddef>
 #include <queue>
 #include <string>
-#include <tracy/Tracy.hpp>
-#include <tracy/TracyVulkan.hpp>
+#ifdef SMOL_ENABLE_PROFILING
+    #include <tracy/TracyVulkan.hpp>
+#endif
 #include <unordered_map>
 #include <unordered_set>
 #include <vector>

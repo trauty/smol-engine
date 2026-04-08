@@ -14,6 +14,7 @@
 #include "smol/ecs_fwd.h"
 #include "smol/log.h"
 #include "smol/math.h"
+#include "smol/profiling.h"
 #include "smol/rendering/renderer_resources.h"
 #include "smol/rendering/renderer_types.h"
 #include "smol/rendering/rendergraph.h"
@@ -35,11 +36,11 @@
 #include <cstddef>
 #include <cstdint>
 #include <cstring>
-#include <immintrin.h>
 #include <mutex>
 #include <set>
-#include <tracy/Tracy.hpp>
-#include <tracy/TracyVulkan.hpp>
+#ifdef SMOL_ENABLE_PROFILING
+    #include <tracy/TracyVulkan.hpp>
+#endif
 #include <vector>
 
 namespace smol::renderer
@@ -48,7 +49,9 @@ namespace smol::renderer
     namespace
     {
         const std::vector<const char*> validation_layers = {"VK_LAYER_KHRONOS_validation"};
+#ifdef SMOL_ENABLE_PROFILING
         TracyVkCtx tracy_vk_ctx = nullptr;
+#endif
 
         rendergraph_t rendergraph;
         std::vector<graph_builder_func_t> custom_renderer_features;

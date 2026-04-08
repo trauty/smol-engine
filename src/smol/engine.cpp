@@ -5,6 +5,7 @@
 #include "smol/input.h"
 #include "smol/jobs.h"
 #include "smol/log.h"
+#include "smol/profiling.h"
 #include "smol/rendering/renderer.h"
 #include "smol/rendering/renderer_types.h"
 #include "smol/systems/camera.h"
@@ -21,7 +22,6 @@
 #include <SDL3/SDL_init.h>
 #include <SDL3/SDL_video.h>
 #include <SDL3/SDL_vulkan.h>
-#include <tracy/Tracy.hpp>
 #include <memory>
 #include <utility>
 #include <vector>

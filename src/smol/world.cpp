@@ -4,8 +4,8 @@
 #include "smol/ecs_fwd.h"
 #include "smol/physics/physics_sync.h"
 #include "smol/physics/physics_world.h"
+#include "smol/profiling.h"
 #include "smol/systems/transform.h"
-#include "tracy/Tracy.hpp"
 
 namespace smol
 {

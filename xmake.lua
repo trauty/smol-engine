@@ -3,6 +3,8 @@ local is_standalone = (os.scriptdir() == os.projectdir())
 local game_name = get_config("game_name") or "smol-engine"
 local game_lib_name = get_config("game_lib_name") or "smol-game"
 
+includes("xmake/rules/*.lua")
+
 if is_standalone then 
     set_project("smol-engine")
     set_version("0.0.1")
@@ -40,6 +42,7 @@ option_end()
 
 local is_standalone = has_config("standalone")
 
+if not is_plat("android") then
 package("slang")
     set_homepage("https://github.com/shader-slang/slang")
     set_description("Slang Shader Language Compiler")
@@ -63,17 +66,19 @@ package("slang")
     end)
 package_end()
 
-add_requires("volk 1.4.*", {system = false})
+add_requires("slang " .. slang_version)
+end
+
 add_requires("vulkan-headers")
-add_requires("libsdl3 3.4.2", {system = false, configs = {shared = false}})
+add_requires("libsdl3 3.4.2", {system = false, configs = {shared = is_plat("android")}})
 
 add_requires("joltphysics 5.5.0", 
     {
         system = false, 
         configs = {
             shared = false,
-            cxflags = "-march=x86-64-v3",
-            rtti = false
+            cxflags = is_arch("x86_64", "x64") and "-march=x86-64-v3" or nil,
+            rtti = is_plat("android")
         }
     }
 )
@@ -81,8 +86,10 @@ add_requires("joltphysics 5.5.0",
 add_requires("cglm 0.9.6", {system = false, configs = {shared = false}})
 add_requires("fmt 12.1.0", {system = false, configs = {shared = false}})
 add_requires("entt 3.16.0", {system = false, configs = {shared = false}})
-add_requires("tracy 0.13.1", {system = false, configs = {shared = false}})
-add_requires("slang " .. slang_version)
+
+if has_config("profiling") then 
+    add_requires("tracy 0.13.1", {system = false, configs = {shared = false}})
+end
 
 add_requires("meshoptimizer 1.0.1", {system = false, configs = {shared = false}})
 add_requires("ktx 4.4.2", {system = false, configs = {shared = false}})
@@ -91,11 +98,12 @@ target("smol-interface")
     set_kind("headeronly")
     
     add_includedirs("include", {public = true})
+    add_includedirs("include/volk", {public = true})
     add_includedirs("src", {public = true})
     
     add_defines("CGLM_FORCE_LEFT_HANDED", {public = true})
     
-    add_packages("volk", "libsdl3", "cglm", "fmt", "entt", {public = true})
+    add_packages("libsdl3", "cglm", "fmt", "entt", {public = true})
 target_end()
 
 target("smol-engine")
@@ -103,8 +111,14 @@ target("smol-engine")
         set_kind("static")
         set_optimize("fastest")
         set_strip("all")
-        set_policy("build.optimization.lto", true)
+        if not is_plat("android") then
+            set_policy("build.optimization.lto", true)
+        end
         add_defines("SMOL_STATIC_LINK", {public = true})
+
+        if is_plat("android") then
+            add_cxflags("-fPIC", {force = true})
+        end
     else 
         set_kind("shared")
         if is_plat("linux") then 
@@ -112,11 +126,16 @@ target("smol-engine")
         end 
     end
 
-    add_cxflags("-march=x86-64-v3")
+    if is_arch("x86_64", "x64") then
+        add_cxflags("-march=x86-64-v3")
+    end
+
     add_options("profiling", {public = true})
 
     if is_mode("debug") then
-        set_policy("build.sanitizer.address", true)
+        if not is_plat("android") then
+            set_policy("build.sanitizer.address", true)
+        end
 
         if is_plat("windows") then
             add_defines("_DISABLE_STRING_ANNOTATION", "_DISABLE_VECTOR_ANNOTATION", {public = true})
@@ -129,12 +148,20 @@ target("smol-engine")
 
     add_packages("joltphysics", {public = true})
     add_undefines("JPH_FLOATING_POINT_EXCEPTIONS_ENABLED")
-    add_packages("tracy", {public = true})
     add_packages("ktx", {public = true})
+
+    if has_config("profiling") then
+        add_packages("tracy", {public = true})
+    end
+
+    if not is_plat("windows") then
+        add_syslinks("dl")
+    end
 
     add_files("src/smol/**.cpp")
     add_files("lib/vma/vk_mem_alloc.cpp", {warnings = "none"})
     add_files("lib/imgui/**.cpp", {warnings = "none"})
+    add_files("lib/volk/volk.c", {warnings = "none"})
 
     add_includedirs("include", {public = true})
     add_includedirs("include/imgui", {public = true})
@@ -142,12 +169,24 @@ target("smol-engine")
 target_end()
 
 target("smol-bin")
-    set_kind("binary")
-    set_basename(game_name)
-    add_cxflags("-march=x86-64-v3")
+    if is_plat("android") then
+        set_kind("shared")
+        add_packages("libsdl3")
+        add_rules("smol.android.apk")
+        set_basename("main")
+    else
+        set_kind("binary")
+        set_basename(game_name)
+    end
+    
+    if is_arch("x86_64", "x64") then
+        add_cxflags("-march=x86-64-v3")
+    end
 
     if is_mode("debug") then
-        set_policy("build.sanitizer.address", true)
+        if not is_plat("android") then
+            set_policy("build.sanitizer.address", true)
+        end
 
         if is_plat("windows") then
             add_defines("_DISABLE_STRING_ANNOTATION", "_DISABLE_VECTOR_ANNOTATION", {public = true})
@@ -214,6 +253,7 @@ target("smol-bin")
     end)
 target_end()
 
+if not is_plat("android") then
 target("smol-cooker")
     set_kind("binary")
 
@@ -254,11 +294,15 @@ target("smol-cooker")
         end  
     end)
 target_end()
+end
 
 if not is_standalone then
 target("smol-editor")
     set_kind("binary")
-    add_cxflags("-march=x86-64-v3")
+
+    if is_arch("x86_64", "x64") then
+        add_cxflags("-march=x86-64-v3")
+    end
 
     if is_plat("linux") then 
         add_rpathdirs("@loader_path")

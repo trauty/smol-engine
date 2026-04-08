@@ -9,7 +9,7 @@
 #include "smol/ecs_fwd.h"
 #include "smol/log.h"
 #include "smol/math.h"
-#include "tracy/Tracy.hpp"
+#include "smol/profiling.h"
 
 #include <vector>
 

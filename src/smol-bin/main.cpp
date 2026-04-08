@@ -3,6 +3,8 @@
 #include "smol/game.h"
 #include "smol/world.h"
 
+#include <SDL3/SDL_main.h>
+
 #ifdef SMOL_STATIC_LINK
 extern "C" void smol_game_init(smol::world_t* world);
 extern "C" void smol_game_update(smol::world_t* world);
@@ -23,7 +25,7 @@ smol::os::lib_handle_t game_lib = nullptr;
 
 #endif
 
-int main()
+int main(int argc, char* argv[])
 {
     if (!smol::engine::init(SMOL_GAME_NAME, 1280, 720)) { return -1; }
 
@@ -82,4 +84,6 @@ int main()
 #endif
 
     smol::engine::shutdown();
+
+    return 0;
 }
