@@ -24,6 +24,10 @@
     #include <wtypes.h>
 #endif
 
+#ifdef SMOL_PLATFORM_ANDROID
+    #include <android/log.h>
+#endif
+
 namespace smol::log
 {
     namespace
@@ -32,6 +36,11 @@ namespace smol::log
         {
             std::string text;
             bool to_console;
+
+#ifdef SMOL_PLATFORM_ANDROID
+            level_e level;
+            std::string clean_text;
+#endif
         };
 
         level_e crt_level = level_e::LOG_INFO;
@@ -118,6 +127,22 @@ namespace smol::log
             SetConsoleMode(h_out, dw_mode);
         }
 #endif
+
+#if SMOL_PLATFORM_ANDROID
+        android_LogPriority get_android_log_level(level_e level)
+        {
+            switch (level)
+            {
+            case level_e::LOG_TRACE: return ANDROID_LOG_VERBOSE;
+            case level_e::LOG_DEBUG: return ANDROID_LOG_DEBUG;
+            case level_e::LOG_INFO: return ANDROID_LOG_INFO;
+            case level_e::LOG_WARN: return ANDROID_LOG_WARN;
+            case level_e::LOG_ERROR: return ANDROID_LOG_ERROR;
+            case level_e::LOG_FATAL: return ANDROID_LOG_FATAL;
+            default: return ANDROID_LOG_DEFAULT;
+            }
+        }
+#endif
     } // namespace
 
     void set_level(level_e level) { crt_level = level; }
@@ -147,10 +172,14 @@ namespace smol::log
 
         if (level == level_e::LOG_FATAL)
         {
+#ifdef SMOL_PLATFORM_ANDROID
+            std::string clean_msg = fmt::format("[{}] {}", category, msg);
+            __android_log_print(get_android_log_level(level), "SmolEngine", "%s", clean_msg.c_str());
+#else
             std::string console_msg =
                 ansi_level_colors[(u8)level] + format_line(level, category, msg, false) + ansi_color_reset;
             std::cout << console_msg << std::endl;
-
+#endif
             if (log_file.is_open())
             {
                 std::string file_msg = format_line(level, category, msg, true);
@@ -162,8 +191,17 @@ namespace smol::log
 
         {
             const std::lock_guard<std::mutex> lock(queue_mutex);
-            msg_queue.push(
-                {ansi_level_colors[(u8)level] + format_line(level, category, msg, false) + ansi_color_reset, true});
+            log_msg_t console_msg;
+            console_msg.text =
+                ansi_level_colors[(u8)level] + format_line(level, category, msg, false) + ansi_color_reset;
+            console_msg.to_console = true;
+
+#ifdef SMOL_PLATFORM_ANDROID
+            console_msg.level = level;
+            console_msg.clean_text = fmt::format("[{}] {}", category, msg);
+#endif
+            msg_queue.push(console_msg);
+
             if (log_file.is_open()) { msg_queue.push({format_line(level, category, msg, true), false}); }
         }
 
@@ -200,7 +238,12 @@ namespace smol::log
 
                         if (msg.to_console)
                         {
+#ifdef SMOL_PLATFORM_ANDROID
+                            __android_log_print(get_android_log_level(msg.level), "smol-engine", "%s",
+                                                msg.clean_text.c_str());
+#else
                             std::cout << msg.text << "\n";
+#endif
                             continue;
                         }
 

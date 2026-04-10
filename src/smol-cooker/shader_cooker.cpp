@@ -4,7 +4,6 @@
 #include "smol/assets/shader_format.h"
 #include "smol/hash.h"
 #include "smol/log.h"
-#include "vulkan/vulkan_core.h"
 
 #include <algorithm>
 #include <cctype>
@@ -301,9 +300,28 @@ namespace smol::cooker::shader
         session_desc.searchPaths = include_paths.data();
         session_desc.searchPathCount = include_paths.size();
 
+        std::vector<slang::CompilerOptionEntry> compiler_options;
+
+        auto add_int_option = [&](slang::CompilerOptionName name, int32_t val)
+        {
+            slang::CompilerOptionEntry entry = {};
+            entry.name = name;
+            entry.value.kind = slang::CompilerOptionValueKind::Int;
+            entry.value.intValue0 = val;
+            compiler_options.push_back(entry);
+        };
+
+        add_int_option(slang::CompilerOptionName::EmitSpirvDirectly, 1);
+        add_int_option(slang::CompilerOptionName::Optimization, 3);
+
+        SlangCapabilityID spirv15_cap = global_session->findCapability("spirv_1_5");
+        if (spirv15_cap != 0) { add_int_option(slang::CompilerOptionName::Capability, spirv15_cap); }
+
         slang::TargetDesc target_descs[1] = {};
         target_descs[0].format = SLANG_SPIRV;
-        target_descs[0].profile = global_session->findProfile("sm_6_2");
+        target_descs[0].profile = global_session->findProfile("sm_6_6");
+        target_descs[0].compilerOptionEntryCount = compiler_options.size();
+        target_descs[0].compilerOptionEntries = compiler_options.data();
         session_desc.targets = target_descs;
         session_desc.targetCount = 1;
 

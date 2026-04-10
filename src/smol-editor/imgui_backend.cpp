@@ -53,7 +53,7 @@ namespace smol::editor::imgui
             ctx.vertex_buffer_bindless_id[i] = renderer::BINDLESS_NULL_HANDLE;
         }
 
-        ctx.shader = smol::load_asset_sync<shader_t>("assets/shaders/imgui.slang");
+        ctx.shader = smol::load_asset_sync<shader_t>("engine://assets/shaders/imgui.slang");
         renderer::register_custom_shader(ctx.shader);
 
         ctx.material = smol::load_asset_sync<material_t>("imgui_mat", "ImGuiShader");

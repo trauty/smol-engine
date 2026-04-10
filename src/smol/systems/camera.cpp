@@ -8,7 +8,6 @@
 #include "smol/components/transform.h"
 #include "smol/math.h"
 #include "smol/rendering/renderer.h"
-#include "smol/window.h"
 
 namespace smol::camera_system
 {
@@ -29,33 +28,24 @@ namespace smol::camera_system
 
     void update(ecs::registry_t& reg)
     {
-        static u32_t last_width = 0;
-        static u32_t last_height = 0;
-
         u32_t cur_width = smol::renderer::ctx.render_extent.width;
         u32_t cur_height = smol::renderer::ctx.render_extent.height;
 
-        if (cur_width > 0 && cur_height > 0 && (cur_width != last_width || cur_height != last_height))
-        {
-            last_width = cur_width;
-            last_height = cur_height;
+        if (cur_width == 0 || cur_height == 0) { return; }
 
-            f32 new_aspect = static_cast<f32>(cur_width) / static_cast<f32>(cur_height);
-
-            for (auto [entity, cam] : reg.view<camera_t>().each())
-            {
-                cam.aspect = new_aspect;
-                cam.is_dirty = true;
-            }
-        }
+        f32 cur_aspect = static_cast<f32>(cur_width) / static_cast<f32>(cur_height);
 
         for (auto [entity, cam, transform] : reg.view<camera_t, transform_t>().each())
         {
+            if (std::abs(cam.aspect - cur_aspect) > 0.001f)
+            {
+                cam.aspect = cur_aspect;
+                cam.is_dirty = true;
+            }
+
             if (cam.is_dirty)
             {
                 glm_perspective_lh_zo(glm_rad(cam.fov_deg), cam.aspect, cam.near_plane, cam.far_plane, cam.projection);
-
-                cam.projection[1][1] *= -1.0f;
                 cam.is_dirty = false;
             }
 

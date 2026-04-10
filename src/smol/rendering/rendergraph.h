@@ -3,7 +3,6 @@
 #include "smol/defines.h"
 #include "smol/ecs_fwd.h"
 #include "smol/rendering/renderer_types.h"
-#include "vulkan/vulkan_core.h"
 
 #include <functional>
 #include <string>

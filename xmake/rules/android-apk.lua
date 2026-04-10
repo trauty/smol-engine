@@ -61,6 +61,18 @@ after_build(function(target)
     local sdl_dir = target:pkg("libsdl3"):installdir()
     os.cp(path.join(sdl_dir, "lib/libSDL3.so"), path.join(work_dir, "lib/arm64-v8a/"))
 
+    if is_mode("debug") then
+        local validation_layer = path.join(ndk_dir,
+            "sources/third_party/vulkan/arm64-v8a/libVkLayer_khronos_validation.so")
+
+        if os.isfile(validation_layer) then
+            os.cp(validation_layer, path.join(work_dir, "lib/arm64-v8a/"))
+            print("Injected Vulkan Validation Layer into APK (Debug Mode)")
+        else
+            print("Warning: Could not find Vulkan validation layer lib at: " .. validation_layer)
+        end
+    end
+
     if os.isdir(assets_dir) then
         os.cp(path.join(assets_dir, "*"), path.join(work_dir, "assets/"))
     else

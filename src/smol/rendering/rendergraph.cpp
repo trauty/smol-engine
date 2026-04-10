@@ -6,7 +6,6 @@
 #include "smol/rendering/renderer.h"
 #include "smol/rendering/renderer_types.h"
 #include "smol/rendering/vulkan.h"
-#include "vulkan/vulkan_core.h"
 
 #include <cstddef>
 #include <queue>
@@ -270,8 +269,10 @@ namespace smol::renderer
                 vkCmdBeginRendering(cmd, &rendering_info);
 
                 VkViewport vp = {
+                    .x = 0.0f,
+                    .y = static_cast<f32>(render_height),
                     .width = static_cast<f32>(render_width),
-                    .height = static_cast<f32>(render_height),
+                    .height = -static_cast<f32>(render_height),
                     .minDepth = 0.0f,
                     .maxDepth = 1.0f,
                 };

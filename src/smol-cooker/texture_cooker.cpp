@@ -1,15 +1,20 @@
 #include "texture_cooker.h"
 
+#include "smol/defines.h"
 #include "smol/log.h"
-#include "vulkan/vulkan_core.h"
+#include "smol/rendering/vulkan.h"
 
 #include <algorithm>
+#include <cmath>
+#include <cstring>
 #include <filesystem>
 #include <fstream>
 #include <json/json.hpp>
 #include <ktx.h>
 #include <stb/stb_image.h>
+#include <stb/stb_image_resize2.h>
 #include <string>
+#include <vector>
 
 namespace smol::cooker::texture
 {
@@ -61,6 +66,8 @@ namespace smol::cooker::texture
             return;
         }
 
+        u32_t mip_count = static_cast<u32_t>(std::floor(std::log2(std::max(width, height)))) + 1;
+
         ktxTexture2* tex;
         ktxTextureCreateInfo tex_create_info = {
             .vkFormat = static_cast<u32_t>(is_srgb ? VK_FORMAT_R8G8B8A8_SRGB : VK_FORMAT_R8G8B8A8_UNORM),
@@ -68,7 +75,7 @@ namespace smol::cooker::texture
             .baseHeight = static_cast<u32_t>(height),
             .baseDepth = 1,
             .numDimensions = 2,
-            .numLevels = 1,
+            .numLevels = mip_count,
             .numLayers = 1,
             .numFaces = 1,
             .isArray = KTX_FALSE,
@@ -80,6 +87,38 @@ namespace smol::cooker::texture
             SMOL_LOG_ERROR("TEXTURE_COOKER", "Failed to create ktx2 texture: {}", input_path);
             stbi_image_free(pixels);
             return;
+        }
+
+        u32_t mip_w = width;
+        u32_t mip_h = height;
+        std::vector<u8_t> cur_mip_data(width * height * 4);
+        std::memcpy(cur_mip_data.data(), pixels, width * height * 4);
+
+        for (u32_t i = 0; i < mip_count; i++)
+        {
+            ktxTexture_SetImageFromMemory(ktxTexture(tex), i, 0, 0, cur_mip_data.data(), mip_w * mip_h * 4);
+
+            if (i < mip_count - 1)
+            {
+                u32_t next_w = std::max(1u, mip_w / 2);
+                u32_t next_h = std::max(1u, mip_h / 2);
+                std::vector<u8_t> next_mip_data(next_w * next_h * 4);
+
+                if (is_srgb)
+                {
+                    stbir_resize_uint8_srgb(cur_mip_data.data(), mip_w, mip_h, 0, next_mip_data.data(), next_w, next_h,
+                                            0, stbir_pixel_layout::STBIR_RGBA);
+                }
+                else
+                {
+                    stbir_resize_uint8_linear(cur_mip_data.data(), mip_w, mip_h, 0, next_mip_data.data(), next_w,
+                                              next_h, 0, stbir_pixel_layout::STBIR_RGBA);
+                }
+
+                cur_mip_data = std::move(next_mip_data);
+                mip_w = next_w;
+                mip_h = next_h;
+            }
         }
 
         ktxTexture_SetImageFromMemory(ktxTexture(tex), 0, 0, 0, pixels, width * height * 4);

@@ -25,20 +25,25 @@ std::string to_lower(std::string s)
 int main(i32 argc, char** argv)
 {
     std::vector<std::string> input_dirs;
+    std::vector<std::string> include_dirs;
     std::string output_dir = ".smol";
 
     for (i32 i = 1; i < argc; i++)
     {
         std::string arg = argv[i];
         if (arg == "-i" && i + 1 < argc) { input_dirs.push_back(argv[++i]); }
+        else if (arg == "-I" && i + 1 < argc) { include_dirs.push_back(argv[++i]); }
         else if (arg == "-o" && i + 1 < argc) { output_dir = argv[++i]; }
     }
 
     if (input_dirs.empty())
     {
-        SMOL_LOG_ERROR("ASSET_COOKER", "usage: smol-cooker -i <dir1> -in <dir2> .... -o <out_dir>");
+        SMOL_LOG_ERROR("ASSET_COOKER", "usage: smol-cooker -i <cook_dir> [-I <include_dir>] -o <out_dir> [--game]");
         return 0;
     }
+
+    std::vector<std::string> all_shader_dirs = input_dirs;
+    all_shader_dirs.insert(all_shader_dirs.end(), include_dirs.begin(), include_dirs.end());
 
     smol::log::init();
     smol::cooker::shader::init();
@@ -53,7 +58,7 @@ int main(i32 argc, char** argv)
     std::vector<std::filesystem::path> core_shader_deps;
     std::unordered_map<std::string, std::vector<std::filesystem::path>> module_deps_by_mode;
 
-    for (const std::string& dir : input_dirs)
+    for (const std::string& dir : all_shader_dirs)
     {
         if (!std::filesystem::exists(dir)) { continue; }
 
@@ -109,7 +114,7 @@ int main(i32 argc, char** argv)
         {
             SMOL_LOG_INFO("SHADER_COOKER", "Cooking uber shader: {} -> {}", mode, out_path);
 
-            std::string source = smol::cooker::shader::generate_uber_shader(mode, input_dirs);
+            std::string source = smol::cooker::shader::generate_uber_shader(mode, all_shader_dirs);
 
             if (source.empty())
             {
@@ -117,8 +122,8 @@ int main(i32 argc, char** argv)
                 continue;
             }
 
-            smol::cooker::shader::slang_compilation_res_t res =
-                smol::cooker::shader::compile_slang_to_spirv("uber_" + mode_lower, pseudo_path, source, input_dirs);
+            smol::cooker::shader::slang_compilation_res_t res = smol::cooker::shader::compile_slang_to_spirv(
+                "uber_" + mode_lower, pseudo_path, source, all_shader_dirs);
 
             if (res.success)
             {
@@ -160,7 +165,7 @@ int main(i32 argc, char** argv)
 
                 if (cache.needs_cooking(out_path.generic_string(), deps))
                 {
-                    smol::cooker::shader::cook_shader(path, out_path.generic_string(), input_dirs);
+                    smol::cooker::shader::cook_shader(path, out_path.generic_string(), all_shader_dirs);
                     cache.update_cache(out_path.generic_string(), deps);
                 }
             }

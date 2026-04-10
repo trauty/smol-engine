@@ -2,7 +2,7 @@
 
 ### Android cheat sheet for Arch Linux
 
-install tooling and SDK
+Install tooling and SDK
 ```bash
 sudo pacman -S android-tools
 yay -S android-ndk android-sdk-cmdline-tools-latest
@@ -20,6 +20,13 @@ keytool -genkeypair -v -keystore debug.keystore -storepass android -alias androi
 xmake configure command:
 ```bash
 xmake f -p android -a arm64-v8a --ndk=/opt/android-ndk -m debug --standalone=y --runtimes=c++_shared
+```
+
+ADB commands:
+```bash
+adb logcat -c
+
+adb logcat | /opt/android-ndk/ndk-stack -sym build/android/arm64-v8a/debug/
 ```
 
 Android build only works on Arch Linux, currently using absolute path to JDK 17.

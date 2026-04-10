@@ -7,6 +7,7 @@
 #include "smol/rendering/renderer_resources.h"
 #include "smol/rendering/renderer_types.h"
 #include "smol/rendering/vulkan.h"
+#include "smol/vfs.h"
 #include "vulkan/vulkan_core.h"
 
 #include <cstddef>
@@ -23,9 +24,16 @@ namespace smol
     {
         std::string cooked_path = get_cooked_path(path, ".ktx2");
 
+        std::vector<u8_t> file_data = smol::vfs::read_bytes(cooked_path);
+        if (file_data.empty())
+        {
+            SMOL_LOG_ERROR("TEXTURE", "Texture not found or empty: {}", cooked_path);
+            return std::nullopt;
+        }
+
         ktxTexture2* k_tex;
-        if (ktxTexture_CreateFromNamedFile(cooked_path.c_str(), KTX_TEXTURE_CREATE_NO_FLAGS, (ktxTexture**)&k_tex) !=
-            KTX_SUCCESS)
+        if (ktxTexture_CreateFromMemory((ktx_uint8_t*)file_data.data(), file_data.size(), KTX_TEXTURE_CREATE_NO_FLAGS,
+                                        (ktxTexture**)&k_tex) != KTX_SUCCESS)
         {
             SMOL_LOG_ERROR("TEXTURE", "Texture not found: {}", cooked_path);
             return std::nullopt;
@@ -43,6 +51,10 @@ namespace smol
             ktxHashList_FindValue(&k_tex->kvDataHead, "smol_tex_channels", &chan_len, (void**)&channels);
             i32 num_channels = channels ? std::stoi(channels) : 4;
 
+#ifdef SMOL_PLATFORM_ANDROID
+            ktx_transcode_fmt_e target_format = KTX_TTF_ASTC_4x4_RGBA;
+#else
+
             ktx_transcode_fmt_e target_format = KTX_TTF_BC7_RGBA;
 
             if (type_str == "normal") { target_format = KTX_TTF_BC5_RG; }
@@ -50,6 +62,7 @@ namespace smol
             {
                 if (num_channels == 1) { target_format = KTX_TTF_BC4_R; }
             }
+#endif
 
             if (ktxTexture2_TranscodeBasis(k_tex, target_format, 0) != KTX_SUCCESS)
             {
@@ -149,34 +162,56 @@ namespace smol
         vkCmdPipelineBarrier(cmd_buf, VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT, VK_PIPELINE_STAGE_TRANSFER_BIT, 0, 0, nullptr,
                              0, nullptr, 1, &barrier_to_dst);
 
-        VkBufferImageCopy copy_region = {
-            .bufferOffset = 0,
-            .imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
-                                 .mipLevel = 0,
-                                 .baseArrayLayer = 0,
-                                 .layerCount = 1},
-            .imageExtent = image_info.extent,
-        };
+        std::vector<VkBufferImageCopy> copy_regions;
+        for (u32_t mip = 0; mip < k_tex->numLevels; mip++)
+        {
+            ktx_size_t offset;
+            if (ktxTexture_GetImageOffset(ktxTexture(k_tex), mip, 0, 0, &offset) != KTX_SUCCESS) { continue; }
 
-        vkCmdCopyBufferToImage(cmd_buf, staging_buf, tex.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL, 1, &copy_region);
+            VkBufferImageCopy region = {
+                .bufferOffset = offset,
+                .imageSubresource = {.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT,
+                                     .mipLevel = mip,
+                                     .baseArrayLayer = 0,
+                                     .layerCount = 1},
+                .imageExtent = {.width = std::max(1u, k_tex->baseWidth >> mip),
+                                     .height = std::max(1u, k_tex->baseHeight >> mip),
+                                     .depth = 1}
+            };
+
+            copy_regions.push_back(region);
+        }
+
+        vkCmdCopyBufferToImage(cmd_buf, staging_buf, tex.image, VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
+                               (u32_t)copy_regions.size(), copy_regions.data());
+
+        bool is_same_queue = renderer::ctx.queue_fam_indices.transfer_family.value() ==
+                             renderer::ctx.queue_fam_indices.graphics_family.value();
 
         VkImageMemoryBarrier release_barrier = {
             .sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER,
             .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-            .dstAccessMask = 0,
+            .dstAccessMask = is_same_queue ? (VkAccessFlags)VK_ACCESS_SHADER_READ_BIT : (VkAccessFlags)0,
             .oldLayout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL,
             .newLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL,
-            .srcQueueFamilyIndex = renderer::ctx.queue_fam_indices.transfer_family.value(),
-            .dstQueueFamilyIndex = renderer::ctx.queue_fam_indices.graphics_family.value(),
+            .srcQueueFamilyIndex =
+                is_same_queue ? VK_QUEUE_FAMILY_IGNORED : renderer::ctx.queue_fam_indices.transfer_family.value(),
+            .dstQueueFamilyIndex =
+                is_same_queue ? VK_QUEUE_FAMILY_IGNORED : renderer::ctx.queue_fam_indices.graphics_family.value(),
             .image = tex.image,
             .subresourceRange = view_info.subresourceRange,
         };
 
-        vkCmdPipelineBarrier(cmd_buf, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0,
-                             nullptr, 0, nullptr, 1, &release_barrier);
+        VkPipelineStageFlags dst_stage =
+            is_same_queue ? (VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT)
+                          : VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+
+        vkCmdPipelineBarrier(cmd_buf, VK_PIPELINE_STAGE_TRANSFER_BIT, dst_stage, 0, 0, nullptr, 0, nullptr, 1,
+                             &release_barrier);
 
         u64_t signal_value = renderer::submit_transfer_commands(cmd_buf);
 
+        if (!is_same_queue)
         {
             std::scoped_lock lock(renderer::res_system.pending_mutex);
             VkImageMemoryBarrier acquire_barrier = release_barrier;

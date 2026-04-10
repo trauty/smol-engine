@@ -9,6 +9,9 @@ public RWTexture2D<float4> global_storage_images[];
 [[vk::binding(3, 0)]]
 public RWByteAddressBuffer global_buffers[];
 
+[[vk::binding(0, 1)]]
+public RWStructuredBuffer<uint> global_draw_counts;
+
 public Texture2D getTexture(uint id) { return global_textures[NonUniformResourceIndex(id)]; }
 public SamplerState getSampler(uint id) { return global_samplers[NonUniformResourceIndex(id)]; }
 public RWByteAddressBuffer getBuffer(uint id) { return global_buffers[NonUniformResourceIndex(id)]; }
@@ -53,9 +56,9 @@ public struct GlobalData
     public uint spot_light_buffer_id;
     public uint spot_light_count;
 
-    public uint indirect_buffer_ids[5];
-    public uint draw_count_ids[5];
     public uint object_count;
+
+    public uint indirect_buffer_ids[5];
 };
 
 public struct PushConstants
@@ -69,31 +72,31 @@ public struct PushConstants
 [[vk::push_constant]]
 public ConstantBuffer<PushConstants> pc;
 
-public GlobalData getGlobalData() { return global_buffers[pc.global_buffer_id].Load<GlobalData>(0); }
+public GlobalData getGlobalData() { return getBuffer(pc.global_buffer_id).Load<GlobalData>(0); }
 
 public ObjectData getObjectData(uint object_id)
 {
     uint byte_offset = object_id * sizeof(ObjectData);
-    return global_buffers[pc.object_buffer_id].Load<ObjectData>(byte_offset);
+    return getBuffer(pc.object_buffer_id).Load<ObjectData>(byte_offset);
 }
 
 public Vertex getVertex(uint vertex_buffer_id, uint vertex_id)
 {
     uint byte_offset = vertex_id * sizeof(Vertex);
-    return global_buffers[vertex_buffer_id].Load<Vertex>(byte_offset);
+    return getBuffer(vertex_buffer_id).Load<Vertex>(byte_offset);
 }
 
 public Vertex getIndexedVertex(uint vertex_buffer_id, uint index_buffer_id, uint vertex_id)
 {
     uint index_byte_offset = vertex_id * 4;
-    uint actual_vertex_index = global_buffers[index_buffer_id].Load<uint>(index_byte_offset);
+    uint actual_vertex_index = getBuffer(index_buffer_id).Load<uint>(index_byte_offset);
 
     uint vertex_byte_offset = actual_vertex_index * sizeof(Vertex);
-    return global_buffers[vertex_buffer_id].Load<Vertex>(vertex_byte_offset);
+    return getBuffer(vertex_buffer_id).Load<Vertex>(vertex_byte_offset);
 }
 
 public T getMaterial<T>(uint material_buffer_id, uint byte_offset)
-{ return global_buffers[material_buffer_id].Load<T>(byte_offset); }
+{ return getBuffer(material_buffer_id).Load<T>(byte_offset); }
 
 [__AttributeUsage(_AttributeTargets.Struct)]
 public struct ShaderConfigAttribute

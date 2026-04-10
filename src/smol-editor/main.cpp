@@ -10,6 +10,7 @@
 #include "smol/rendering/renderer.h"
 #include "smol/rendering/renderer_types.h"
 #include "smol/rendering/vulkan.h"
+#include "smol/vfs.h"
 #include "smol/window.h"
 #include "smol/world.h"
 
@@ -232,6 +233,9 @@ int main(i32 argc, char** argv)
     }
 
     if (!smol::engine::init("smol-editor", 1280, 720)) { return -1; }
+
+    smol::vfs::mount("engine://assets/", project_file_path.parent_path().generic_string() + "/.smol/engine/");
+    smol::vfs::mount("game://assets/", project_file_path.parent_path().generic_string() + "/.smol/game/");
 
     volkInitialize();
     volkLoadInstance(smol::renderer::ctx.instance);

@@ -3,7 +3,6 @@
 #include "smol/rendering/renderer.h"
 #include "smol/rendering/renderer_resources.h"
 #include "smol/rendering/vulkan.h"
-#include "vulkan/vulkan_core.h"
 
 namespace smol::renderer
 {

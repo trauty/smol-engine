@@ -8,9 +8,10 @@
 #include "smol/rendering/renderer_resources.h"
 #include "smol/rendering/renderer_types.h"
 #include "smol/rendering/vulkan.h"
+#include "smol/vfs.h"
 #include "vulkan/vulkan_core.h"
 
-#include <fstream>
+#include <SDL3/SDL_iostream.h>
 #include <mutex>
 #include <optional>
 #include <string>
@@ -20,7 +21,6 @@ namespace smol
 {
     namespace
     {
-
         VkShaderModule create_shader_module(const std::vector<u32_t>& code)
         {
             VkShaderModuleCreateInfo shader_module_info = {VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO};
@@ -36,22 +36,21 @@ namespace smol
 
             return module;
         }
-
     } // namespace
 
     std::optional<shader_t> smol::asset_loader_t<shader_t>::load(const std::string& path)
     {
         std::string cooked_path = get_cooked_path(path, ".smolshader");
 
-        std::ifstream file(cooked_path, std::ios::binary);
-        if (!file.is_open())
+        SDL_IOStream* stream = smol::vfs::open_read(cooked_path);
+        if (!stream)
         {
             SMOL_LOG_ERROR("SHADER", "Shader not found: {}", cooked_path);
             return std::nullopt;
         }
 
         shader_header_t header;
-        file.read(reinterpret_cast<char*>(&header), sizeof(shader_header_t));
+        SDL_ReadIO(stream, &header, sizeof(shader_header_t));
 
         if (header.magic != SMOL_SHADER_MAGIC)
         {
@@ -63,7 +62,7 @@ namespace smol
         shader.is_compute = header.is_compute;
 
         shader.target_formats.resize(header.target_format_count);
-        file.read(reinterpret_cast<char*>(shader.target_formats.data()), header.target_format_count * sizeof(VkFormat));
+        SDL_ReadIO(stream, shader.target_formats.data(), header.target_format_count * sizeof(VkFormat));
 
         for (VkFormat& format : shader.target_formats)
         {
@@ -73,7 +72,7 @@ namespace smol
         for (u32_t i = 0; i < header.module_count; i++)
         {
             shader_module_header_t mod_header;
-            file.read(reinterpret_cast<char*>(&mod_header), sizeof(shader_module_header_t));
+            SDL_ReadIO(stream, &mod_header, sizeof(shader_module_header_t));
 
             shader_module_info_t info = {
                 .name = mod_header.name,
@@ -87,7 +86,7 @@ namespace smol
             for (u32_t j = 0; j < mod_header.member_count; j++)
             {
                 shader_member_header_t member_header;
-                file.read(reinterpret_cast<char*>(&member_header), sizeof(shader_member_header_t));
+                SDL_ReadIO(stream, &member_header, sizeof(shader_member_header_t));
                 info.members[member_header.name_hash] = {"", member_header.offset, member_header.size};
             }
 
@@ -98,20 +97,13 @@ namespace smol
         std::vector<u32_t> frag_spirv(header.frag_spirv_size);
         std::vector<u32_t> comp_spirv(header.comp_spirv_size);
 
-        if (header.vert_spirv_size > 0)
-        {
-            file.read(reinterpret_cast<char*>(vert_spirv.data()), header.vert_spirv_size * 4);
-        }
+        if (header.vert_spirv_size > 0) { SDL_ReadIO(stream, vert_spirv.data(), header.vert_spirv_size * 4); }
 
-        if (header.frag_spirv_size > 0)
-        {
-            file.read(reinterpret_cast<char*>(frag_spirv.data()), header.frag_spirv_size * 4);
-        }
+        if (header.frag_spirv_size > 0) { SDL_ReadIO(stream, frag_spirv.data(), header.frag_spirv_size * 4); }
 
-        if (header.comp_spirv_size > 0)
-        {
-            file.read(reinterpret_cast<char*>(comp_spirv.data()), header.comp_spirv_size * 4);
-        }
+        if (header.comp_spirv_size > 0) { SDL_ReadIO(stream, comp_spirv.data(), header.comp_spirv_size * 4); }
+
+        SDL_CloseIO(stream);
 
         VkPipelineColorBlendAttachmentState base_blend = {
             .blendEnable = VK_FALSE,
@@ -234,11 +226,11 @@ namespace smol
             .size = sizeof(renderer::push_constants_t),
         };
 
-        VkDescriptorSetLayout set_layouts[] = {renderer::res_system.global_layout};
+        VkDescriptorSetLayout set_layouts[] = {renderer::res_system.global_layout, renderer::res_system.frame_layout};
 
         VkPipelineLayoutCreateInfo pipeline_layout_info = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-            .setLayoutCount = 1,
+            .setLayoutCount = 2,
             .pSetLayouts = set_layouts,
             .pushConstantRangeCount = 1,
             .pPushConstantRanges = &push_constant,

@@ -2,7 +2,6 @@
 
 #include "smol/defines.h"
 #include "smol/rendering/renderer_types.h"
-#include "vulkan/vulkan_core.h"
 
 #include <deque>
 #include <mutex>
@@ -130,6 +129,8 @@ namespace smol::renderer
         VkDescriptorSetLayout global_layout;
         VkDescriptorPool global_pool;
         VkDescriptorSet global_set;
+
+        VkDescriptorSetLayout frame_layout;
 
         descriptor_heap_t buffer_heap;
         descriptor_heap_t texture_heap;

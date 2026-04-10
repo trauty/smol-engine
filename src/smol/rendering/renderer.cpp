@@ -22,6 +22,7 @@
 #include "smol/rendering/vulkan.h"
 #include "smol/systems/camera.h"
 #include "smol/time.h"
+#include "smol/vfs.h"
 #include "smol/window.h"
 #include "vulkan/vulkan_core.h"
 
@@ -55,6 +56,50 @@ namespace smol::renderer
 
         rendergraph_t rendergraph;
         std::vector<graph_builder_func_t> custom_renderer_features;
+
+        void recreate_surface()
+        {
+            vkDeviceWaitIdle(ctx.device);
+
+            if (ctx.swapchain.handle != VK_NULL_HANDLE)
+            {
+                std::scoped_lock lock(res_system.deletion_mutex);
+                u64_t safe_timeline = ctx.timeline_value;
+
+                for (VkImageView view : ctx.swapchain.views)
+                {
+                    res_system.deletion_queue.push_back({
+                        .type = resource_type_e::IMAGE_VIEW,
+                        .handle = {.image_view = view},
+                        .bindless_id = BINDLESS_NULL_HANDLE,
+                        .gpu_timeline_value = safe_timeline,
+                    });
+                }
+                ctx.swapchain.views.clear();
+
+                res_system.deletion_queue.push_back({
+                    .type = resource_type_e::TEXTURE,
+                    .handle = {.texture = {ctx.swapchain.depth_image, ctx.swapchain.depth_allocation,
+                                           ctx.swapchain.depth_view}},
+                    .bindless_id = BINDLESS_NULL_HANDLE,
+                    .gpu_timeline_value = safe_timeline,
+                });
+
+                vkDestroySwapchainKHR(ctx.device, ctx.swapchain.handle, nullptr);
+                ctx.swapchain.handle = VK_NULL_HANDLE;
+            }
+
+            if (ctx.surface != VK_NULL_HANDLE)
+            {
+                vkDestroySurfaceKHR(ctx.instance, ctx.surface, nullptr);
+                ctx.surface = VK_NULL_HANDLE;
+            }
+
+            if (!SDL_Vulkan_CreateSurface(smol::window::get_window(), ctx.instance, nullptr, &ctx.surface))
+            {
+                SMOL_LOG_WARN("VULKAN", "Failed to recreate Vulkan surface on resume");
+            }
+        }
     } // namespace
 
     void register_renderer_feature(graph_builder_func_t builder) { custom_renderer_features.push_back(builder); }
@@ -85,8 +130,8 @@ namespace smol::renderer
             vkCmdPushConstants(cmd, ctx.opaque_uber_shader->pipeline_layout,
                                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push_constants_t),
                                &pc_data);
-            vkCmdDrawIndirectCount(cmd, frame_data.indirect_buffers[0], 0, frame_data.draw_count_buffers[0], 0,
-                                   frame_data.object_counter, sizeof(VkDrawIndirectCommand));
+            vkCmdDrawIndirectCount(cmd, frame_data.indirect_buffers[0], 0, frame_data.draw_counts_buffer,
+                                   0 * sizeof(u32_t), frame_data.object_counter, sizeof(VkDrawIndirectCommand));
 
             if (ctx.cutout_uber_shader)
             {
@@ -94,8 +139,8 @@ namespace smol::renderer
                 vkCmdPushConstants(cmd, ctx.cutout_uber_shader->pipeline_layout,
                                    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                                    sizeof(push_constants_t), &pc_data);
-                vkCmdDrawIndirectCount(cmd, frame_data.indirect_buffers[1], 0, frame_data.draw_count_buffers[1], 0,
-                                       frame_data.object_counter, sizeof(VkDrawIndirectCommand));
+                vkCmdDrawIndirectCount(cmd, frame_data.indirect_buffers[1], 0, frame_data.draw_counts_buffer,
+                                       1 * sizeof(u32_t), frame_data.object_counter, sizeof(VkDrawIndirectCommand));
             }
 
             if (ctx.transparent_alpha_uber_shader)
@@ -104,8 +149,8 @@ namespace smol::renderer
                 vkCmdPushConstants(cmd, ctx.transparent_alpha_uber_shader->pipeline_layout,
                                    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                                    sizeof(push_constants_t), &pc_data);
-                vkCmdDrawIndirectCount(cmd, frame_data.indirect_buffers[2], 0, frame_data.draw_count_buffers[2], 0,
-                                       frame_data.object_counter, sizeof(VkDrawIndirectCommand));
+                vkCmdDrawIndirectCount(cmd, frame_data.indirect_buffers[2], 0, frame_data.draw_counts_buffer,
+                                       2 * sizeof(u32_t), frame_data.object_counter, sizeof(VkDrawIndirectCommand));
             }
 
             if (ctx.transparent_add_uber_shader)
@@ -114,8 +159,8 @@ namespace smol::renderer
                 vkCmdPushConstants(cmd, ctx.transparent_add_uber_shader->pipeline_layout,
                                    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                                    sizeof(push_constants_t), &pc_data);
-                vkCmdDrawIndirectCount(cmd, frame_data.indirect_buffers[3], 0, frame_data.draw_count_buffers[3], 0,
-                                       frame_data.object_counter, sizeof(VkDrawIndirectCommand));
+                vkCmdDrawIndirectCount(cmd, frame_data.indirect_buffers[3], 0, frame_data.draw_counts_buffer,
+                                       3 * sizeof(u32_t), frame_data.object_counter, sizeof(VkDrawIndirectCommand));
             }
 
             if (ctx.transparent_mult_uber_shader)
@@ -124,8 +169,8 @@ namespace smol::renderer
                 vkCmdPushConstants(cmd, ctx.transparent_mult_uber_shader->pipeline_layout,
                                    VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                                    sizeof(push_constants_t), &pc_data);
-                vkCmdDrawIndirectCount(cmd, frame_data.indirect_buffers[4], 0, frame_data.draw_count_buffers[4], 0,
-                                       frame_data.object_counter, sizeof(VkDrawIndirectCommand));
+                vkCmdDrawIndirectCount(cmd, frame_data.indirect_buffers[4], 0, frame_data.draw_counts_buffer,
+                                       4 * sizeof(u32_t), frame_data.object_counter, sizeof(VkDrawIndirectCommand));
             }
         };
 
@@ -579,25 +624,37 @@ namespace smol::renderer
             }
         };
 
-        ctx.culling_shader = smol::load_asset_sync<shader_t>("assets/shaders/culling.slang");
+        ctx.culling_shader = smol::load_asset_sync<shader_t>("engine://assets/shaders/culling.slang");
 
-        ctx.opaque_uber_shader = smol::load_asset_sync<shader_t>("assets/shaders/uber_opaque.slang");
+        ctx.opaque_uber_shader = smol::load_asset_sync<shader_t>("game://assets/shaders/uber_opaque.slang");
         register_modules(ctx.opaque_uber_shader);
 
-        ctx.cutout_uber_shader = smol::load_asset_sync<shader_t>("assets/shaders/uber_cutout.slang");
-        register_modules(ctx.cutout_uber_shader);
+        if (smol::vfs::exists("game://assets/shaders/uber_cutout.smolshader"))
+        {
+            ctx.cutout_uber_shader = smol::load_asset_sync<shader_t>("game://assets/shaders/uber_cutout.slang");
+            register_modules(ctx.cutout_uber_shader);
+        }
 
-        ctx.transparent_alpha_uber_shader =
-            smol::load_asset_sync<shader_t>("assets/shaders/uber_transparent_alpha.slang");
-        register_modules(ctx.transparent_alpha_uber_shader);
+        if (smol::vfs::exists("game://assets/shaders/uber_transparent_alpha.smolshader"))
+        {
+            ctx.transparent_alpha_uber_shader =
+                smol::load_asset_sync<shader_t>("game://assets/shaders/uber_transparent_alpha.slang");
+            register_modules(ctx.transparent_alpha_uber_shader);
+        }
 
-        ctx.transparent_add_uber_shader = smol::load_asset_sync<shader_t>("assets/shaders/uber_transparent_add.slang");
-        register_modules(ctx.transparent_add_uber_shader);
+        if (smol::vfs::exists("game://assets/shaders/uber_transparent_add.smolshader"))
+        {
+            ctx.transparent_add_uber_shader =
+                smol::load_asset_sync<shader_t>("game://assets/shaders/uber_transparent_add.slang");
+            register_modules(ctx.transparent_add_uber_shader);
+        }
 
-        ctx.transparent_mult_uber_shader =
-            smol::load_asset_sync<shader_t>("assets/shaders/uber_transparent_mult.slang");
-        register_modules(ctx.transparent_mult_uber_shader);
-
+        if (smol::vfs::exists("game://assets/shaders/uber_transparent_mult.smolshader"))
+        {
+            ctx.transparent_mult_uber_shader =
+                smol::load_asset_sync<shader_t>("game://assets/shaders/uber_transparent_mult.slang");
+            register_modules(ctx.transparent_mult_uber_shader);
+        }
         return true;
     }
 
@@ -703,13 +760,17 @@ namespace smol::renderer
         u32_t index;
         VkResult res = acquire_next_image(&index);
 
-        if (res == VK_SUBOPTIMAL_KHR || res == VK_ERROR_OUT_OF_DATE_KHR)
+        if (res == VK_ERROR_SURFACE_LOST_KHR)
+        {
+            recreate_surface();
+            return;
+        }
+        else if (res == VK_SUBOPTIMAL_KHR || res == VK_ERROR_OUT_OF_DATE_KHR)
         {
             resize(ctx.swapchain.extent.width, ctx.swapchain.extent.height);
-            res = acquire_next_image(&index);
+            return;
         }
-
-        if (res != VK_SUCCESS)
+        else if (res != VK_SUCCESS)
         {
             vkQueueWaitIdle(ctx.present_queue);
             return;
@@ -955,23 +1016,22 @@ namespace smol::renderer
         for (u32_t i = 0; i < MAX_BINS; i++)
         {
             frame_data.mapped_global_data->indirect_buffer_ids[i] = frame_data.indirect_bindless_ids[i];
-            frame_data.mapped_global_data->draw_count_ids[i] = frame_data.draw_count_bindless_ids[i];
-
-            vkCmdFillBuffer(cmd, frame_data.draw_count_buffers[i], 0, sizeof(u32_t), 0);
-
-            fill_barriers.push_back({
-                .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
-                .srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-                .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-                .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                .dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT | VK_ACCESS_2_SHADER_WRITE_BIT,
-                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                .buffer = frame_data.draw_count_buffers[i],
-                .offset = 0,
-                .size = sizeof(u32_t),
-            });
         }
+
+        vkCmdFillBuffer(cmd, frame_data.draw_counts_buffer, 0, sizeof(u32_t) * MAX_BINS, 0);
+
+        fill_barriers.push_back({
+            .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+            .srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+            .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+            .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+            .dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+            .buffer = frame_data.draw_counts_buffer,
+            .offset = 0,
+            .size = sizeof(u32_t) * MAX_BINS,
+        });
 
         VkDependencyInfo fill_dep_info = {
             .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
@@ -984,8 +1044,9 @@ namespace smol::renderer
         if (cur_object_id > 0)
         {
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, ctx.culling_shader->pipeline);
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, ctx.culling_shader->pipeline_layout, 0, 1,
-                                    &res_system.global_set, 0, nullptr);
+            VkDescriptorSet sets[] = {res_system.global_set, frame_data.frame_descriptor_set};
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, ctx.culling_shader->pipeline_layout, 0, 2,
+                                    sets, 0, nullptr);
 
             push_constants_t pc_data = {
                 frame_data.global_bindless_id,
@@ -1004,7 +1065,7 @@ namespace smol::renderer
                 indirect_barriers.push_back({
                     .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
                     .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                    .srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT,
+                    .srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
                     .dstStageMask = VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
                     .dstAccessMask = VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT,
                     .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
@@ -1013,20 +1074,20 @@ namespace smol::renderer
                     .offset = 0,
                     .size = sizeof(VkDrawIndirectCommand) * cur_object_id,
                 });
-
-                indirect_barriers.push_back({
-                    .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
-                    .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                    .srcAccessMask = VK_ACCESS_2_SHADER_WRITE_BIT,
-                    .dstStageMask = VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
-                    .dstAccessMask = VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT,
-                    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                    .buffer = frame_data.draw_count_buffers[i],
-                    .offset = 0,
-                    .size = sizeof(u32_t),
-                });
             }
+
+            indirect_barriers.push_back({
+                .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+                .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                .srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                .dstStageMask = VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
+                .dstAccessMask = VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT,
+                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .buffer = frame_data.draw_counts_buffer,
+                .offset = 0,
+                .size = sizeof(u32_t) * MAX_BINS,
+            });
 
             VkDependencyInfo indirect_dep_info = {
                 .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
@@ -1159,7 +1220,8 @@ namespace smol::renderer
 
         res = vkQueuePresentKHR(ctx.present_queue, &present_info);
 
-        if (res == VK_SUBOPTIMAL_KHR || res == VK_ERROR_OUT_OF_DATE_KHR)
+        if (res == VK_ERROR_SURFACE_LOST_KHR) { recreate_surface(); }
+        else if (res == VK_SUBOPTIMAL_KHR || res == VK_ERROR_OUT_OF_DATE_KHR)
         {
             resize(ctx.swapchain.extent.width, ctx.swapchain.extent.height);
         }
@@ -1293,6 +1355,8 @@ namespace smol::renderer
 
     bool resize(const u32_t width, const u32_t height)
     {
+        if (ctx.surface == VK_NULL_HANDLE) { return false; }
+
         VkSurfaceCapabilitiesKHR surface_caps;
         vkGetPhysicalDeviceSurfaceCapabilitiesKHR(ctx.physical_device, ctx.surface, &surface_caps);
 
@@ -1305,6 +1369,8 @@ namespace smol::renderer
 
     void init_swapchain()
     {
+        if (ctx.surface == VK_NULL_HANDLE) { return; }
+
         VkSurfaceCapabilitiesKHR surface_caps;
         vkGetPhysicalDeviceSurfaceCapabilitiesKHR(ctx.physical_device, ctx.surface, &surface_caps);
 
@@ -1334,14 +1400,10 @@ namespace smol::renderer
             desired_swapchain_images = surface_caps.maxImageCount;
         }
 
-        VkSurfaceTransformFlagBitsKHR pre_transform;
+        VkSurfaceTransformFlagBitsKHR pre_transform = surface_caps.currentTransform;
         if (surface_caps.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR)
         {
             pre_transform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
-        }
-        else
-        {
-            pre_transform = surface_caps.currentTransform;
         }
 
         VkSwapchainKHR old_swapchain = ctx.swapchain.handle;
@@ -1518,6 +1580,8 @@ namespace smol::renderer
 
     VkResult acquire_next_image(u32_t* image_index)
     {
+        if (ctx.swapchain.handle == VK_NULL_HANDLE) { return VK_ERROR_OUT_OF_DATE_KHR; }
+
         per_frame_t& frame_data = ctx.per_frame_objects[ctx.cur_frame];
 
         if (frame_data.target_timeline_value > 0)
@@ -1535,7 +1599,10 @@ namespace smol::renderer
         VkResult res = vkAcquireNextImageKHR(ctx.device, ctx.swapchain.handle, UINT64_MAX,
                                              frame_data.swapchain_acquire_semaphore, VK_NULL_HANDLE, image_index);
 
-        if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR) { return res; }
+        if (res == VK_ERROR_OUT_OF_DATE_KHR || res == VK_SUBOPTIMAL_KHR || res == VK_ERROR_SURFACE_LOST_KHR)
+        {
+            return res;
+        }
 
         vkResetCommandPool(ctx.device, frame_data.main_command_pool, 0);
 
@@ -1568,6 +1635,7 @@ namespace smol::renderer
             VmaAllocationCreateInfo alloc_info = {
                 .flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
                 .usage = VMA_MEMORY_USAGE_AUTO,
+                .requiredFlags = VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
             };
 
             VmaAllocationInfo vma_alloc_info;
@@ -1626,12 +1694,49 @@ namespace smol::renderer
                                  VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                                  frame_data.indirect_buffers[i], frame_data.indirect_allocations[i]);
             make_bindless(frame_data.indirect_buffers[i], frame_data.indirect_bindless_ids[i]);
-
-            create_device_buffer(sizeof(u32_t),
-                                 VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                                 frame_data.draw_count_buffers[i], frame_data.draw_count_allocations[i]);
-            make_bindless(frame_data.draw_count_buffers[i], frame_data.draw_count_bindless_ids[i]);
         }
+
+        create_device_buffer(sizeof(u32_t) * MAX_BINS,
+                             VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
+                                 VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                             frame_data.draw_counts_buffer, frame_data.draw_counts_allocation);
+
+        VkDescriptorPoolSize pool_size = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1};
+        VkDescriptorPoolCreateInfo frame_pool_info = {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+            .flags = 0,
+            .maxSets = 1,
+            .poolSizeCount = 1,
+            .pPoolSizes = &pool_size,
+        };
+
+        VK_CHECK(vkCreateDescriptorPool(ctx.device, &frame_pool_info, nullptr, &frame_data.frame_descriptor_pool));
+
+        VkDescriptorSetAllocateInfo frame_set_alloc_info = {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+            .descriptorPool = frame_data.frame_descriptor_pool,
+            .descriptorSetCount = 1,
+            .pSetLayouts = &res_system.frame_layout,
+        };
+
+        VK_CHECK(vkAllocateDescriptorSets(ctx.device, &frame_set_alloc_info, &frame_data.frame_descriptor_set));
+
+        VkDescriptorBufferInfo counts_desc_info = {
+            .buffer = frame_data.draw_counts_buffer,
+            .offset = 0,
+            .range = VK_WHOLE_SIZE,
+        };
+        VkWriteDescriptorSet counts_write_desc = {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = frame_data.frame_descriptor_set,
+            .dstBinding = 0,
+            .dstArrayElement = 0,
+            .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            .pBufferInfo = &counts_desc_info,
+        };
+
+        vkUpdateDescriptorSets(ctx.device, 1, &counts_write_desc, 0, nullptr);
 
         create_mapped_buffer(MAX_MATERIAL_BUFFER_SIZE, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, frame_data.material_buffer,
                              frame_data.material_allocation, (void*&)frame_data.mapped_material_data);
@@ -1697,11 +1802,16 @@ namespace smol::renderer
                 vmaDestroyBuffer(ctx.allocator, frame_data.indirect_buffers[i], frame_data.indirect_allocations[i]);
                 res_system.buffer_heap.release(frame_data.indirect_bindless_ids[i]);
             }
-            if (frame_data.draw_count_buffers[i] != VK_NULL_HANDLE)
-            {
-                vmaDestroyBuffer(ctx.allocator, frame_data.draw_count_buffers[i], frame_data.draw_count_allocations[i]);
-                res_system.buffer_heap.release(frame_data.draw_count_bindless_ids[i]);
-            }
+        }
+
+        if (frame_data.draw_counts_buffer != VK_NULL_HANDLE)
+        {
+            vmaDestroyBuffer(ctx.allocator, frame_data.draw_counts_buffer, frame_data.draw_counts_allocation);
+        }
+
+        if (frame_data.frame_descriptor_pool != VK_NULL_HANDLE)
+        {
+            vkDestroyDescriptorPool(ctx.device, frame_data.frame_descriptor_pool, nullptr);
         }
 
         if (frame_data.material_buffer != VK_NULL_HANDLE)

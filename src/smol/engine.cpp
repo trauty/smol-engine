@@ -12,6 +12,7 @@
 #include "smol/systems/events.h"
 #include "smol/systems/transform.h"
 #include "smol/time.h"
+#include "smol/vfs.h"
 #include "smol/window.h"
 #include "smol/world.h"
 
@@ -22,6 +23,7 @@
 #include <SDL3/SDL_init.h>
 #include <SDL3/SDL_video.h>
 #include <SDL3/SDL_vulkan.h>
+#include <SDL3/SDL_timer.h>
 #include <memory>
 #include <utility>
 #include <vector>
@@ -37,16 +39,21 @@ namespace smol::engine
 {
     namespace
     {
+        std::string game_name;
         std::unique_ptr<world_t> active_scene;
         asset_registry_t engine_assets;
         bool is_running = true;
+        bool is_suspended = false;
 
         event_callback_t user_event_cb;
         ui_callback_t user_ui_cb;
     } // namespace
 
-    bool init(const std::string& game_name, i32 init_window_width, i32 init_window_height)
+    bool init(const std::string& name, i32 init_window_width, i32 init_window_height)
     {
+        smol::vfs::init();
+
+        game_name = name;
         smol::log::init();
         smol::log::set_level(smol::log::level_e::LOG_DEBUG);
 
@@ -65,8 +72,13 @@ namespace smol::engine
             return false;
         }
 
-        SDL_Window* window = SDL_CreateWindow(game_name.c_str(), init_window_width, init_window_height,
-                                              SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
+        SDL_WindowFlags window_flags = (SDL_WindowFlags)(SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
+
+#if SMOL_PLATFORM_ANDROID
+        window_flags = (SDL_WindowFlags)(window_flags | SDL_WINDOW_FULLSCREEN);
+#endif
+
+        SDL_Window* window = SDL_CreateWindow(game_name.c_str(), init_window_width, init_window_height, window_flags);
         SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
         smol::window::set_window(window);
 
@@ -99,14 +111,17 @@ namespace smol::engine
 
         while (is_running)
         {
-            smol::time::update();
-            f64 frame_time = smol::time::get_dt();
+            if (!is_suspended)
+            {
+                smol::time::update();
+                f64 frame_time = smol::time::get_dt();
 
-            if (frame_time >= 0.25) { frame_time = 0.25; }
+                if (frame_time >= 0.25) { frame_time = 0.25; }
 
-            accumulator += frame_time;
+                accumulator += frame_time;
 
-            smol::input::detail::prepare_update();
+                smol::input::detail::prepare_update();
+            }
 
             static SDL_Event event;
             while (SDL_PollEvent(&event))
@@ -120,10 +135,26 @@ namespace smol::engine
                 case SDL_EVENT_WINDOW_RESIZED:
                     smol::window::set_window_size(event.window.data1, event.window.data2);
                     break;
+
+                case SDL_EVENT_WILL_ENTER_BACKGROUND:
+                case SDL_EVENT_DID_ENTER_BACKGROUND: is_suspended = true; break;
+
+                case SDL_EVENT_WILL_ENTER_FOREGROUND:
+                case SDL_EVENT_DID_ENTER_FOREGROUND:
+                    is_suspended = false;
+                    smol::time::update();
+                    break;
+
                 default: break;
                 }
 
-                if (!handled_by_user) { smol::input::detail::process(event); }
+                if (!handled_by_user && !is_suspended) { smol::input::detail::process(event); }
+            }
+
+            if (is_suspended)
+            {
+                SDL_Delay(50);
+                continue;
             }
 
             while (accumulator >= fixed_timestep)
@@ -140,7 +171,7 @@ namespace smol::engine
 
             if (user_ui_cb) { user_ui_cb(); }
 
-            smol::renderer::render(active_scene->registry);
+            if (!is_suspended) { smol::renderer::render(active_scene->registry); }
 
             smol::event_system::clear_frame_events(active_scene->registry);
 
@@ -167,10 +198,14 @@ namespace smol::engine
         smol::window::shutdown();
         smol::log::shutdown();
 
+        smol::vfs::shutdown();
+
         return 0;
     }
 
     void exit() { is_running = false; }
+
+    std::string get_game_name() { return game_name; }
 
     void create_scene()
     {

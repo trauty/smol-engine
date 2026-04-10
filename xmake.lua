@@ -70,6 +70,7 @@ add_requires("slang " .. slang_version)
 end
 
 add_requires("vulkan-headers")
+add_requires("volk 1.4.*")
 add_requires("libsdl3 3.4.2", {system = false, configs = {shared = is_plat("android")}})
 
 add_requires("joltphysics 5.5.0", 
@@ -98,12 +99,11 @@ target("smol-interface")
     set_kind("headeronly")
     
     add_includedirs("include", {public = true})
-    add_includedirs("include/volk", {public = true})
     add_includedirs("src", {public = true})
     
-    add_defines("CGLM_FORCE_LEFT_HANDED", {public = true})
+    add_defines("CGLM_FORCE_LEFT_HANDED", "VK_NO_PROTOTYPES", {public = true})
     
-    add_packages("libsdl3", "cglm", "fmt", "entt", {public = true})
+    add_packages("vulkan-headers", "volk", "libsdl3", "cglm", "fmt", "entt", {public = true})
 target_end()
 
 target("smol-engine")
@@ -161,7 +161,6 @@ target("smol-engine")
     add_files("src/smol/**.cpp")
     add_files("lib/vma/vk_mem_alloc.cpp", {warnings = "none"})
     add_files("lib/imgui/**.cpp", {warnings = "none"})
-    add_files("lib/volk/volk.c", {warnings = "none"})
 
     add_includedirs("include", {public = true})
     add_includedirs("include/imgui", {public = true})

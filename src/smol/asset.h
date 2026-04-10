@@ -2,6 +2,7 @@
 
 #include "smol/asset_registry.h"
 #include "smol/engine.h"
+#include "smol/log.h"
 
 #include <atomic>
 #include <filesystem>
@@ -114,18 +115,21 @@ namespace smol
         return asset_t<T>(&asset_reg, slot);
     }
 
-    // i need a real vfs for this, but this will work for now
     inline std::string get_cooked_path(const std::string& raw_path, const std::string& extension)
     {
-        std::filesystem::path path(raw_path);
-        std::string path_str = path.string();
+        std::string protocol = "";
+        std::string path_to_process = raw_path;
 
-        if (path_str.starts_with("assets/")) { path_str.replace(0, 7, ".smol/"); }
-        else if (path_str.starts_with("assets\\")) { path_str.replace(0, 7, ".smol\\"); }
+        size_t protocol_pos = raw_path.find("://");
+        if (protocol_pos != std::string::npos)
+        {
+            protocol = raw_path.substr(0, protocol_pos + 3);
+            path_to_process = raw_path.substr(protocol_pos + 3);
+        }
 
-        std::filesystem::path cooked_path(path_str);
+        std::filesystem::path cooked_path(path_to_process);
         cooked_path.replace_extension(extension);
 
-        return cooked_path.string();
+        return protocol + cooked_path.generic_string();
     }
 } // namespace smol

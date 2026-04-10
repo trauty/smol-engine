@@ -5,6 +5,7 @@
 #include "smol/rendering/renderer.h"
 #include "smol/rendering/renderer_types.h"
 #include "smol/rendering/vulkan.h"
+#include "vulkan/vulkan_core.h"
 
 #include <algorithm>
 #include <cstring>
@@ -194,7 +195,7 @@ namespace smol::renderer
         VkDescriptorPoolCreateInfo pool_info = {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
             .flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT,
-            .maxSets = 1,
+            .maxSets = 16,
             .poolSizeCount = 4,
             .pPoolSizes = pool_sizes,
         };
@@ -215,6 +216,22 @@ namespace smol::renderer
         res_system.buffer_heap.init(MAX_SSBOS);
 
         res_system.material_heap.init(MATERIAL_HEAP_SIZE);
+
+        VkDescriptorSetLayoutBinding frame_binding = {
+            .binding = 0,
+            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
+            .descriptorCount = 1,
+            .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
+            .pImmutableSamplers = nullptr,
+        };
+
+        VkDescriptorSetLayoutCreateInfo frame_layout_info = {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+            .bindingCount = 1,
+            .pBindings = &frame_binding,
+        };
+
+        VK_CHECK(vkCreateDescriptorSetLayout(ctx.device, &frame_layout_info, nullptr, &res_system.frame_layout));
 
         VkSemaphoreTypeCreateInfo sem_type_info = {
             .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
@@ -240,6 +257,8 @@ namespace smol::renderer
         res_system.buffer_heap.free_indices.clear();
 
         res_system.material_heap.shutdown();
+
+        vkDestroyDescriptorSetLayout(ctx.device, res_system.frame_layout, nullptr);
 
         vkDestroySemaphore(ctx.device, res_system.timeline_semaphore, nullptr);
     }

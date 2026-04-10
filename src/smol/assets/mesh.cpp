@@ -2,14 +2,15 @@
 
 #include "smol/asset.h"
 #include "smol/assets/mesh_format.h"
-#include "smol/assets/shader.h"
 #include "smol/log.h"
 #include "smol/rendering/renderer.h"
 #include "smol/rendering/renderer_resources.h"
 #include "smol/rendering/renderer_types.h"
 #include "smol/rendering/vulkan.h"
+#include "smol/vfs.h"
+#include "vulkan/vulkan_core.h"
 
-#include <fstream>
+#include <SDL3/SDL_iostream.h>
 #include <mutex>
 #include <optional>
 #include <tinygltf/tiny_gltf.h>
@@ -21,15 +22,15 @@ namespace smol
     {
         std::string cooked_path = get_cooked_path(path, ".smolmesh");
 
-        std::ifstream file(cooked_path, std::ios::binary);
-        if (!file.is_open())
+        SDL_IOStream* stream = smol::vfs::open_read(cooked_path);
+        if (!stream)
         {
             SMOL_LOG_ERROR("MESH", "Mesh not found: {}", cooked_path);
             return std::nullopt;
         }
 
         mesh_header_t header;
-        file.read(reinterpret_cast<char*>(&header), sizeof(mesh_header_t));
+        SDL_ReadIO(stream, &header, sizeof(mesh_header_t));
 
         if (header.magic != SMOL_MESH_MAGIC)
         {
@@ -65,8 +66,10 @@ namespace smol
         VK_CHECK(vmaCreateBuffer(renderer::ctx.allocator, &staging_info, &alloc_info, &staging_buf, &staging_alloc,
                                  &staging_alloc_info));
 
-        file.read(reinterpret_cast<char*>(staging_alloc_info.pMappedData), vertex_size);
-        file.read(reinterpret_cast<char*>((u8*)staging_alloc_info.pMappedData + vertex_size), index_size);
+        SDL_ReadIO(stream, staging_alloc_info.pMappedData, vertex_size);
+        SDL_ReadIO(stream, (u8*)staging_alloc_info.pMappedData + vertex_size, index_size);
+
+        SDL_CloseIO(stream);
 
         VkBufferCreateInfo mesh_info = {
             .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
@@ -106,11 +109,16 @@ namespace smol
             vkCmdCopyBuffer(cmd_buf, staging_buf, asset.index_buffer, 1, &copy_region);
         }
 
+        bool is_same_queue_fam = renderer::ctx.queue_fam_indices.transfer_family.value() ==
+                                 renderer::ctx.queue_fam_indices.graphics_family.value();
+
         std::vector<VkBufferMemoryBarrier> barriers;
         VkBufferMemoryBarrier base_barrier = {
             .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
             .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
-            .dstAccessMask = 0,
+            .dstAccessMask = is_same_queue_fam
+                                 ? (VkAccessFlags)(VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT)
+                                 : (VkAccessFlags)0,
             .srcQueueFamilyIndex = renderer::ctx.queue_fam_indices.transfer_family.value(),
             .dstQueueFamilyIndex = renderer::ctx.queue_fam_indices.graphics_family.value(),
         };
@@ -126,11 +134,16 @@ namespace smol
             barriers.push_back(base_barrier);
         }
 
-        vkCmdPipelineBarrier(cmd_buf, VK_PIPELINE_STAGE_TRANSFER_BIT, VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT, 0, 0,
-                             nullptr, static_cast<u32_t>(barriers.size()), barriers.data(), 0, nullptr);
+        VkPipelineStageFlags dst_stage =
+            is_same_queue_fam ? (VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT)
+                              : VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+
+        vkCmdPipelineBarrier(cmd_buf, VK_PIPELINE_STAGE_TRANSFER_BIT, dst_stage, 0, 0, nullptr,
+                             static_cast<u32_t>(barriers.size()), barriers.data(), 0, nullptr);
 
         u64_t signal_value = renderer::submit_transfer_commands(cmd_buf);
 
+        if (!is_same_queue_fam)
         {
             std::scoped_lock lock(renderer::res_system.pending_mutex);
             for (VkBufferMemoryBarrier& barrier : barriers)

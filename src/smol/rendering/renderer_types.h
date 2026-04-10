@@ -155,9 +155,9 @@ namespace smol::renderer
         u32_t spot_light_buffer_id;
         u32_t spot_light_count;
 
-        u32_t indirect_buffer_ids[MAX_BINS];
-        u32_t draw_count_ids[MAX_BINS];
         u32_t object_count;
+
+        u32_t indirect_buffer_ids[MAX_BINS];
     };
 
     struct object_data_t
@@ -233,9 +233,10 @@ namespace smol::renderer
         VmaAllocation indirect_allocations[MAX_BINS] = {};
         u32_t indirect_bindless_ids[MAX_BINS] = {};
 
-        VkBuffer draw_count_buffers[MAX_BINS] = {};
-        VmaAllocation draw_count_allocations[MAX_BINS] = {};
-        u32_t draw_count_bindless_ids[MAX_BINS] = {};
+        VkBuffer draw_counts_buffer = VK_NULL_HANDLE;
+        VmaAllocation draw_counts_allocation = VK_NULL_HANDLE;
+        VkDescriptorPool frame_descriptor_pool = VK_NULL_HANDLE;
+        VkDescriptorSet frame_descriptor_set = VK_NULL_HANDLE;
 
         VkBuffer material_buffer = VK_NULL_HANDLE;
         VmaAllocation material_allocation = VK_NULL_HANDLE;
