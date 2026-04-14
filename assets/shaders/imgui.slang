@@ -11,7 +11,7 @@ struct ImGuiShader
 
 StructuredBuffer<ImGuiShader> _reflection_ImGuiShader;
 
-struct VertexOut
+struct ImGuiVertexOut
 {
     float4 pos : SV_Position;
     float4 col : COLOR0;
@@ -19,9 +19,9 @@ struct VertexOut
 };
 
 [shader("vertex")]
-VertexOut vertexMain(uint vertex_id: SV_VertexID)
+ImGuiVertexOut vertexMain(uint vertex_id: SV_VertexID)
 {
-    ImGuiShader mat = getMaterial<ImGuiShader>(pc.material_buffer_id, pc.custom_data);
+    ImGuiShader mat = getMaterial<ImGuiShader>(pc.custom_data);
 
     uint byte_offset = vertex_id * 20;
     float2 pos = float2(asfloat(getBuffer(mat.vertex_buffer_id).Load(byte_offset)),
@@ -34,7 +34,7 @@ VertexOut vertexMain(uint vertex_id: SV_VertexID)
     float4 color = float4(float(col & 0xff) / 255.0f, float((col >> 8) & 0xff) / 255.0f,
                           float((col >> 16) & 0xff) / 255.0f, float((col >> 24) & 0xff) / 255.0f);
 
-    VertexOut out;
+    ImGuiVertexOut out;
     out.pos = float4(pos * mat.scale + mat.translate, 0.0f, 1.0f);
     out.col = color;
     out.uv = uv;
@@ -50,7 +50,7 @@ struct FragmentOut
 };
 
 [shader("fragment")]
-FragmentOut fragmentMain(VertexOut input)
+FragmentOut fragmentMain(ImGuiVertexOut input)
 {
     uint texture_id = pc.object_buffer_id;
     uint sampler_id = 0;

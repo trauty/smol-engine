@@ -26,7 +26,6 @@ namespace smol::cooker::shader
     void init()
     {
         SlangGlobalSessionDesc global_desc = {};
-        global_desc.enableGLSL = true;
         SMOL_LOG_INFO("SHADER_COOKER", "Slang global instance: {}",
                       slang::createGlobalSession(&global_desc, global_session.writeRef()));
     }
@@ -45,147 +44,55 @@ namespace smol::cooker::shader
         return VK_FORMAT_UNDEFINED;
     }
 
-    std::string extract_struct_name(const std::string& code)
+    smol::descriptor_type_e map_slang_type_to_descriptor(slang::TypeReflection* type)
     {
-        size_t config_pos = code.find("ShaderConfig");
-        if (config_pos == std::string::npos) { return ""; }
-
-        size_t pos = code.find("struct ", config_pos);
-        if (pos == std::string::npos) { return ""; }
-
-        pos += 7;
-
-        while (pos < code.size() && std::isspace(code[pos])) { pos++; }
-        size_t start = pos;
-        while (pos < code.size() && (std::isalnum(code[pos]) || code[pos] == '_')) { pos++; }
-
-        return code.substr(start, pos - start);
-    }
-
-    std::string generate_uber_shader(const std::string& target_blend_mode, const std::vector<std::string>& input_dirs)
-    {
-        std::vector<generated_shader_module_t> shaders;
-
-        for (const std::string& dir : input_dirs)
+        slang::TypeReflection::Kind kind = type->getKind();
+        if (kind == slang::TypeReflection::Kind::Resource)
         {
-            if (!std::filesystem::exists(dir)) { continue; }
+            SlangResourceShape shape = type->getResourceShape();
+            SlangResourceAccess access = type->getResourceAccess();
 
-            for (const std::filesystem::directory_entry& entry : std::filesystem::recursive_directory_iterator(dir))
+            if (shape == SLANG_STRUCTURED_BUFFER || shape == SLANG_BYTE_ADDRESS_BUFFER)
             {
-                if (!entry.is_regular_file() || entry.path().extension() != ".slang") { continue; }
-
-                std::string filename = entry.path().stem().string();
-                if (filename.find("uber_") != std::string::npos) { continue; }
-
-                std::filesystem::path rel_path = std::filesystem::relative(entry.path(), dir);
-                std::string module_name = rel_path.replace_extension("").generic_string();
-                std::replace(module_name.begin(), module_name.end(), '/', '.');
-
-                std::ifstream file(entry.path());
-                std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-
-                if (content.find("IShaderModule") != std::string::npos &&
-                    content.find("ShaderConfig") != std::string::npos)
-                {
-                    generated_shader_module_t mod;
-                    mod.module_name = module_name;
-                    mod.shader_name = extract_struct_name(content);
-
-                    if (content.find("\"Opaque\"") != std::string::npos) { mod.blend_mode = "Opaque"; }
-                    else if (content.find("\"Cutout\"") != std::string::npos) { mod.blend_mode = "Cutout"; }
-                    else if (content.find("\"TransparentAlpha\"") != std::string::npos)
-                    {
-                        mod.blend_mode = "TransparentAlpha";
-                    }
-                    else if (content.find("\"TransparentAdd\"") != std::string::npos)
-                    {
-                        mod.blend_mode = "TransparentAdd";
-                    }
-                    else if (content.find("\"TransparentMult\"") != std::string::npos)
-                    {
-                        mod.blend_mode = "TransparentMult";
-                    }
-                    else
-                    {
-                        mod.blend_mode = "Opaque";
-                    }
-
-                    if (mod.blend_mode == target_blend_mode) { shaders.push_back(mod); }
-                }
+                return descriptor_type_e::STORAGE_BUFFER;
+            }
+            if (shape == SLANG_TEXTURE_2D)
+            {
+                return access == SLANG_RESOURCE_ACCESS_READ_WRITE ? descriptor_type_e::STORAGE_IMAGE
+                                                                  : descriptor_type_e::SAMPLED_IMAGE;
             }
         }
+        if (kind == slang::TypeReflection::Kind::SamplerState) { return descriptor_type_e::SAMPLER; }
+        if (kind == slang::TypeReflection::Kind::ConstantBuffer) { return descriptor_type_e::UNIFORM_BUFFER; }
 
-        if (shaders.empty()) { return {}; }
+        return descriptor_type_e::STORAGE_BUFFER;
+    }
 
-        std::sort(shaders.begin(), shaders.end(),
-                  [](const generated_shader_module_t& mod_a, const generated_shader_module_t& mod_b)
-                  { return mod_a.module_name < mod_b.module_name; });
-
-        u32_t next_id = 0;
-        for (generated_shader_module_t& mod : shaders) { mod.id = next_id++; }
-
-        std::string new_source = "import smol_globals;\nimport shader_interface;\n\n";
-
-        for (generated_shader_module_t& mod : shaders) { new_source += "import " + mod.module_name + ";\n"; }
-
-        new_source += "\npublic struct VertexOut\n{\n";
-        new_source +=
-            "    public float4 position : SV_Position;\n    public float3 world_pos;\n    public float3 normal;\n   "
-            " public float2 uv;\n    public uint draw_id;\n};\n\n";
-
-        new_source += "[shader(\"vertex\")]\nVertexOut vertexMain(uint vertex_id: SV_VertexID, uint instance_id: "
-                      "SV_InstanceID, uint base_instance: SV_StartInstanceLocation)\n{\n";
-        new_source += "    uint actual_instance_id = instance_id + base_instance;\n    ObjectData obj = "
-                      "getObjectData(actual_instance_id);\n    GlobalData globals = getGlobalData();\n";
-        new_source +=
-            "    Vertex vertex = getIndexedVertex(obj.vertex_buffer_id, obj.index_buffer_id, vertex_id);\n    "
-            "float3 offset = float3(0.0f, 0.0f, 0.0f);\n\n";
-
-        new_source += "    switch (obj.material_type)\n    {\n";
-        for (generated_shader_module_t& mod : shaders)
+    void reflect_descriptors(slang::ProgramLayout* layout, slang_compilation_res_t& res)
+    {
+        u32_t param_count = layout->getParameterCount();
+        for (u32_t i = 0; i < param_count; i++)
         {
-            new_source += "    case " + std::to_string(mod.id) + ": {\n        " + mod.shader_name +
-                          " m = getBuffer(pc.material_buffer_id).Load<" + mod.shader_name + ">(obj.material_offset);\n";
-            new_source +=
-                "        offset = m.vertex(vertex.position, vertex.normal, globals.time);\n        break; }\n";
+            slang::VariableLayoutReflection* param = layout->getParameterByIndex(i);
+            if (!param) { continue; }
+
+            u32_t set = param->getBindingSpace();
+
+            if (set == 0) { continue; } // ignore bindless and globals set
+
+            descriptor_binding_info_t binding;
+            binding.set = set;
+            binding.binding = param->getBindingIndex();
+            binding.count = 1;
+
+            slang::TypeLayoutReflection* type_layout = param->getTypeLayout();
+            binding.type = map_slang_type_to_descriptor(type_layout->getType());
+
+            res.descriptor_bindings.push_back(binding);
+
+            SMOL_LOG_INFO("SHADER_COOKER", "Detected custom descriptor: Set {}; Binding {}; Type {};", set,
+                          binding.binding, (u32_t)binding.type);
         }
-        new_source += "    default: break;\n    }\n\n";
-
-        new_source +=
-            "    float3 local_pos = vertex.position + offset;\n    float4 world_pos = mul(float4(local_pos, 1.0f), "
-            "obj.model_matrix);\n";
-        new_source +=
-            "    VertexOut out_v;\n    out_v.position = mul(world_pos, globals.view_proj);\n    out_v.world_pos = "
-            "world_pos.xyz;\n";
-        new_source += "    float3x3 normal_mat = float3x3(obj.normal_matrix[0].xyz, obj.normal_matrix[1].xyz, "
-                      "obj.normal_matrix[2].xyz);\n";
-        new_source += "    out_v.normal = normalize(mul(vertex.normal, normal_mat));\n    out_v.uv = vertex.uv;\n    "
-                      "out_v.draw_id = actual_instance_id;\n    return out_v;\n}\n\n";
-
-        new_source +=
-            "[RenderTargetsConfig]\nstruct FragmentOut\n{\n    [RenderTarget(\"RGBA16_FLOAT\")]\n    float4 color : "
-            "SV_Target0;\n};\n\n";
-        new_source += "[shader(\"fragment\")]\nFragmentOut fragmentMain(VertexOut in_f)\n{\n";
-        new_source += "    ObjectData obj = getObjectData(in_f.draw_id);\n    float4 color = float4(1.0f, 0.0f, 1.0f, "
-                      "1.0f);\n\n";
-
-        new_source += "    switch (obj.material_type)\n    {\n";
-        for (generated_shader_module_t& mod : shaders)
-        {
-            new_source += "    case " + std::to_string(mod.id) + ": {\n        " + mod.shader_name +
-                          " m = getBuffer(pc.material_buffer_id).Load<" + mod.shader_name + ">(obj.material_offset);\n";
-            new_source += "        color = m.fragment(in_f.uv, in_f.world_pos, in_f.normal);\n        break; }\n";
-        }
-        new_source += "    default: break;\n    }\n\n";
-        new_source += "    FragmentOut out_frag;\n    out_frag.color = color;\n    return out_frag;\n}\n\n";
-
-        new_source += "// --- REFLECTION HOOKS ---\n";
-        for (generated_shader_module_t& mod : shaders)
-        {
-            new_source += "StructuredBuffer<" + mod.shader_name + "> _reflect_" + mod.shader_name + ";\n";
-        }
-
-        return new_source;
     }
 
     std::vector<shader_module_info_t> reflect_slang_layout(slang::ProgramLayout* layout)
@@ -378,8 +285,8 @@ namespace smol::cooker::shader
         }
 
         slang::ProgramLayout* layout = linked_program->getLayout();
-        std::vector<shader_module_info_t> info = reflect_slang_layout(layout);
-        res.shader_types = std::move(info);
+        res.shader_types = reflect_slang_layout(layout);
+        reflect_descriptors(layout, res);
 
         // extraction of render config for pipeline creation
         for (u32 ep_idx = 0; ep_idx < layout->getEntryPointCount(); ep_idx++)
@@ -472,19 +379,22 @@ namespace smol::cooker::shader
         shader_header_t header = {
             .magic = SMOL_SHADER_MAGIC,
             .is_compute = res.is_compute,
-            .module_count = static_cast<u32_t>(res.shader_types.size()),
+            .has_material_data = !res.shader_types.empty(),
             .vert_spirv_size = static_cast<u32_t>(res.vert_spirv.size()),
             .frag_spirv_size = static_cast<u32_t>(res.frag_spirv.size()),
             .comp_spirv_size = static_cast<u32_t>(res.compute_spirv.size()),
             .target_format_count = static_cast<u32_t>(res.target_formats.size()),
+            .descriptor_binding_count = static_cast<u32_t>(res.descriptor_bindings.size()),
         };
         out.write(reinterpret_cast<const char*>(&header), sizeof(shader_header_t));
 
         out.write(reinterpret_cast<const char*>(res.target_formats.data()),
                   res.target_formats.size() * sizeof(VkFormat));
 
-        for (const shader_module_info_t& module : res.shader_types)
+        if (!res.shader_types.empty())
         {
+            shader_module_info_t module = res.shader_types[0];
+
             shader_module_header_t mod_header = {};
             std::snprintf(mod_header.name, sizeof(mod_header.name), "%s", module.name.c_str());
             std::snprintf(mod_header.target_pass, sizeof(mod_header.target_pass), "%s", module.target_pass.c_str());
@@ -505,6 +415,12 @@ namespace smol::cooker::shader
 
                 out.write(reinterpret_cast<const char*>(&member_header), sizeof(shader_member_header_t));
             }
+        }
+
+        if (!res.descriptor_bindings.empty())
+        {
+            out.write(reinterpret_cast<const char*>(res.descriptor_bindings.data()),
+                      res.descriptor_bindings.size() * sizeof(descriptor_binding_info_t));
         }
 
         if (!res.vert_spirv.empty())
@@ -568,59 +484,5 @@ namespace smol::cooker::shader
         std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
 
         return content.find("vertexMain") != std::string::npos || content.find("computeMain") != std::string::npos;
-    }
-
-    shader_timestamps_t scan_shader_deps(const std::vector<std::string>& input_dirs)
-    {
-        shader_timestamps_t stamps;
-        for (const std::string& dir : input_dirs)
-        {
-            if (!std::filesystem::exists(dir)) { continue; }
-
-            for (const auto& entry : std::filesystem::recursive_directory_iterator(dir))
-            {
-                if (entry.is_regular_file() && entry.path().extension() == ".slang")
-                {
-                    std::string filename = entry.path().filename().string();
-
-                    if (filename.find("uber_") != std::string::npos) { continue; }
-
-                    std::ifstream file(entry.path());
-                    std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-                    auto time = std::filesystem::last_write_time(entry.path());
-
-                    bool is_pipeline = content.find("vertexMain") != std::string::npos ||
-                                       content.find("computeMain") != std::string::npos;
-                    bool is_module = content.find("ShaderConfig") != std::string::npos;
-
-                    if (is_module)
-                    {
-                        std::string blend_mode = "Opaque";
-
-                        if (content.find("\"Cutout\"") != std::string::npos) { blend_mode = "Cutout"; }
-                        else if (content.find("\"TransparentAlpha\"") != std::string::npos)
-                        {
-                            blend_mode = "TransparentAlpha";
-                        }
-                        else if (content.find("\"TransparentAdd\"") != std::string::npos)
-                        {
-                            blend_mode = "TransparentAdd";
-                        }
-                        else if (content.find("\"TransparentMult\"") != std::string::npos)
-                        {
-                            blend_mode = "TransparentMult";
-                        }
-
-                        if (time > stamps.module_newest[blend_mode]) { stamps.module_newest[blend_mode] = time; }
-                    }
-                    else if (!is_pipeline)
-                    {
-                        if (time > stamps.core_newest) { stamps.core_newest = time; }
-                    }
-                }
-            }
-        }
-
-        return stamps;
     }
 } // namespace smol::cooker::shader

@@ -6,15 +6,33 @@ namespace smol
     // SMSH
     constexpr u32_t SMOL_SHADER_MAGIC = 0x48534d53;
 
+    enum class descriptor_type_e : u32_t
+    {
+        SAMPLER,
+        SAMPLED_IMAGE,
+        STORAGE_IMAGE,
+        UNIFORM_BUFFER,
+        STORAGE_BUFFER
+    };
+
+    struct shader_descriptor_binding_t
+    {
+        u32_t set;
+        u32_t binding;
+        descriptor_type_e type;
+        u32_t count;
+    };
+
     struct shader_header_t
     {
         u32_t magic;
         bool is_compute;
-        u32_t module_count;
+        bool has_material_data;
         u32_t vert_spirv_size;
         u32_t frag_spirv_size;
         u32_t comp_spirv_size;
         u32_t target_format_count;
+        u32_t descriptor_binding_count;
     };
 
     struct shader_module_header_t

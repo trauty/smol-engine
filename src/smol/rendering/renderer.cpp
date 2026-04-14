@@ -1,7 +1,5 @@
 #include "renderer.h"
 
-#include "cglm/frustum.h"
-#include "cglm/util.h"
 #include "smol/asset.h"
 #include "smol/assets/material.h"
 #include "smol/assets/mesh.h"
@@ -30,9 +28,7 @@
 #include <SDL3/SDL_video.h>
 #include <SDL3/SDL_vulkan.h>
 #include <algorithm>
-#include <cglm/mat4.h>
-#include <cglm/types.h>
-#include <cglm/vec3.h>
+#include <cglm/cglm.h>
 #include <cmath>
 #include <cstddef>
 #include <cstdint>
@@ -359,9 +355,22 @@ namespace smol::renderer
             VK_STRUCTURE_TYPE_DEBUG_UTILS_MESSENGER_CREATE_INFO_EXT};
         bool enable_validation = config.enable_validation && detail::check_validation_support();
 
+        VkValidationFeatureEnableEXT enable_validation_features[] = {
+            VK_VALIDATION_FEATURE_ENABLE_SYNCHRONIZATION_VALIDATION_EXT,
+        };
+
+        VkValidationFeaturesEXT validation_features = {
+            .sType = VK_STRUCTURE_TYPE_VALIDATION_FEATURES_EXT,
+            .pNext = nullptr,
+            .enabledValidationFeatureCount = 1,
+            .pEnabledValidationFeatures = enable_validation_features,
+        };
+
         if (enable_validation)
         {
             instance_exts.push_back(VK_EXT_DEBUG_UTILS_EXTENSION_NAME);
+            // instance_exts.push_back(VK_EXT_VALIDATION_FEATURES_EXTENSION_NAME);
+
             debug_create_info.messageSeverity = VK_DEBUG_UTILS_MESSAGE_SEVERITY_INFO_BIT_EXT |
                                                 VK_DEBUG_UTILS_MESSAGE_SEVERITY_WARNING_BIT_EXT |
                                                 VK_DEBUG_UTILS_MESSAGE_SEVERITY_ERROR_BIT_EXT;
@@ -371,6 +380,8 @@ namespace smol::renderer
             debug_create_info.pfnUserCallback = detail::debug_callback;
 
             for (const char* layer : validation_layers) { ctx.active_layers.push_back(layer); }
+
+            // validation_features.pNext = &debug_create_info;
         }
 
         VkApplicationInfo app_info = {VK_STRUCTURE_TYPE_APPLICATION_INFO};
@@ -1283,7 +1294,7 @@ namespace smol::renderer
 
         if (old_layout == VK_IMAGE_LAYOUT_UNDEFINED && new_layout == VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
         {
-            barrier.srcStageMask = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+            barrier.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
             barrier.srcAccessMask = 0;
             barrier.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
             barrier.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
@@ -1317,7 +1328,7 @@ namespace smol::renderer
         }
         else if (old_layout == VK_IMAGE_LAYOUT_UNDEFINED && new_layout == VK_IMAGE_LAYOUT_PRESENT_SRC_KHR)
         {
-            barrier.srcStageMask = VK_PIPELINE_STAGE_2_TOP_OF_PIPE_BIT;
+            barrier.srcStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
             barrier.srcAccessMask = 0;
             barrier.dstStageMask = VK_PIPELINE_STAGE_2_BOTTOM_OF_PIPE_BIT;
             barrier.dstAccessMask = 0;

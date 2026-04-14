@@ -7,20 +7,26 @@ public Texture2D global_textures[];
 [[vk::binding(2, 0)]]
 public RWTexture2D<float4> global_storage_images[];
 [[vk::binding(3, 0)]]
-public RWByteAddressBuffer global_buffers[];
-
-[[vk::binding(0, 1)]]
-public RWStructuredBuffer<uint> global_draw_counts;
+public ByteAddressBuffer global_buffers[];
 
 public Texture2D getTexture(uint id) { return global_textures[NonUniformResourceIndex(id)]; }
 public SamplerState getSampler(uint id) { return global_samplers[NonUniformResourceIndex(id)]; }
-public RWByteAddressBuffer getBuffer(uint id) { return global_buffers[NonUniformResourceIndex(id)]; }
+public ByteAddressBuffer getBuffer(uint id) { return global_buffers[NonUniformResourceIndex(id)]; }
 
 public struct Vertex
 {
     public float3 position;
     public float3 normal;
     public float2 uv;
+};
+
+public struct VertexOut
+{
+    public float4 position : SV_Position;
+    public float3 world_pos;
+    public float3 normal;
+    public float2 uv;
+    public uint draw_id;
 };
 
 public struct ObjectData
@@ -33,8 +39,7 @@ public struct ObjectData
     public uint index_count;
     public uint vertex_count;
     public float bounding_sphere_radius;
-    public uint material_type;
-    public uint bin_index;
+    public uint pipeline_index;
     public float4 bounding_sphere_center;
 };
 
@@ -58,7 +63,8 @@ public struct GlobalData
 
     public uint object_count;
 
-    public uint indirect_buffer_ids[5];
+    public uint indirect_buffer_id;
+    public uint active_pipeline_count;
 };
 
 public struct PushConstants
@@ -95,14 +101,36 @@ public Vertex getIndexedVertex(uint vertex_buffer_id, uint index_buffer_id, uint
     return getBuffer(vertex_buffer_id).Load<Vertex>(vertex_byte_offset);
 }
 
-public T getMaterial<T>(uint material_buffer_id, uint byte_offset)
-{ return getBuffer(material_buffer_id).Load<T>(byte_offset); }
+public T getMaterial<T>(uint byte_offset) { return getBuffer(pc.material_buffer_id).Load<T>(byte_offset); }
+
+public VertexOut defaultVertexTransform(uint vertex_id, uint instance_id, uint base_instance)
+{
+    uint actual_instance_id = instance_id + base_instance;
+
+    ObjectData obj = getObjectData(actual_instance_id);
+    GlobalData globals = getGlobalData();
+
+    Vertex vertex = getIndexedVertex(obj.vertex_buffer_id, obj.index_buffer_id, vertex_id);
+
+    float4 world_pos = mul(float4(vertex.position, 1.0f), obj.model_matrix);
+
+    VertexOut out;
+    out.position = mul(world_pos, globals.view_proj);
+    out.world_pos = world_pos.xyz;
+
+    float3x3 normal_mat = float3x3(obj.normal_matrix[0].xyz, obj.normal_matrix[1].xyz, obj.normal_matrix[2].xyz);
+    out.normal = normalize(mul(vertex.normal, normal_mat));
+    out.uv = vertex.uv;
+    out.draw_id = actual_instance_id;
+
+    return out;
+}
 
 [__AttributeUsage(_AttributeTargets.Struct)]
 public struct ShaderConfigAttribute
 {
     public string pass_name;
-    public string blend_mode; // Opaque, Cutout, Transparent
+    public string blend_mode; // Opaque, Cutout, TransparentAdd, TransparentMult, TransparentAlpha
     public bool depth_write;
     public bool depth_test;
 };

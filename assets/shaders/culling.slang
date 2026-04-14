@@ -1,12 +1,23 @@
 import smol_globals;
 
-bool frustumCull(float4 sphere_center, float radius)
+struct DrawIndirectCommand
 {
-    GlobalData global_data = getGlobalData();
+    uint vertex_count;
+    uint instance_count;
+    uint first_vertex;
+    uint first_instance;
+};
 
+[[vk::binding(0, 1)]]
+RWStructuredBuffer<uint> draw_counts;
+[[vk::binding(1, 1)]]
+RWStructuredBuffer<DrawIndirectCommand> indirect_commands;
+
+bool frustumCull(float4 sphere_center, float radius, float4[6] frustum_planes)
+{
     for (int i = 0; i < 6; ++i)
     {
-        float dist = dot(global_data.frustum_planes[i].xyz, sphere_center.xyz) + global_data.frustum_planes[i].w;
+        float dist = dot(frustum_planes[i].xyz, sphere_center.xyz) + frustum_planes[i].w;
         if (dist < -radius) { return false; }
     }
 
@@ -22,31 +33,41 @@ void computeMain(uint3 thread_id: SV_DispatchThreadID)
 
     ObjectData obj = getObjectData(thread_id.x);
 
-    bool is_visible = frustumCull(obj.bounding_sphere_center, obj.bounding_sphere_radius);
+    bool is_visible = frustumCull(obj.bounding_sphere_center, obj.bounding_sphere_radius, globals.frustum_planes);
 
-    uint wave_offset = WavePrefixCountBits(is_visible);
-    uint wave_total = WaveActiveCountBits(is_visible);
+    uint final_index = 0;
+    bool should_write = false;
 
-    uint base_index = 0;
-
-    if (WaveIsFirstLane() && wave_total > 0)
+    for (uint pipeline = 0; pipeline < globals.active_pipeline_count; pipeline++)
     {
-        InterlockedAdd(global_draw_counts[obj.bin_index], wave_total, base_index);
+        bool active_in_pipeline = is_visible && (obj.pipeline_index == pipeline);
+
+        uint wave_offset = WavePrefixCountBits(is_visible);
+        uint wave_total = WaveActiveCountBits(is_visible);
+        uint base_index = 0;
+
+        if (WaveIsFirstLane() && wave_total > 0) { InterlockedAdd(draw_counts[pipeline], wave_total, base_index); }
+
+        base_index = WaveReadLaneFirst(base_index);
+
+        if (active_in_pipeline)
+        {
+            final_index = base_index + wave_offset;
+            should_write = true;
+        }
     }
 
-    base_index = WaveReadLaneFirst(base_index);
-
-    if (is_visible)
+    if (should_write)
     {
-        uint final_index = base_index + wave_offset;
+        DrawIndirectCommand cmd;
+        cmd.vertex_count = obj.index_count;
+        cmd.instance_count = 1;
+        cmd.first_vertex = 0;
+        cmd.first_instance = thread_id.x;
 
-        RWByteAddressBuffer indirect_buf = getBuffer(globals.indirect_buffer_ids[obj.bin_index]);
+        uint max_draws_per_bin = globals.object_count;
+        uint array_index = (obj.pipeline_index * max_draws_per_bin) + final_index;
 
-        uint byte_offset = final_index * 16;
-
-        indirect_buf.Store<uint>(byte_offset, obj.index_count);
-        indirect_buf.Store<uint>(byte_offset + 4, 1);
-        indirect_buf.Store<uint>(byte_offset + 8, 0);
-        indirect_buf.Store<uint>(byte_offset + 12, thread_id.x);
+        indirect_commands[array_index] = cmd;
     }
 }
