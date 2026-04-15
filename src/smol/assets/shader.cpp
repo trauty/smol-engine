@@ -12,9 +12,11 @@
 #include "vulkan/vulkan_core.h"
 
 #include <SDL3/SDL_iostream.h>
+#include <algorithm>
 #include <mutex>
 #include <optional>
 #include <string>
+#include <unordered_map>
 #include <vector>
 
 namespace smol
@@ -35,6 +37,19 @@ namespace smol
             }
 
             return module;
+        }
+
+        VkDescriptorType map_descriptor_type(descriptor_type_e type)
+        {
+            switch (type)
+            {
+            case descriptor_type_e::SAMPLER: return VK_DESCRIPTOR_TYPE_SAMPLER;
+            case descriptor_type_e::SAMPLED_IMAGE: return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
+            case descriptor_type_e::STORAGE_IMAGE: return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
+            case descriptor_type_e::UNIFORM_BUFFER: return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+            case descriptor_type_e::STORAGE_BUFFER: return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            default: return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
+            }
         }
     } // namespace
 
@@ -111,6 +126,45 @@ namespace smol
 
         SDL_CloseIO(stream);
 
+        std::unordered_map<u32_t, std::vector<VkDescriptorSetLayoutBinding>> set_bindings;
+        for (const shader_descriptor_binding_t& b : shader.descriptor_bindings)
+        {
+            VkDescriptorSetLayoutBinding layout_binding = {
+                .binding = b.binding,
+                .descriptorType = map_descriptor_type(b.type),
+                .descriptorCount = b.count,
+                .stageFlags = VK_SHADER_STAGE_ALL,
+            };
+
+            set_bindings[b.set].push_back(layout_binding);
+        }
+
+        for (const auto& [set, bindings] : set_bindings)
+        {
+            VkDescriptorSetLayoutCreateInfo layout_info = {
+                .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
+                .bindingCount = static_cast<u32_t>(bindings.size()),
+                .pBindings = bindings.data(),
+            };
+
+            VkDescriptorSetLayout layout;
+            vkCreateDescriptorSetLayout(renderer::ctx.device, &layout_info, nullptr, &layout);
+            shader.custom_layouts[set] = layout;
+        }
+
+        u32_t max_set = 1;
+        for (const auto& [set, layout] : shader.custom_layouts) { max_set = std::max(max_set, set); }
+
+        std::vector<VkDescriptorSetLayout> set_layouts(max_set + 1, VK_NULL_HANDLE);
+
+        set_layouts[0] = renderer::res_system.global_layout;
+
+        for (u32_t i = 1; i <= max_set; i++)
+        {
+            // should also check for skipped sets, but this works for now
+            if (shader.custom_layouts.count(i)) { set_layouts[i] = shader.custom_layouts[i]; }
+        }
+
         VkPipelineColorBlendAttachmentState base_blend = {
             .blendEnable = VK_FALSE,
             .srcColorBlendFactor = VK_BLEND_FACTOR_ONE,
@@ -127,11 +181,11 @@ namespace smol
         bool is_depth_write = true;
         bool is_depth_test = true;
 
-        if (!shader.modules.empty())
+        if (shader.has_material_data)
         {
-            blend_mode = shader.modules[0].blend_mode;
-            is_depth_write = shader.modules[0].depth_write;
-            is_depth_test = shader.modules[0].depth_test;
+            blend_mode = shader.module.blend_mode;
+            is_depth_write = shader.module.depth_write;
+            is_depth_test = shader.module.depth_test;
         }
 
         if (blend_mode == "TransparentAlpha")
@@ -232,12 +286,10 @@ namespace smol
             .size = sizeof(renderer::push_constants_t),
         };
 
-        VkDescriptorSetLayout set_layouts[] = {renderer::res_system.global_layout, renderer::res_system.frame_layout};
-
         VkPipelineLayoutCreateInfo pipeline_layout_info = {
             .sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO,
-            .setLayoutCount = 2,
-            .pSetLayouts = set_layouts,
+            .setLayoutCount = static_cast<u32_t>(set_layouts.size()),
+            .pSetLayouts = set_layouts.data(),
             .pushConstantRangeCount = 1,
             .pPushConstantRanges = &push_constant,
         };
@@ -354,6 +406,18 @@ namespace smol
             .bindless_id = renderer::BINDLESS_NULL_HANDLE,
             .gpu_timeline_value = renderer::res_system.timeline_value,
         });
+
+        for (const auto& [set, layout] : shader.custom_layouts)
+        {
+            renderer::res_system.deletion_queue.push_back({
+                .type = renderer::resource_type_e::DESCRIPTOR_SET_LAYOUT,
+                .handle = {.descriptor_set_layout = layout},
+                .bindless_id = renderer::BINDLESS_NULL_HANDLE,
+                .gpu_timeline_value = renderer::res_system.timeline_value,
+            });
+        }
+
+        shader.custom_layouts.clear();
 
         shader.pipeline = VK_NULL_HANDLE;
         shader.pipeline_layout = VK_NULL_HANDLE;

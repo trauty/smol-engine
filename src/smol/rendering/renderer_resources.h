@@ -2,6 +2,7 @@
 
 #include "smol/defines.h"
 #include "smol/rendering/renderer_types.h"
+#include "vulkan/vulkan_core.h"
 
 #include <deque>
 #include <mutex>
@@ -18,7 +19,8 @@ namespace smol::renderer
         PIPELINE,
         SWAPCHAIN,
         IMAGE_VIEW,
-        SEMAPHORE
+        SEMAPHORE,
+        DESCRIPTOR_SET_LAYOUT
     };
 
     constexpr u32_t SAMPLERS_BINDING_POINT = 0;
@@ -77,6 +79,7 @@ namespace smol::renderer
             VkSwapchainKHR swapchain;
             VkImageView image_view;
             VkSemaphore semaphore;
+            VkDescriptorSetLayout descriptor_set_layout;
         } handle;
 
         u32_t bindless_id;

@@ -335,6 +335,12 @@ namespace smol::renderer
                 vkDestroySemaphore(ctx.device, del.handle.semaphore, nullptr);
                 break;
             }
+
+            case smol::renderer::resource_type_e::DESCRIPTOR_SET_LAYOUT:
+            {
+                vkDestroyDescriptorSetLayout(ctx.device, del.handle.descriptor_set_layout, nullptr);
+                break;
+            }
             }
 
             deletion_queue.pop_front();
