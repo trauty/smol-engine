@@ -54,12 +54,13 @@ namespace smol
 
         if (header.magic != SMOL_SHADER_MAGIC)
         {
-            SMOL_LOG_ERROR("SHADER", "Invalid .smolshader file");
+            SMOL_LOG_ERROR("SHADER", "Invalid .smolshader file: {}", path);
             return std::nullopt;
         }
 
         shader_t shader;
         shader.is_compute = header.is_compute;
+        shader.has_material_data = header.has_material_data;
 
         shader.target_formats.resize(header.target_format_count);
         SDL_ReadIO(stream, shader.target_formats.data(), header.target_format_count * sizeof(VkFormat));
@@ -69,12 +70,12 @@ namespace smol
             if (format == VK_FORMAT_UNDEFINED) { format = renderer::ctx.swapchain.format; }
         }
 
-        for (u32_t i = 0; i < header.module_count; i++)
+        if (shader.has_material_data)
         {
             shader_module_header_t mod_header;
             SDL_ReadIO(stream, &mod_header, sizeof(shader_module_header_t));
 
-            shader_module_info_t info = {
+            shader.module = {
                 .name = mod_header.name,
                 .size = mod_header.size,
                 .target_pass = mod_header.target_pass,
@@ -87,21 +88,26 @@ namespace smol
             {
                 shader_member_header_t member_header;
                 SDL_ReadIO(stream, &member_header, sizeof(shader_member_header_t));
-                info.members[member_header.name_hash] = {"", member_header.offset, member_header.size};
+                shader.module.members[member_header.name_hash] = {"", member_header.offset, member_header.size};
             }
-
-            shader.modules.push_back(info);
         }
 
-        std::vector<u32_t> vert_spirv(header.vert_spirv_size);
-        std::vector<u32_t> frag_spirv(header.frag_spirv_size);
-        std::vector<u32_t> comp_spirv(header.comp_spirv_size);
+        if (header.descriptor_binding_count > 0)
+        {
+            shader.descriptor_bindings.resize(header.descriptor_binding_count);
+            SDL_ReadIO(stream, shader.descriptor_bindings.data(),
+                       header.descriptor_binding_count * sizeof(shader_descriptor_binding_t));
+        }
 
-        if (header.vert_spirv_size > 0) { SDL_ReadIO(stream, vert_spirv.data(), header.vert_spirv_size * 4); }
+        std::vector<u32_t> vert_spirv(header.vert_spirv_size / 4);
+        std::vector<u32_t> frag_spirv(header.frag_spirv_size / 4);
+        std::vector<u32_t> comp_spirv(header.comp_spirv_size / 4);
 
-        if (header.frag_spirv_size > 0) { SDL_ReadIO(stream, frag_spirv.data(), header.frag_spirv_size * 4); }
+        if (header.vert_spirv_size > 0) { SDL_ReadIO(stream, vert_spirv.data(), header.vert_spirv_size); }
 
-        if (header.comp_spirv_size > 0) { SDL_ReadIO(stream, comp_spirv.data(), header.comp_spirv_size * 4); }
+        if (header.frag_spirv_size > 0) { SDL_ReadIO(stream, frag_spirv.data(), header.frag_spirv_size); }
+
+        if (header.comp_spirv_size > 0) { SDL_ReadIO(stream, comp_spirv.data(), header.comp_spirv_size); }
 
         SDL_CloseIO(stream);
 

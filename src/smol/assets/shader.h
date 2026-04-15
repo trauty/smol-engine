@@ -1,6 +1,7 @@
 #pragma once
 
 #include "smol/asset_registry.h"
+#include "smol/assets/shader_format.h"
 #include "smol/defines.h"
 #include "smol/rendering/vulkan.h"
 
@@ -36,7 +37,11 @@ namespace smol
         VkPipeline pipeline = VK_NULL_HANDLE;
         VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
 
-        std::vector<shader_module_info_t> modules;
+        bool has_material_data = false;
+        shader_module_info_t module;
+
+        std::unordered_map<u32_t, VkDescriptorSetLayout> custom_layouts;
+        std::vector<shader_descriptor_binding_t> descriptor_bindings;
 
         bool is_compute = false;
         std::vector<VkFormat> target_formats;
