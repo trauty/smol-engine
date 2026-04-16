@@ -13,6 +13,7 @@
 #include "smol/rendering/renderer_types.h"
 #include "smol/rendering/rendergraph.h"
 #include "smol/rendering/vulkan.h"
+#include "vulkan/vulkan_core.h"
 
 #include <cstdint>
 #include <cstring>
@@ -54,9 +55,7 @@ namespace smol::editor::imgui
         }
 
         ctx.shader = smol::load_asset_sync<shader_t>("engine://assets/shaders/imgui.slang");
-        renderer::register_custom_shader(ctx.shader);
-
-        ctx.material = smol::load_asset_sync<material_t>("imgui_mat", "ImGuiShader");
+        ctx.material = smol::load_asset_sync<material_t>("imgui_mat", ctx.shader);
 
         ImGuiIO& io = ImGui::GetIO();
         u8* pixels;
@@ -324,13 +323,15 @@ namespace smol::editor::imgui
 
                     vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.shader->pipeline);
 
-                    vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.shader->pipeline_layout, 0, 1,
-                                            &renderer::res_system.global_set, 0, nullptr);
+                    VkDescriptorSet sets[] = {renderer::res_system.global_set, renderer::res_system.frame_set};
+
+                    vkCmdBindDescriptorSets(
+                        cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.shader->pipeline_layout, 0, 2, sets, 1,
+                        &renderer::ctx.per_frame_objects[renderer::ctx.cur_frame].global_data_offset);
 
                     vkCmdBindIndexBuffer(cmd, ctx.index_buffer[cur_frame], 0, VK_INDEX_TYPE_UINT32);
 
                     renderer::push_constants_t pc = {
-                        .global_buffer_id = renderer::ctx.per_frame_objects[renderer::ctx.cur_frame].global_bindless_id,
                         .material_buffer_id = renderer::res_system.material_heap.bindless_id,
                         .custom_data = ctx.material->heap_offset[cur_frame],
                     };

@@ -66,8 +66,6 @@ namespace smol::renderer
 
     VkSampler create_sampler(VkFilter filter, VkSamplerAddressMode address_mode);
 
-    SMOL_API void register_custom_shader(asset_t<shader_t> shader);
-
     SMOL_API void set_render_resolution(u32_t width, u32_t height);
     SMOL_API u32_t get_viewport_texture_id();
 

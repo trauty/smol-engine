@@ -27,8 +27,6 @@ public float3 applyBlinnPhongLighting(Surface surface, float3 world_pos)
 {
     float3 final_color = float3(0.01f);
 
-    GlobalData globals = getGlobalData();
-
     for (uint d = 0; d < globals.dir_light_count; d++)
     {
         DirectionalLight dl =

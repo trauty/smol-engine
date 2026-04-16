@@ -8,9 +8,9 @@ struct DrawIndirectCommand
     uint first_instance;
 };
 
-[[vk::binding(0, 1)]]
+[[vk::binding(0, 2)]]
 RWStructuredBuffer<uint> draw_counts;
-[[vk::binding(1, 1)]]
+[[vk::binding(1, 2)]]
 RWStructuredBuffer<DrawIndirectCommand> indirect_commands;
 
 bool frustumCull(float4 sphere_center, float radius, float4[6] frustum_planes)
@@ -28,7 +28,6 @@ bool frustumCull(float4 sphere_center, float radius, float4[6] frustum_planes)
 [numthreads(64, 1, 1)]
 void computeMain(uint3 thread_id: SV_DispatchThreadID)
 {
-    GlobalData globals = getGlobalData();
     if (thread_id.x >= globals.object_count) { return; }
 
     ObjectData obj = getObjectData(thread_id.x);
@@ -42,8 +41,8 @@ void computeMain(uint3 thread_id: SV_DispatchThreadID)
     {
         bool active_in_pipeline = is_visible && (obj.pipeline_index == pipeline);
 
-        uint wave_offset = WavePrefixCountBits(is_visible);
-        uint wave_total = WaveActiveCountBits(is_visible);
+        uint wave_offset = WavePrefixCountBits(active_in_pipeline);
+        uint wave_total = WaveActiveCountBits(active_in_pipeline);
         uint base_index = 0;
 
         if (WaveIsFirstLane() && wave_total > 0) { InterlockedAdd(draw_counts[pipeline], wave_total, base_index); }

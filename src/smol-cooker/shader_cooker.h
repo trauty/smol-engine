@@ -13,14 +13,6 @@ namespace smol::cooker::shader
 {
     void init();
 
-    struct descriptor_binding_info_t
-    {
-        u32_t set;
-        u32_t binding;
-        smol::descriptor_type_e type;
-        u32_t count;
-    };
-
     struct slang_compilation_res_t
     {
         std::vector<u32> vert_spirv;
@@ -29,7 +21,7 @@ namespace smol::cooker::shader
 
         std::vector<shader_module_info_t> shader_types;
         std::vector<VkFormat> target_formats;
-        std::vector<descriptor_binding_info_t> descriptor_bindings;
+        std::vector<shader_descriptor_binding_t> descriptor_bindings;
 
         bool is_compute = false;
         bool success = false;

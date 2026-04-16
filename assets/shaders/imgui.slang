@@ -9,8 +9,6 @@ struct ImGuiShader
     uint vertex_buffer_id;
 };
 
-StructuredBuffer<ImGuiShader> _reflection_ImGuiShader;
-
 struct ImGuiVertexOut
 {
     float4 pos : SV_Position;

@@ -9,6 +9,7 @@
 
 #include <algorithm>
 #include <cstring>
+#include <iterator>
 #include <mutex>
 
 namespace smol::renderer
@@ -185,44 +186,8 @@ namespace smol::renderer
 
         VK_CHECK(vkCreateDescriptorSetLayout(ctx.device, &layout_info, nullptr, &res_system.global_layout));
 
-        VkDescriptorPoolSize pool_sizes[4] = {
-            {VK_DESCRIPTOR_TYPE_SAMPLER,        MAX_SAMPLERS        },
-            {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  MAX_SAMPLED_TEXTURES},
-            {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  MAX_STORAGE_TEXTURES},
-            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, MAX_SSBOS           },
-        };
-
-        VkDescriptorPoolCreateInfo pool_info = {
-            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-            .flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT,
-            .maxSets = 16,
-            .poolSizeCount = 4,
-            .pPoolSizes = pool_sizes,
-        };
-
-        VK_CHECK(vkCreateDescriptorPool(ctx.device, &pool_info, nullptr, &res_system.global_pool));
-
-        VkDescriptorSetAllocateInfo alloc_info = {
-            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-            .descriptorPool = res_system.global_pool,
-            .descriptorSetCount = 1,
-            .pSetLayouts = &res_system.global_layout,
-        };
-
-        VK_CHECK(vkAllocateDescriptorSets(ctx.device, &alloc_info, &res_system.global_set));
-
-        res_system.texture_heap.init(MAX_SAMPLED_TEXTURES);
-        res_system.storage_image_heap.init(MAX_STORAGE_TEXTURES);
-        res_system.buffer_heap.init(MAX_SSBOS);
-
-        res_system.material_heap.init(MATERIAL_HEAP_SIZE);
-
         VkDescriptorSetLayoutBinding frame_binding = {
-            .binding = 0,
-            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            .descriptorCount = 1,
-            .stageFlags = VK_SHADER_STAGE_COMPUTE_BIT,
-            .pImmutableSamplers = nullptr,
+            0, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1, VK_SHADER_STAGE_ALL, nullptr,
         };
 
         VkDescriptorSetLayoutCreateInfo frame_layout_info = {
@@ -232,6 +197,60 @@ namespace smol::renderer
         };
 
         VK_CHECK(vkCreateDescriptorSetLayout(ctx.device, &frame_layout_info, nullptr, &res_system.frame_layout));
+
+        VkDescriptorPoolSize global_pool_sizes[5] = {
+            {VK_DESCRIPTOR_TYPE_SAMPLER,                MAX_SAMPLERS        },
+            {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,          MAX_SAMPLED_TEXTURES},
+            {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,          MAX_STORAGE_TEXTURES},
+            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,         MAX_SSBOS           },
+            {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1                   },
+        };
+
+        VkDescriptorPoolCreateInfo global_pool_info = {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+            .flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT,
+            .maxSets = 2,
+            .poolSizeCount = 5,
+            .pPoolSizes = global_pool_sizes,
+        };
+
+        VK_CHECK(vkCreateDescriptorPool(ctx.device, &global_pool_info, nullptr, &res_system.global_pool));
+
+        VkDescriptorSetLayout alloc_layouts[] = {res_system.global_layout, res_system.frame_layout};
+        VkDescriptorSetAllocateInfo alloc_info = {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
+            .descriptorPool = res_system.global_pool,
+            .descriptorSetCount = 2,
+            .pSetLayouts = alloc_layouts,
+        };
+
+        VkDescriptorSet allocated_sets[2];
+        VK_CHECK(vkAllocateDescriptorSets(ctx.device, &alloc_info, allocated_sets));
+        res_system.global_set = allocated_sets[0];
+        res_system.frame_set = allocated_sets[1];
+
+        VkDescriptorPoolSize instance_pool_sizes[] = {
+            {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER, 1024},
+            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1024},
+            {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,  1024},
+            {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,  1024},
+        };
+
+        VkDescriptorPoolCreateInfo instance_pool_info = {
+            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
+            .flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT,
+            .maxSets = 2048,
+            .poolSizeCount = 4,
+            .pPoolSizes = instance_pool_sizes,
+        };
+
+        VK_CHECK(vkCreateDescriptorPool(ctx.device, &instance_pool_info, nullptr, &res_system.instance_pool));
+
+        res_system.texture_heap.init(MAX_SAMPLED_TEXTURES);
+        res_system.storage_image_heap.init(MAX_STORAGE_TEXTURES);
+        res_system.buffer_heap.init(MAX_SSBOS);
+
+        res_system.material_heap.init(MATERIAL_HEAP_SIZE);
 
         VkSemaphoreTypeCreateInfo sem_type_info = {
             .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
@@ -250,15 +269,15 @@ namespace smol::renderer
     void shutdown_resources()
     {
         vkDestroyDescriptorPool(ctx.device, res_system.global_pool, nullptr);
+        vkDestroyDescriptorPool(ctx.device, res_system.instance_pool, nullptr);
         vkDestroyDescriptorSetLayout(ctx.device, res_system.global_layout, nullptr);
+        vkDestroyDescriptorSetLayout(ctx.device, res_system.frame_layout, nullptr);
 
         res_system.texture_heap.free_indices.clear();
         res_system.storage_image_heap.free_indices.clear();
         res_system.buffer_heap.free_indices.clear();
 
         res_system.material_heap.shutdown();
-
-        vkDestroyDescriptorSetLayout(ctx.device, res_system.frame_layout, nullptr);
 
         vkDestroySemaphore(ctx.device, res_system.timeline_semaphore, nullptr);
     }
@@ -333,6 +352,18 @@ namespace smol::renderer
             case smol::renderer::resource_type_e::SEMAPHORE:
             {
                 vkDestroySemaphore(ctx.device, del.handle.semaphore, nullptr);
+                break;
+            }
+
+            case smol::renderer::resource_type_e::DESCRIPTOR_SET_LAYOUT:
+            {
+                vkDestroyDescriptorSetLayout(ctx.device, del.handle.descriptor_set_layout, nullptr);
+                break;
+            }
+
+            case smol::renderer::resource_type_e::DESCRIPTOR_SET:
+            {
+                vkFreeDescriptorSets(ctx.device, del.handle.descriptor_set.pool, 1, &del.handle.descriptor_set.set);
                 break;
             }
             }
