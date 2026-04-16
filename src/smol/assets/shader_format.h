@@ -17,6 +17,7 @@ namespace smol
 
     struct shader_descriptor_binding_t
     {
+        u32_t name_hash;
         u32_t set;
         u32_t binding;
         descriptor_type_e type;

@@ -44,6 +44,22 @@ namespace smol::cooker::shader
         return VK_FORMAT_UNDEFINED;
     }
 
+    std::string extract_struct_name(const std::string& code)
+    {
+        size_t config_pos = code.find("ShaderConfig");
+        if (config_pos == std::string::npos) { return ""; }
+
+        size_t pos = code.find("struct ", config_pos);
+        if (pos == std::string::npos) { return ""; }
+
+        pos += 7;
+        while (pos < code.size() && std::isspace(code[pos])) { pos++; }
+        size_t start = pos;
+        while (pos < code.size() && (std::isalnum(code[pos]) || code[pos] == '_')) { pos++; }
+
+        return code.substr(start, pos - start);
+    }
+
     smol::descriptor_type_e map_slang_type_to_descriptor(slang::TypeReflection* type)
     {
         slang::TypeReflection::Kind kind = type->getKind();
@@ -78,9 +94,10 @@ namespace smol::cooker::shader
 
             u32_t set = param->getBindingSpace();
 
-            if (set == 0) { continue; } // ignore bindless and globals set
+            if (set < 2) { continue; } // ignore bindless and globals sets
 
-            descriptor_binding_info_t binding;
+            shader_descriptor_binding_t binding;
+            binding.name_hash = smol::hash_string(param->getName());
             binding.set = set;
             binding.binding = param->getBindingIndex();
             binding.count = 1;
@@ -420,7 +437,7 @@ namespace smol::cooker::shader
         if (!res.descriptor_bindings.empty())
         {
             out.write(reinterpret_cast<const char*>(res.descriptor_bindings.data()),
-                      res.descriptor_bindings.size() * sizeof(descriptor_binding_info_t));
+                      res.descriptor_bindings.size() * sizeof(shader_descriptor_binding_t));
         }
 
         if (!res.vert_spirv.empty())
@@ -453,6 +470,9 @@ namespace smol::cooker::shader
 
         std::string source((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
         std::string module_name = std::filesystem::path(input_path).stem().string();
+
+        std::string struct_name = extract_struct_name(source);
+        if (!struct_name.empty()) { source += "\nStructuredBuffer<" + struct_name + "> _reflection;\n"; }
 
         for (const std::string& dir : input_dirs)
         {

@@ -9,6 +9,9 @@ public RWTexture2D<float4> global_storage_images[];
 [[vk::binding(3, 0)]]
 public ByteAddressBuffer global_buffers[];
 
+[[vk::binding(0, 1)]]
+public ConstantBuffer<GlobalData> globals;
+
 public Texture2D getTexture(uint id) { return global_textures[NonUniformResourceIndex(id)]; }
 public SamplerState getSampler(uint id) { return global_samplers[NonUniformResourceIndex(id)]; }
 public ByteAddressBuffer getBuffer(uint id) { return global_buffers[NonUniformResourceIndex(id)]; }
@@ -40,6 +43,7 @@ public struct ObjectData
     public uint vertex_count;
     public float bounding_sphere_radius;
     public uint pipeline_index;
+    public uint _pad;
     public float4 bounding_sphere_center;
 };
 
@@ -62,23 +66,19 @@ public struct GlobalData
     public uint spot_light_count;
 
     public uint object_count;
-
-    public uint indirect_buffer_id;
     public uint active_pipeline_count;
 };
 
 public struct PushConstants
 {
-    public uint global_buffer_id;
     public uint object_buffer_id;
     public uint material_buffer_id;
     public uint custom_data;
+    public uint _pad;
 };
 
 [[vk::push_constant]]
 public ConstantBuffer<PushConstants> pc;
-
-public GlobalData getGlobalData() { return getBuffer(pc.global_buffer_id).Load<GlobalData>(0); }
 
 public ObjectData getObjectData(uint object_id)
 {
@@ -108,7 +108,6 @@ public VertexOut defaultVertexTransform(uint vertex_id, uint instance_id, uint b
     uint actual_instance_id = instance_id + base_instance;
 
     ObjectData obj = getObjectData(actual_instance_id);
-    GlobalData globals = getGlobalData();
 
     Vertex vertex = getIndexedVertex(obj.vertex_buffer_id, obj.index_buffer_id, vertex_id);
 

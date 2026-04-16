@@ -20,7 +20,8 @@ namespace smol::renderer
         SWAPCHAIN,
         IMAGE_VIEW,
         SEMAPHORE,
-        DESCRIPTOR_SET_LAYOUT
+        DESCRIPTOR_SET_LAYOUT,
+        DESCRIPTOR_SET
     };
 
     constexpr u32_t SAMPLERS_BINDING_POINT = 0;
@@ -80,6 +81,12 @@ namespace smol::renderer
             VkImageView image_view;
             VkSemaphore semaphore;
             VkDescriptorSetLayout descriptor_set_layout;
+
+            struct
+            {
+                VkDescriptorPool pool;
+                VkDescriptorSet set;
+            } descriptor_set;
         } handle;
 
         u32_t bindless_id;
@@ -130,10 +137,13 @@ namespace smol::renderer
     struct resource_system_t
     {
         VkDescriptorSetLayout global_layout;
+        VkDescriptorSetLayout frame_layout;
+
         VkDescriptorPool global_pool;
         VkDescriptorSet global_set;
+        VkDescriptorSet frame_set;
 
-        VkDescriptorSetLayout frame_layout;
+        VkDescriptorPool instance_pool;
 
         descriptor_heap_t buffer_heap;
         descriptor_heap_t texture_heap;

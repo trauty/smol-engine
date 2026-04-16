@@ -56,7 +56,6 @@ int main(i32 argc, char** argv)
     std::filesystem::create_directories(output_dir + "/shaders");
 
     std::vector<std::filesystem::path> core_shader_deps;
-    std::unordered_map<std::string, std::vector<std::filesystem::path>> module_deps_by_mode;
 
     for (const std::string& dir : all_shader_dirs)
     {
@@ -66,73 +65,8 @@ int main(i32 argc, char** argv)
         {
             if (entry.is_regular_file() && entry.path().extension() == ".slang")
             {
-                std::string filename = entry.path().filename().string();
-                if (filename.find("uber_") != std::string::npos) { continue; }
-
-                std::ifstream file(entry.path());
-                std::string content((std::istreambuf_iterator<char>(file)), std::istreambuf_iterator<char>());
-
-                bool is_pipeline =
-                    content.find("vertexMain") != std::string::npos || content.find("computeMain") != std::string::npos;
-                bool is_module = content.find("ShaderConfig") != std::string::npos &&
-                                 content.find("IShaderModule") != std::string::npos;
-
-                if (is_module)
-                {
-                    std::string blend_mode = "Opaque";
-                    if (content.find("\"Cutout\"") != std::string::npos) blend_mode = "Cutout";
-                    else if (content.find("\"TransparentAlpha\"") != std::string::npos) blend_mode = "TransparentAlpha";
-                    else if (content.find("\"TransparentAdd\"") != std::string::npos) blend_mode = "TransparentAdd";
-                    else if (content.find("\"TransparentMult\"") != std::string::npos) blend_mode = "TransparentMult";
-
-                    module_deps_by_mode[blend_mode].push_back(entry.path());
-                }
-                else if (!is_pipeline) { core_shader_deps.push_back(entry.path()); }
-            }
-        }
-    }
-
-    std::vector<std::string> blend_modes = {
-        "Opaque", "Cutout", "TransparentAlpha", "TransparentAdd", "TransparentMult",
-    };
-    for (const std::string& mode : blend_modes)
-    {
-        std::string mode_lower = to_lower(mode);
-        if (mode == "TransparentAlpha") { mode_lower = "transparent_alpha"; }
-        if (mode == "TransparentAdd") { mode_lower = "transparent_add"; }
-        if (mode == "TransparentMult") { mode_lower = "transparent_mult"; }
-
-        if (module_deps_by_mode[mode].empty()) { continue; }
-
-        std::string out_path = output_dir + "/shaders/uber_" + mode_lower + ".smolshader";
-        std::string pseudo_path = "uber_" + mode_lower + ".slang";
-
-        std::vector<std::filesystem::path> uber_deps = core_shader_deps;
-        for (const auto& mod_path : module_deps_by_mode[mode]) { uber_deps.push_back(mod_path); }
-
-        if (cache.needs_cooking(out_path, uber_deps))
-        {
-            SMOL_LOG_INFO("SHADER_COOKER", "Cooking uber shader: {} -> {}", mode, out_path);
-
-            std::string source = smol::cooker::shader::generate_uber_shader(mode, all_shader_dirs);
-
-            if (source.empty())
-            {
-                SMOL_LOG_INFO("SHADER_COOKER", "No shader modules found for {}, skipping", mode);
-                continue;
-            }
-
-            smol::cooker::shader::slang_compilation_res_t res = smol::cooker::shader::compile_slang_to_spirv(
-                "uber_" + mode_lower, pseudo_path, source, all_shader_dirs);
-
-            if (res.success)
-            {
-                smol::cooker::shader::write_smolshader(out_path, res);
-                cache.update_cache(out_path, uber_deps);
-            }
-            else
-            {
-                SMOL_LOG_ERROR("SHADER_COOKER", "Failed to compile uber shader: {}", mode);
+                std::string path = entry.path().generic_string();
+                if (!smol::cooker::shader::is_compilable_pipeline(path)) { core_shader_deps.push_back(entry.path()); }
             }
         }
     }

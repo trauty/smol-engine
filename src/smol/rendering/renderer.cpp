@@ -4,15 +4,18 @@
 #include "smol/assets/material.h"
 #include "smol/assets/mesh.h"
 #include "smol/assets/shader.h"
+#include "smol/assets/texture.h"
 #include "smol/components/camera.h"
 #include "smol/components/lighting.h"
 #include "smol/components/renderer.h"
 #include "smol/components/transform.h"
 #include "smol/defines.h"
 #include "smol/ecs_fwd.h"
+#include "smol/hash.h"
 #include "smol/log.h"
 #include "smol/math.h"
 #include "smol/profiling.h"
+#include "smol/rendering/renderer_constants.h"
 #include "smol/rendering/renderer_resources.h"
 #include "smol/rendering/renderer_types.h"
 #include "smol/rendering/rendergraph.h"
@@ -113,60 +116,29 @@ namespace smol::renderer
         {
             per_frame_t& frame_data = ctx.per_frame_objects[ctx.cur_frame];
 
+            if (frame_data.object_counter == 0 || frame_data.active_pipelines.empty()) return;
+
             push_constants_t pc_data = {
-                frame_data.global_bindless_id,
                 frame_data.object_bindless_id,
                 res_system.material_heap.bindless_id,
-                0,
             };
 
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.opaque_uber_shader->pipeline_layout, 0, 1,
-                                    &res_system.global_set, 0, nullptr);
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.opaque_uber_shader->pipeline);
-            vkCmdPushConstants(cmd, ctx.opaque_uber_shader->pipeline_layout,
-                               VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push_constants_t),
-                               &pc_data);
-            vkCmdDrawIndirectCount(cmd, frame_data.indirect_buffers[0], 0, frame_data.draw_counts_buffer,
-                                   0 * sizeof(u32_t), frame_data.object_counter, sizeof(VkDrawIndirectCommand));
-
-            if (ctx.cutout_uber_shader)
+            for (const active_pipeline_t& p : frame_data.active_pipelines)
             {
-                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.cutout_uber_shader->pipeline);
-                vkCmdPushConstants(cmd, ctx.cutout_uber_shader->pipeline_layout,
-                                   VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-                                   sizeof(push_constants_t), &pc_data);
-                vkCmdDrawIndirectCount(cmd, frame_data.indirect_buffers[1], 0, frame_data.draw_counts_buffer,
-                                       1 * sizeof(u32_t), frame_data.object_counter, sizeof(VkDrawIndirectCommand));
-            }
+                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, p.pipeline);
 
-            if (ctx.transparent_alpha_uber_shader)
-            {
-                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.transparent_alpha_uber_shader->pipeline);
-                vkCmdPushConstants(cmd, ctx.transparent_alpha_uber_shader->pipeline_layout,
-                                   VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-                                   sizeof(push_constants_t), &pc_data);
-                vkCmdDrawIndirectCount(cmd, frame_data.indirect_buffers[2], 0, frame_data.draw_counts_buffer,
-                                       2 * sizeof(u32_t), frame_data.object_counter, sizeof(VkDrawIndirectCommand));
-            }
+                VkDescriptorSet sets[] = {res_system.global_set, res_system.frame_set};
 
-            if (ctx.transparent_add_uber_shader)
-            {
-                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.transparent_add_uber_shader->pipeline);
-                vkCmdPushConstants(cmd, ctx.transparent_add_uber_shader->pipeline_layout,
-                                   VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, p.layout, 0, 2, sets, 1,
+                                        &frame_data.global_data_offset);
+                vkCmdPushConstants(cmd, p.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                                    sizeof(push_constants_t), &pc_data);
-                vkCmdDrawIndirectCount(cmd, frame_data.indirect_buffers[3], 0, frame_data.draw_counts_buffer,
-                                       3 * sizeof(u32_t), frame_data.object_counter, sizeof(VkDrawIndirectCommand));
-            }
 
-            if (ctx.transparent_mult_uber_shader)
-            {
-                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.transparent_mult_uber_shader->pipeline);
-                vkCmdPushConstants(cmd, ctx.transparent_mult_uber_shader->pipeline_layout,
-                                   VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
-                                   sizeof(push_constants_t), &pc_data);
-                vkCmdDrawIndirectCount(cmd, frame_data.indirect_buffers[4], 0, frame_data.draw_counts_buffer,
-                                       4 * sizeof(u32_t), frame_data.object_counter, sizeof(VkDrawIndirectCommand));
+                u32_t indirect_offset = p.pipeline_index * frame_data.object_counter * 16;
+                u32_t counts_offset = p.pipeline_index * sizeof(u32_t);
+
+                vkCmdDrawIndirectCount(cmd, frame_data.indirect_buffer, indirect_offset, frame_data.draw_counts_buffer,
+                                       counts_offset, frame_data.object_counter, 16);
             }
         };
 
@@ -191,13 +163,16 @@ namespace smol::renderer
 
             material->sync();
 
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, material->shader->pipeline);
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, material->shader->pipeline_layout, 0, 1,
-                                    &res_system.global_set, 0, nullptr);
-
             per_frame_t& frame_data = ctx.per_frame_objects[ctx.cur_frame];
+
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, material->shader->pipeline);
+
+            VkDescriptorSet sets[] = {res_system.global_set, res_system.frame_set};
+
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, material->shader->pipeline_layout, 0, 2, sets,
+                                    1, &frame_data.global_data_offset);
+
             push_constants_t pc_data = {
-                frame_data.global_bindless_id,
                 frame_data.object_bindless_id,
                 res_system.material_heap.bindless_id,
                 material->heap_offset[ctx.cur_frame],
@@ -232,21 +207,22 @@ namespace smol::renderer
 
             material->sync();
 
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, material->shader->pipeline);
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, material->shader->pipeline_layout, 0, 1,
-                                    &res_system.global_set, 0, nullptr);
-
             per_frame_t& frame_data = ctx.per_frame_objects[ctx.cur_frame];
+
+            VkDescriptorSet sets[] = {res_system.global_set, res_system.frame_set};
+
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, material->shader->pipeline);
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, material->shader->pipeline_layout, 0, 2, sets,
+                                    1, &frame_data.global_data_offset);
+
             push_constants_t pc_data = {
-                frame_data.global_bindless_id,
                 frame_data.object_bindless_id,
                 res_system.material_heap.bindless_id,
                 material->heap_offset[ctx.cur_frame],
             };
 
-            vkCmdPushConstants(cmd, material->shader->pipeline_layout,
-                               VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push_constants_t),
-                               &pc_data);
+            vkCmdPushConstants(cmd, material->shader->pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+                               sizeof(push_constants_t), &pc_data);
 
             vkCmdDispatch(cmd, dispatch_x, dispatch_y, dispatch_z);
         };
@@ -452,9 +428,11 @@ namespace smol::renderer
         }
 
         std::vector<VkDeviceQueueCreateInfo> queue_infos;
-        std::set<u32_t> unique_families = {ctx.queue_fam_indices.graphics_family.value(),
-                                           ctx.queue_fam_indices.present_family.value(),
-                                           ctx.queue_fam_indices.transfer_family.value()};
+        std::set<u32_t> unique_families = {
+            ctx.queue_fam_indices.graphics_family.value(),
+            ctx.queue_fam_indices.present_family.value(),
+            ctx.queue_fam_indices.transfer_family.value(),
+        };
 
         float priority = 1.0f;
         for (u32_t family : unique_families)
@@ -622,64 +600,72 @@ namespace smol::renderer
         vkDestroyCommandPool(ctx.device, tracy_pool, nullptr);
 #endif
 
-        auto register_modules = [](asset_t<shader_t> uber_shader)
+        auto create_mapped_buffer =
+            [](VkDeviceSize size, VkBufferUsageFlags usage, VkBuffer& buffer, VmaAllocation& alloc, void*& mapped_mem)
         {
-            if (!uber_shader) return;
+            VkBufferCreateInfo buf_info = {
+                .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                .size = size,
+                .usage = usage,
+            };
+            VmaAllocationCreateInfo alloc_info = {
+                .flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
+                .usage = VMA_MEMORY_USAGE_AUTO,
+                .requiredFlags = VK_MEMORY_PROPERTY_HOST_COHERENT_BIT,
+            };
 
-            for (u32_t i = 0; i < uber_shader->modules.size(); i++)
-            {
-                const shader_module_info_t& module = uber_shader->modules[i];
-
-                ctx.shader_registry[module.name] = {uber_shader, i};
-                SMOL_LOG_INFO("RENDERER", "Registered shader module: {} (ID: {})", module.name, i);
-            }
+            VmaAllocationInfo vma_alloc_info;
+            VK_CHECK(vmaCreateBuffer(ctx.allocator, &buf_info, &alloc_info, &buffer, &alloc, &vma_alloc_info));
+            mapped_mem = vma_alloc_info.pMappedData;
         };
 
+        VkDeviceSize min_alignment = ctx.properties.limits.minUniformBufferOffsetAlignment;
+        ctx.global_data_aligned_size = (sizeof(global_data_t) + min_alignment - 1) & ~(min_alignment - 1);
+
+        void* mapped_global_data;
+        create_mapped_buffer(ctx.global_data_aligned_size * MAX_FRAMES_IN_FLIGHT, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
+                             ctx.global_data_buffer, ctx.global_data_alloc, mapped_global_data);
+
+        ctx.global_data_mapped = static_cast<u8*>(mapped_global_data);
+
+        for (u32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
+        {
+            u32_t offset = i * ctx.global_data_aligned_size;
+            ctx.per_frame_objects[i].mapped_global_data =
+                reinterpret_cast<global_data_t*>(ctx.global_data_mapped + offset);
+            ctx.per_frame_objects[i].global_data_offset = offset;
+        }
+
+        VkDescriptorBufferInfo ubo_info = {
+            .buffer = ctx.global_data_buffer,
+            .offset = 0,
+            .range = sizeof(global_data_t),
+        };
+
+        VkWriteDescriptorSet write_desc = {
+            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
+            .dstSet = res_system.frame_set,
+            .dstBinding = 0,
+            .dstArrayElement = 0,
+            .descriptorCount = 1,
+            .descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC,
+            .pBufferInfo = &ubo_info,
+        };
+        vkUpdateDescriptorSets(ctx.device, 1, &write_desc, 0, nullptr);
+
         ctx.culling_shader = smol::load_asset_sync<shader_t>("engine://assets/shaders/culling.slang");
+        ctx.culling_instance.init(ctx.culling_shader);
 
-        ctx.opaque_uber_shader = smol::load_asset_sync<shader_t>("game://assets/shaders/uber_opaque.slang");
-        register_modules(ctx.opaque_uber_shader);
+        ctx.default_tex = smol::load_asset_sync<texture_t>("engine://assets/textures/default_white.png");
 
-        if (smol::vfs::exists("game://assets/shaders/uber_cutout.smolshader"))
-        {
-            ctx.cutout_uber_shader = smol::load_asset_sync<shader_t>("game://assets/shaders/uber_cutout.slang");
-            register_modules(ctx.cutout_uber_shader);
-        }
-
-        if (smol::vfs::exists("game://assets/shaders/uber_transparent_alpha.smolshader"))
-        {
-            ctx.transparent_alpha_uber_shader =
-                smol::load_asset_sync<shader_t>("game://assets/shaders/uber_transparent_alpha.slang");
-            register_modules(ctx.transparent_alpha_uber_shader);
-        }
-
-        if (smol::vfs::exists("game://assets/shaders/uber_transparent_add.smolshader"))
-        {
-            ctx.transparent_add_uber_shader =
-                smol::load_asset_sync<shader_t>("game://assets/shaders/uber_transparent_add.slang");
-            register_modules(ctx.transparent_add_uber_shader);
-        }
-
-        if (smol::vfs::exists("game://assets/shaders/uber_transparent_mult.smolshader"))
-        {
-            ctx.transparent_mult_uber_shader =
-                smol::load_asset_sync<shader_t>("game://assets/shaders/uber_transparent_mult.slang");
-            register_modules(ctx.transparent_mult_uber_shader);
-        }
         return true;
     }
 
     void reset_assets()
     {
-        ctx.shader_registry.clear();
+        ctx.culling_instance.shutdown();
         ctx.culling_shader.release();
-
-        ctx.opaque_uber_shader.release();
-        ctx.cutout_uber_shader.release();
-        ctx.transparent_alpha_uber_shader.release();
-        ctx.transparent_add_uber_shader.release();
-        ctx.transparent_mult_uber_shader.release();
-
+        ctx.default_tex.release();
         rendergraph.clear();
         custom_renderer_features.clear();
     }
@@ -712,6 +698,11 @@ namespace smol::renderer
         for (per_frame_t& frame_data : ctx.per_frame_objects) { shutdown_per_frame(frame_data); }
 
         ctx.per_frame_objects.clear();
+
+        if (ctx.global_data_buffer != VK_NULL_HANDLE)
+        {
+            vmaDestroyBuffer(ctx.allocator, ctx.global_data_buffer, ctx.global_data_alloc);
+        }
 
         for (VkImageView image_view : ctx.swapchain.views) { vkDestroyImageView(ctx.device, image_view, nullptr); }
 
@@ -935,15 +926,28 @@ namespace smol::renderer
         frame_data.mapped_global_data->spot_light_count = spot_count;
         frame_data.mapped_global_data->spot_light_buffer_id = frame_data.spot_light_bindless_id;
 
-        u32_t cur_object_id = 0;
+        auto get_blend_key = [](const std::string& mode) -> u32_t
+        {
+            if (mode == "Opaque") return 0;
+            else if (mode == "Cutout") return 1;
+            else if (mode == "TransparentAlpha") return 2;
+            else if (mode == "TransparentAdd") return 3;
+            else if (mode == "TransparentMult") return 4;
+            return 5;
+        };
 
         reg.sort<mesh_renderer_t>(
-            [](const mesh_renderer_t& lhs, const mesh_renderer_t& rhs)
+            [&](const mesh_renderer_t& lhs, const mesh_renderer_t& rhs)
             {
                 if (!lhs.material->shader || !rhs.material->shader)
                 {
                     return lhs.material->shader > rhs.material->shader;
                 }
+
+                u32_t l_key = get_blend_key(lhs.material->shader->module.blend_mode);
+                u32_t r_key = get_blend_key(rhs.material->shader->module.blend_mode);
+
+                if (l_key != r_key) { return l_key < r_key; }
 
                 if (lhs.material->shader->pipeline != rhs.material->shader->pipeline)
                 {
@@ -953,12 +957,27 @@ namespace smol::renderer
                 return lhs.material.get() < rhs.material.get();
             });
 
+        u32_t cur_object_id = 0;
+        frame_data.active_pipelines.clear();
+        VkPipeline last_pipeline = VK_NULL_HANDLE;
+
         auto view = reg.view<transform_t, mesh_renderer_t>();
         for (auto [entity, transform, renderer] : view.each())
         {
             if (!renderer.active || !renderer.mesh || !renderer.material || !renderer.material->shader) { continue; }
 
             renderer.material->sync();
+
+            if (renderer.material->shader->pipeline != last_pipeline)
+            {
+                last_pipeline = renderer.material->shader->pipeline;
+                frame_data.active_pipelines.push_back({
+                    last_pipeline,
+                    renderer.material->shader->pipeline_layout,
+                    static_cast<u32_t>(frame_data.active_pipelines.size()),
+                    get_blend_key(renderer.material->shader->module.blend_mode),
+                });
+            }
 
             object_data_t& obj_data = frame_data.mapped_object_data[cur_object_id];
             std::memcpy(obj_data.model_matrix.data, &transform.world_mat, sizeof(mat4_t));
@@ -975,28 +994,7 @@ namespace smol::renderer
             obj_data.vertex_count = renderer.mesh->vertex_count;
             obj_data.index_count = renderer.mesh->index_count;
 
-            obj_data.material_type = renderer.material->type_id;
-
-            const std::string& blend_mode =
-                renderer.material->shader->modules[renderer.material->shader_module_idx].blend_mode;
-
-            if (blend_mode == "Cutout") { obj_data.bin_index = static_cast<u32_t>(render_bin_e::CUTOUT); }
-            else if (blend_mode == "TransparentAlpha")
-            {
-                obj_data.bin_index = static_cast<u32_t>(render_bin_e::TRANSPARENT_ALPHA);
-            }
-            else if (blend_mode == "TransparentAdd")
-            {
-                obj_data.bin_index = static_cast<u32_t>(render_bin_e::TRANSPARENT_ADD);
-            }
-            else if (blend_mode == "TransparentMult")
-            {
-                obj_data.bin_index = static_cast<u32_t>(render_bin_e::TRANSPARENT_MULT);
-            }
-            else
-            {
-                obj_data.bin_index = static_cast<u32_t>(render_bin_e::OPAQUE);
-            }
+            obj_data.pipeline_index = frame_data.active_pipelines.back().pipeline_index;
 
             vec3_t world_center;
             vec3_t local_c = renderer.mesh->local_center;
@@ -1022,45 +1020,89 @@ namespace smol::renderer
 
         frame_data.object_counter = cur_object_id;
         frame_data.mapped_global_data->object_count = cur_object_id;
+        frame_data.mapped_global_data->active_pipeline_count = frame_data.active_pipelines.size();
 
-        std::vector<VkBufferMemoryBarrier2> fill_barriers;
-        for (u32_t i = 0; i < MAX_BINS; i++)
+        if (cur_object_id > 0 && !frame_data.active_pipelines.empty())
         {
-            frame_data.mapped_global_data->indirect_buffer_ids[i] = frame_data.indirect_bindless_ids[i];
-        }
+            VkDeviceSize req_counts = frame_data.active_pipelines.size() * sizeof(u32_t);
+            VkDeviceSize req_indirect = frame_data.active_pipelines.size() * cur_object_id * 16;
 
-        vkCmdFillBuffer(cmd, frame_data.draw_counts_buffer, 0, sizeof(u32_t) * MAX_BINS, 0);
+            auto create_device_buffer =
+                [](VkDeviceSize size, VkBufferUsageFlags usage, VkBuffer& buffer, VmaAllocation& alloc)
+            {
+                VkBufferCreateInfo buf_info = {
+                    .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                    .size = size,
+                    .usage = usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+                };
+                VmaAllocationCreateInfo alloc_info = {
+                    .usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
+                };
 
-        fill_barriers.push_back({
-            .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
-            .srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
-            .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
-            .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-            .dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-            .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-            .buffer = frame_data.draw_counts_buffer,
-            .offset = 0,
-            .size = sizeof(u32_t) * MAX_BINS,
-        });
+                VK_CHECK(vmaCreateBuffer(ctx.allocator, &buf_info, &alloc_info, &buffer, &alloc, nullptr));
+            };
 
-        VkDependencyInfo fill_dep_info = {
-            .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-            .bufferMemoryBarrierCount = static_cast<u32_t>(fill_barriers.size()),
-            .pBufferMemoryBarriers = fill_barriers.data(),
-        };
+            if (frame_data.draw_counts_size < req_counts)
+            {
+                if (frame_data.draw_counts_buffer != VK_NULL_HANDLE)
+                {
+                    vmaDestroyBuffer(ctx.allocator, frame_data.draw_counts_buffer, frame_data.draw_counts_alloc);
+                }
 
-        vkCmdPipelineBarrier2(cmd, &fill_dep_info);
+                create_device_buffer(req_counts,
+                                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
+                                     frame_data.draw_counts_buffer, frame_data.draw_counts_alloc);
+                frame_data.draw_counts_size = req_counts;
+            }
 
-        if (cur_object_id > 0)
-        {
+            if (frame_data.indirect_size < req_indirect)
+            {
+                if (frame_data.indirect_buffer != VK_NULL_HANDLE)
+                {
+                    vmaDestroyBuffer(ctx.allocator, frame_data.indirect_buffer, frame_data.indirect_alloc);
+                }
+
+                create_device_buffer(req_indirect,
+                                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
+                                     frame_data.indirect_buffer, frame_data.indirect_alloc);
+                frame_data.indirect_size = req_indirect;
+            }
+
+            vkCmdFillBuffer(cmd, frame_data.draw_counts_buffer, 0, req_counts, 0);
+
+            VkBufferMemoryBarrier2 fill_barrier = {
+                .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+                .srcStageMask = VK_PIPELINE_STAGE_2_TRANSFER_BIT,
+                .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
+                .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                .dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                .buffer = frame_data.draw_counts_buffer,
+                .offset = 0,
+                .size = req_counts,
+            };
+
+            VkDependencyInfo fill_dep_info = {
+                .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
+                .bufferMemoryBarrierCount = 1,
+                .pBufferMemoryBarriers = &fill_barrier,
+            };
+
+            vkCmdPipelineBarrier2(cmd, &fill_dep_info);
+
+            ctx.culling_instance.set_buffer("draw_counts"_h, frame_data.draw_counts_buffer);
+            ctx.culling_instance.set_buffer("indirect_commands"_h, frame_data.indirect_buffer);
+            ctx.culling_instance.sync();
+
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, ctx.culling_shader->pipeline);
-            VkDescriptorSet sets[] = {res_system.global_set, frame_data.frame_descriptor_set};
+
+            VkDescriptorSet sets[] = {res_system.global_set, res_system.frame_set};
+
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, ctx.culling_shader->pipeline_layout, 0, 2,
-                                    sets, 0, nullptr);
+                                    sets, 1, &frame_data.global_data_offset);
+
+            ctx.culling_instance.bind(cmd);
 
             push_constants_t pc_data = {
-                frame_data.global_bindless_id,
                 frame_data.object_bindless_id,
                 res_system.material_heap.bindless_id,
                 0,
@@ -1070,40 +1112,33 @@ namespace smol::renderer
 
             vkCmdDispatch(cmd, (cur_object_id + 63) / 64, 1, 1);
 
-            std::vector<VkBufferMemoryBarrier2> indirect_barriers;
-            for (u32_t i = 0; i < MAX_BINS; i++)
-            {
-                indirect_barriers.push_back({
-                    .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
-                    .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                    .srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-                    .dstStageMask = VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
-                    .dstAccessMask = VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT,
-                    .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                    .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                    .buffer = frame_data.indirect_buffers[i],
-                    .offset = 0,
-                    .size = sizeof(VkDrawIndirectCommand) * cur_object_id,
-                });
-            }
-
-            indirect_barriers.push_back({
+            VkBufferMemoryBarrier2 indirect_barriers[2] = {};
+            indirect_barriers[0] = {
                 .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
                 .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                 .srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
                 .dstStageMask = VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
                 .dstAccessMask = VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT,
-                .srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
-                .dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED,
+                .buffer = frame_data.indirect_buffer,
+                .offset = 0,
+                .size = req_indirect,
+            };
+
+            indirect_barriers[1] = {
+                .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
+                .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
+                .srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
+                .dstStageMask = VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
+                .dstAccessMask = VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT,
                 .buffer = frame_data.draw_counts_buffer,
                 .offset = 0,
-                .size = sizeof(u32_t) * MAX_BINS,
-            });
+                .size = req_counts,
+            };
 
             VkDependencyInfo indirect_dep_info = {
                 .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
-                .bufferMemoryBarrierCount = static_cast<u32_t>(indirect_barriers.size()),
-                .pBufferMemoryBarriers = indirect_barriers.data(),
+                .bufferMemoryBarrierCount = 2,
+                .pBufferMemoryBarriers = indirect_barriers,
             };
 
             vkCmdPipelineBarrier2(cmd, &indirect_dep_info);
@@ -1690,64 +1725,16 @@ namespace smol::renderer
             VK_CHECK(vmaCreateBuffer(ctx.allocator, &buf_info, &alloc_info, &buffer, &alloc, nullptr));
         };
 
-        create_mapped_buffer(sizeof(global_data_t), VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, frame_data.global_buffer,
-                             frame_data.global_allocation, (void*&)frame_data.mapped_global_data);
-        make_bindless(frame_data.global_buffer, frame_data.global_bindless_id);
-
         create_mapped_buffer(sizeof(object_data_t) * ecs::MAX_ENTITIES, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                              frame_data.object_buffer, frame_data.object_allocation,
                              (void*&)frame_data.mapped_object_data);
         make_bindless(frame_data.object_buffer, frame_data.object_bindless_id);
 
-        for (u32_t i = 0; i < MAX_BINS; i++)
-        {
-            create_device_buffer(sizeof(VkDrawIndirectCommand) * ecs::MAX_ENTITIES,
-                                 VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
-                                 frame_data.indirect_buffers[i], frame_data.indirect_allocations[i]);
-            make_bindless(frame_data.indirect_buffers[i], frame_data.indirect_bindless_ids[i]);
-        }
+        frame_data.indirect_buffer = VK_NULL_HANDLE;
+        frame_data.indirect_size = 0;
 
-        create_device_buffer(sizeof(u32_t) * MAX_BINS,
-                             VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT | VK_BUFFER_USAGE_STORAGE_BUFFER_BIT |
-                                 VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                             frame_data.draw_counts_buffer, frame_data.draw_counts_allocation);
-
-        VkDescriptorPoolSize pool_size = {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, 1};
-        VkDescriptorPoolCreateInfo frame_pool_info = {
-            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
-            .flags = 0,
-            .maxSets = 1,
-            .poolSizeCount = 1,
-            .pPoolSizes = &pool_size,
-        };
-
-        VK_CHECK(vkCreateDescriptorPool(ctx.device, &frame_pool_info, nullptr, &frame_data.frame_descriptor_pool));
-
-        VkDescriptorSetAllocateInfo frame_set_alloc_info = {
-            .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO,
-            .descriptorPool = frame_data.frame_descriptor_pool,
-            .descriptorSetCount = 1,
-            .pSetLayouts = &res_system.frame_layout,
-        };
-
-        VK_CHECK(vkAllocateDescriptorSets(ctx.device, &frame_set_alloc_info, &frame_data.frame_descriptor_set));
-
-        VkDescriptorBufferInfo counts_desc_info = {
-            .buffer = frame_data.draw_counts_buffer,
-            .offset = 0,
-            .range = VK_WHOLE_SIZE,
-        };
-        VkWriteDescriptorSet counts_write_desc = {
-            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = frame_data.frame_descriptor_set,
-            .dstBinding = 0,
-            .dstArrayElement = 0,
-            .descriptorCount = 1,
-            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            .pBufferInfo = &counts_desc_info,
-        };
-
-        vkUpdateDescriptorSets(ctx.device, 1, &counts_write_desc, 0, nullptr);
+        frame_data.draw_counts_buffer = VK_NULL_HANDLE;
+        frame_data.draw_counts_size = 0;
 
         create_mapped_buffer(MAX_MATERIAL_BUFFER_SIZE, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, frame_data.material_buffer,
                              frame_data.material_allocation, (void*&)frame_data.mapped_material_data);
@@ -1794,35 +1781,20 @@ namespace smol::renderer
             frame_data.swapchain_acquire_semaphore = VK_NULL_HANDLE;
         }
 
-        if (frame_data.global_buffer != VK_NULL_HANDLE)
-        {
-            vmaDestroyBuffer(ctx.allocator, frame_data.global_buffer, frame_data.global_allocation);
-            res_system.buffer_heap.release(frame_data.global_bindless_id);
-        }
-
         if (frame_data.object_buffer != VK_NULL_HANDLE)
         {
             vmaDestroyBuffer(ctx.allocator, frame_data.object_buffer, frame_data.object_allocation);
             res_system.buffer_heap.release(frame_data.object_bindless_id);
         }
 
-        for (u32_t i = 0; i < MAX_BINS; i++)
+        if (frame_data.indirect_buffer != VK_NULL_HANDLE)
         {
-            if (frame_data.indirect_buffers[i] != VK_NULL_HANDLE)
-            {
-                vmaDestroyBuffer(ctx.allocator, frame_data.indirect_buffers[i], frame_data.indirect_allocations[i]);
-                res_system.buffer_heap.release(frame_data.indirect_bindless_ids[i]);
-            }
+            vmaDestroyBuffer(ctx.allocator, frame_data.indirect_buffer, frame_data.indirect_alloc);
         }
 
         if (frame_data.draw_counts_buffer != VK_NULL_HANDLE)
         {
-            vmaDestroyBuffer(ctx.allocator, frame_data.draw_counts_buffer, frame_data.draw_counts_allocation);
-        }
-
-        if (frame_data.frame_descriptor_pool != VK_NULL_HANDLE)
-        {
-            vkDestroyDescriptorPool(ctx.device, frame_data.frame_descriptor_pool, nullptr);
+            vmaDestroyBuffer(ctx.allocator, frame_data.draw_counts_buffer, frame_data.draw_counts_alloc);
         }
 
         if (frame_data.material_buffer != VK_NULL_HANDLE)
@@ -1982,11 +1954,6 @@ namespace smol::renderer
         VK_CHECK(vkCreateSampler(ctx.device, &sampler_info, nullptr, &sampler));
 
         return sampler;
-    }
-
-    void register_custom_shader(asset_t<shader_t> shader)
-    {
-        for (const shader_module_info_t& module : shader->modules) { ctx.shader_registry[module.name] = {shader, 0}; }
     }
 
     void set_render_resolution(u32_t width, u32_t height)

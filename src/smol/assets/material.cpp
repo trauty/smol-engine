@@ -1,5 +1,6 @@
 #include "material.h"
 
+#include "smol/asset.h"
 #include "smol/assets/shader.h"
 #include "smol/log.h"
 #include "smol/rendering/renderer.h"
@@ -10,28 +11,21 @@
 
 namespace smol
 {
-    material_t::material_t(const std::string& shader_name)
+    material_t::material_t(asset_t<shader_t> target_shader) : shader(target_shader)
     {
-        auto it = renderer::ctx.shader_registry.find(shader_name);
-        if (it == renderer::ctx.shader_registry.end())
+        for (u32_t i = 0; i < renderer::MAX_FRAMES_IN_FLIGHT; i++) { heap_offset[i] = renderer::BINDLESS_NULL_HANDLE; }
+
+        if (!shader)
         {
-            SMOL_LOG_ERROR("MATERIAL", "Shader '{}' is not registered to any loaded uber shader", shader_name);
+            SMOL_LOG_ERROR("MATERIAL", "Cannot create material with null shader");
             return;
         }
 
-        shader = it->second.shader;
-        type_id = it->second.type_id;
-
-        for (u32_t idx = 0; idx < shader->modules.size(); idx++)
+        if (shader->has_material_data) { data.resize(shader->module.size, 0); }
+        else
         {
-            if (shader->modules[idx].name == shader_name)
-            {
-                shader_module_idx = idx;
-                break;
-            }
+            SMOL_LOG_WARN("SHADER", "Shader '{}' has no material info attached", shader->module.name);
         }
-
-        if (shader_module_idx != NULL_SHADER_MODULE) { data.resize(shader->modules[shader_module_idx].size, 0); }
     }
 
     void material_t::sync()
@@ -54,14 +48,10 @@ namespace smol
         }
     }
 
-    std::optional<material_t> asset_loader_t<material_t>::load(const std::string& path, const std::string& shader_name)
+    std::optional<material_t> asset_loader_t<material_t>::load(const std::string& path, asset_t<shader_t> target_shader)
     {
-        material_t mat(shader_name);
-        for (u32_t i = 0; i < renderer::MAX_FRAMES_IN_FLIGHT; i++)
-        {
-            mat.heap_offset[i] = renderer::BINDLESS_NULL_HANDLE;
-        }
-        if (mat.shader_module_idx == NULL_SHADER_MODULE) { return std::nullopt; }
+        material_t mat(target_shader);
+        if (!mat.shader) { return std::nullopt; }
         return mat;
     }
 
@@ -77,6 +67,6 @@ namespace smol
 
         mat.data.clear();
         mat.bound_textures.clear();
-        mat.shader_module_idx = NULL_SHADER_MODULE;
+        mat.shader.release();
     }
 }; // namespace smol

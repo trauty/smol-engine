@@ -38,19 +38,6 @@ namespace smol
 
             return module;
         }
-
-        VkDescriptorType map_descriptor_type(descriptor_type_e type)
-        {
-            switch (type)
-            {
-            case descriptor_type_e::SAMPLER: return VK_DESCRIPTOR_TYPE_SAMPLER;
-            case descriptor_type_e::SAMPLED_IMAGE: return VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE;
-            case descriptor_type_e::STORAGE_IMAGE: return VK_DESCRIPTOR_TYPE_STORAGE_IMAGE;
-            case descriptor_type_e::UNIFORM_BUFFER: return VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
-            case descriptor_type_e::STORAGE_BUFFER: return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-            default: return VK_DESCRIPTOR_TYPE_STORAGE_BUFFER;
-            }
-        }
     } // namespace
 
     std::optional<shader_t> smol::asset_loader_t<shader_t>::load(const std::string& path)
@@ -114,15 +101,15 @@ namespace smol
                        header.descriptor_binding_count * sizeof(shader_descriptor_binding_t));
         }
 
-        std::vector<u32_t> vert_spirv(header.vert_spirv_size / 4);
-        std::vector<u32_t> frag_spirv(header.frag_spirv_size / 4);
-        std::vector<u32_t> comp_spirv(header.comp_spirv_size / 4);
+        std::vector<u32_t> vert_spirv(header.vert_spirv_size);
+        std::vector<u32_t> frag_spirv(header.frag_spirv_size);
+        std::vector<u32_t> comp_spirv(header.comp_spirv_size);
 
-        if (header.vert_spirv_size > 0) { SDL_ReadIO(stream, vert_spirv.data(), header.vert_spirv_size); }
+        if (header.vert_spirv_size > 0) { SDL_ReadIO(stream, vert_spirv.data(), header.vert_spirv_size * 4); }
 
-        if (header.frag_spirv_size > 0) { SDL_ReadIO(stream, frag_spirv.data(), header.frag_spirv_size); }
+        if (header.frag_spirv_size > 0) { SDL_ReadIO(stream, frag_spirv.data(), header.frag_spirv_size * 4); }
 
-        if (header.comp_spirv_size > 0) { SDL_ReadIO(stream, comp_spirv.data(), header.comp_spirv_size); }
+        if (header.comp_spirv_size > 0) { SDL_ReadIO(stream, comp_spirv.data(), header.comp_spirv_size * 4); }
 
         SDL_CloseIO(stream);
 
@@ -131,7 +118,7 @@ namespace smol
         {
             VkDescriptorSetLayoutBinding layout_binding = {
                 .binding = b.binding,
-                .descriptorType = map_descriptor_type(b.type),
+                .descriptorType = vulkan::map_descriptor_type(b.type),
                 .descriptorCount = b.count,
                 .stageFlags = VK_SHADER_STAGE_ALL,
             };
@@ -158,8 +145,9 @@ namespace smol
         std::vector<VkDescriptorSetLayout> set_layouts(max_set + 1, VK_NULL_HANDLE);
 
         set_layouts[0] = renderer::res_system.global_layout;
+        set_layouts[1] = renderer::res_system.frame_layout;
 
-        for (u32_t i = 1; i <= max_set; i++)
+        for (u32_t i = 2; i <= max_set; i++)
         {
             // should also check for skipped sets, but this works for now
             if (shader.custom_layouts.count(i)) { set_layouts[i] = shader.custom_layouts[i]; }

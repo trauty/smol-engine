@@ -2,15 +2,17 @@
 
 #include "smol/asset.h"
 #include "smol/assets/shader.h"
+#include "smol/assets/texture.h"
 #include "smol/defines.h"
 #include "smol/log.h"
+#include "smol/rendering/renderer_constants.h"
+#include "smol/rendering/shader_instance.h"
 #include "smol/rendering/vulkan.h"
 #include "vulkan/vulkan_core.h"
 
 #include <deque>
 #include <mutex>
 #include <optional>
-#include <unordered_map>
 #include <vector>
 
 #define VK_CHECK(x)                                                                                                    \
@@ -26,29 +28,13 @@
 
 namespace smol::renderer
 {
-    constexpr u32_t MAX_SAMPLED_TEXTURES = 100000;
-    constexpr u32_t MAX_STORAGE_TEXTURES = 4096;
-    constexpr u32_t MAX_SSBOS = 100000;
-    constexpr u32_t MAX_SAMPLERS = 32;
-
-    constexpr u32_t MAX_MATERIAL_COUNT = 4096;
-    constexpr u32_t MAX_MATERIAL_BUFFER_SIZE = MAX_MATERIAL_COUNT * 512;
-
-    constexpr u32_t BINDLESS_NULL_HANDLE = 0xffffffff;
-
-    constexpr u32_t MAX_FRAMES_IN_FLIGHT = 2;
-
-    enum class render_bin_e : u32_t
+    struct active_pipeline_t
     {
-        OPAQUE = 0,
-        CUTOUT,
-        TRANSPARENT_ALPHA,
-        TRANSPARENT_ADD,
-        TRANSPARENT_MULT,
-        COUNT
+        VkPipeline pipeline;
+        VkPipelineLayout layout;
+        u32_t pipeline_index;
+        u32_t blend_sort_key;
     };
-
-    constexpr u32_t MAX_BINS = static_cast<u32_t>(render_bin_e::COUNT);
 
     struct queue_family_indices_t
     {
@@ -79,10 +65,10 @@ namespace smol::renderer
 
     struct push_constants_t
     {
-        u32_t global_buffer_id;
-        u32_t object_buffer_id;
-        u32_t material_buffer_id;
-        u32_t custom_data;
+        u32_t object_buffer_id = 0;
+        u32_t material_buffer_id = 0;
+        u32_t custom_data = 0;
+        u32_t _pad = 0;
     };
 
     struct alignas(16) gpu_mat4_t
@@ -113,9 +99,6 @@ namespace smol::renderer
             f32 raw[3];
         } data;
     };
-
-    constexpr u32_t MAX_LIGHTS = 1024;
-    constexpr u32_t MAX_DIR_LIGHTS = 32;
 
     struct gpu_directional_light_t
     {
@@ -156,8 +139,8 @@ namespace smol::renderer
         u32_t spot_light_count;
 
         u32_t object_count;
-
-        u32_t indirect_buffer_ids[MAX_BINS];
+        u32_t active_pipeline_count;
+        u32_t _pad[2];
     };
 
     struct object_data_t
@@ -170,8 +153,8 @@ namespace smol::renderer
         u32_t index_count;
         u32_t vertex_count;
         f32 bounding_sphere_radius;
-        u32_t material_type;
-        u32_t bin_index;
+        u32_t pipeline_index;
+        u32_t _pad;
         gpu_vec4_t bounding_sphere_center;
     };
 
@@ -217,10 +200,8 @@ namespace smol::renderer
         VkCommandBuffer main_command_buffer = VK_NULL_HANDLE;
         VkSemaphore swapchain_acquire_semaphore = VK_NULL_HANDLE;
 
-        VkBuffer global_buffer = VK_NULL_HANDLE;
-        VmaAllocation global_allocation = VK_NULL_HANDLE;
         global_data_t* mapped_global_data = nullptr;
-        u32_t global_bindless_id = BINDLESS_NULL_HANDLE;
+        u32_t global_data_offset = 0;
 
         VkBuffer object_buffer = VK_NULL_HANDLE;
         VmaAllocation object_allocation = VK_NULL_HANDLE;
@@ -229,14 +210,15 @@ namespace smol::renderer
 
         u32_t object_counter = 0;
 
-        VkBuffer indirect_buffers[MAX_BINS] = {};
-        VmaAllocation indirect_allocations[MAX_BINS] = {};
-        u32_t indirect_bindless_ids[MAX_BINS] = {};
+        VkBuffer indirect_buffer = VK_NULL_HANDLE;
+        VmaAllocation indirect_alloc = VK_NULL_HANDLE;
+        VkDeviceSize indirect_size = 0;
 
         VkBuffer draw_counts_buffer = VK_NULL_HANDLE;
-        VmaAllocation draw_counts_allocation = VK_NULL_HANDLE;
-        VkDescriptorPool frame_descriptor_pool = VK_NULL_HANDLE;
-        VkDescriptorSet frame_descriptor_set = VK_NULL_HANDLE;
+        VmaAllocation draw_counts_alloc = VK_NULL_HANDLE;
+        VkDeviceSize draw_counts_size = 0;
+
+        std::vector<active_pipeline_t> active_pipelines;
 
         VkBuffer material_buffer = VK_NULL_HANDLE;
         VmaAllocation material_allocation = VK_NULL_HANDLE;
@@ -259,12 +241,6 @@ namespace smol::renderer
         VmaAllocation spot_light_allocation = VK_NULL_HANDLE;
         gpu_spot_light_t* mapped_spot_lights = nullptr;
         u32_t spot_light_bindless_id = BINDLESS_NULL_HANDLE;
-    };
-
-    struct registered_shader_t
-    {
-        asset_t<shader_t> shader;
-        u32_t type_id;
     };
 
     struct render_context_t
@@ -306,14 +282,14 @@ namespace smol::renderer
         std::vector<VkSampler> samplers;
 
         asset_t<shader_t> culling_shader;
+        shader_instance_t culling_instance;
 
-        asset_t<shader_t> opaque_uber_shader;
-        asset_t<shader_t> cutout_uber_shader;
-        asset_t<shader_t> transparent_alpha_uber_shader;
-        asset_t<shader_t> transparent_add_uber_shader;
-        asset_t<shader_t> transparent_mult_uber_shader;
+        asset_t<texture_t> default_tex;
 
-        std::unordered_map<std::string, registered_shader_t> shader_registry;
+        VkDeviceSize global_data_aligned_size = 0;
+        VkBuffer global_data_buffer = VK_NULL_HANDLE;
+        VmaAllocation global_data_alloc = VK_NULL_HANDLE;
+        u8* global_data_mapped = nullptr;
 
         VkExtent2D render_extent = {0, 0};
         u32_t viewport_bindless_id = BINDLESS_NULL_HANDLE;

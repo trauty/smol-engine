@@ -22,24 +22,22 @@ namespace smol
         std::vector<u8> data;
 
         std::unordered_map<u32_t, asset_t<texture_t>> bound_textures;
-        u32_t type_id;
-        u32_t shader_module_idx = NULL_SHADER_MODULE;
 
         u32_t heap_offset[renderer::MAX_FRAMES_IN_FLIGHT];
         u32_t dirty_frames = renderer::MAX_FRAMES_IN_FLIGHT;
         u32_t last_synced_frame = renderer::BINDLESS_NULL_HANDLE;
 
         material_t() = default;
-        material_t(const std::string& shader_name);
+        material_t(asset_t<shader_t> target_shader);
 
         void sync();
 
         template <typename T>
         void set_property(u32_t name_hash, const T& value)
         {
-            if (!shader || shader_module_idx == NULL_SHADER_MODULE) { return; }
+            if (!shader) { return; }
 
-            const std::unordered_map<u32_t, shader_member_t>& members = shader->modules[shader_module_idx].members;
+            const std::unordered_map<u32_t, shader_member_t>& members = shader->module.members;
             auto it = members.find(name_hash);
 
             if (it == members.end())
@@ -77,7 +75,7 @@ namespace smol
     template <>
     struct SMOL_API asset_loader_t<material_t>
     {
-        static std::optional<material_t> load(const std::string& path, const std::string& shader_name);
+        static std::optional<material_t> load(const std::string& path, asset_t<shader_t> target_shader);
         static void unload(material_t& mat);
     };
 } // namespace smol
