@@ -14,6 +14,7 @@
 #include "smol/hash.h"
 #include "smol/log.h"
 #include "smol/math.h"
+#include "smol/memory/linear_allocator.h"
 #include "smol/profiling.h"
 #include "smol/rendering/renderer_constants.h"
 #include "smol/rendering/renderer_resources.h"
@@ -101,11 +102,11 @@ namespace smol::renderer
 
     void register_renderer_feature(graph_builder_func_t builder) { custom_renderer_features.push_back(builder); }
 
-    SMOL_API rg_pass_t& add_mesh_pass(rendergraph_t& graph, const std::string& name, const std::string& target_pass_tag,
-                                      const std::vector<rg_resource_id>& reads,
+    SMOL_API rg_pass_t& add_mesh_pass(rendergraph_t& graph, u32_t name_hash, const char* debug_name,
+                                      const std::string& target_pass_tag, const std::vector<rg_resource_id>& reads,
                                       const std::vector<rg_resource_id>& writes, rg_resource_id depth)
     {
-        rg_pass_t& pass = graph.add_pass(name);
+        rg_pass_t& pass = graph.add_pass(name_hash, debug_name);
         pass.texture_reads = reads;
         pass.color_writes = writes;
         pass.depth_stencil = depth;
@@ -143,13 +144,12 @@ namespace smol::renderer
         return pass;
     }
 
-    SMOL_API rg_pass_t& add_fullscreen_pass(rendergraph_t& graph, const std::string& name,
-                                            asset_t<smol::material_t> material,
-                                            const std::vector<rg_resource_id>& reads,
+    SMOL_API rg_pass_t& add_fullscreen_pass(rendergraph_t& graph, u32_t name_hash, const char* debug_name,
+                                            smol::material_t* material, const std::vector<rg_resource_id>& reads,
                                             const std::vector<rg_resource_id>& writes,
                                             std::function<void(rendergraph_t&, smol::material_t&)> on_execute)
     {
-        rg_pass_t& pass = graph.add_pass(name);
+        rg_pass_t& pass = graph.add_pass(name_hash, debug_name);
         pass.texture_reads = reads;
         pass.color_writes = writes;
 
@@ -186,13 +186,13 @@ namespace smol::renderer
         return pass;
     }
 
-    SMOL_API rg_pass_t& add_compute_pass(rendergraph_t& graph, const std::string& name,
-                                         asset_t<smol::material_t> material, u32_t dispatch_x, u32_t dispatch_y,
+    SMOL_API rg_pass_t& add_compute_pass(rendergraph_t& graph, u32_t name_hash, const char* debug_name,
+                                         smol::material_t* material, u32_t dispatch_x, u32_t dispatch_y,
                                          u32_t dispatch_z, const std::vector<rg_resource_id>& reads,
                                          const std::vector<rg_resource_id>& writes,
                                          std::function<void(rendergraph_t&, smol::material_t&)> on_execute)
     {
-        rg_pass_t& pass = graph.add_pass(name);
+        rg_pass_t& pass = graph.add_pass(name_hash, debug_name);
         pass.texture_reads = reads;
         pass.storage_writes = writes;
 
@@ -1159,11 +1159,13 @@ namespace smol::renderer
             vkCmdPipelineBarrier2(cmd, &indirect_dep_info);
         }
 
+        smol::active_arena = &frame_data.frame_allocator;
+
         rendergraph.clear();
 
-        rg_resource_id swapchain_res =
-            rendergraph.import_image("Swapchain", ctx.swapchain.images[index], ctx.swapchain.views[index],
-                                     ctx.swapchain.format, ctx.swapchain.extent.width, ctx.swapchain.extent.height);
+        rg_resource_id swapchain_res = rendergraph.import_image(
+            "Swapchain"_h, "Swapchain", ctx.swapchain.images[index], ctx.swapchain.views[index], ctx.swapchain.format,
+            ctx.swapchain.extent.width, ctx.swapchain.extent.height);
 
         if (!ctx.use_offscreen_viewport) { ctx.render_extent = ctx.swapchain.extent; }
 
@@ -1175,7 +1177,7 @@ namespace smol::renderer
             .aspect = VK_IMAGE_ASPECT_COLOR_BIT,
         };
 
-        rg_resource_id color_res = rendergraph.create_image("SceneColor", color_desc);
+        rg_resource_id color_res = rendergraph.create_image("SceneColor"_h, "SceneColor", color_desc);
 
         image_desc_t depth_desc = {
             .width = ctx.render_extent.width,
@@ -1185,7 +1187,7 @@ namespace smol::renderer
             .aspect = VK_IMAGE_ASPECT_DEPTH_BIT,
         };
 
-        rg_resource_id depth_res = rendergraph.create_image("SceneDepth", depth_desc);
+        rg_resource_id depth_res = rendergraph.create_image("SceneDepth"_h, "SceneDepth", depth_desc);
 
         if (ctx.use_offscreen_viewport)
         {
@@ -1197,12 +1199,12 @@ namespace smol::renderer
                 .aspect = VK_IMAGE_ASPECT_COLOR_BIT,
             };
 
-            rendergraph.create_image("ViewportColor", viewport_desc);
-            rendergraph.add_alias("FinalOutput", "ViewportColor");
+            rendergraph.create_image("ViewportColor"_h, "ViewportColor", viewport_desc);
+            rendergraph.add_alias("FinalOutput"_h, "ViewportColor"_h);
         }
         else
         {
-            rendergraph.add_alias("FinalOutput", "Swapchain");
+            rendergraph.add_alias("FinalOutput"_h, "Swapchain"_h);
         }
 
         for (graph_builder_func_t& feature_builder : custom_renderer_features) { feature_builder(rendergraph, reg); }
@@ -1211,7 +1213,7 @@ namespace smol::renderer
 
         if (ctx.use_offscreen_viewport)
         {
-            ctx.viewport_bindless_id = rendergraph.get_bindless_id(rendergraph.get_resource("ViewportColor"));
+            ctx.viewport_bindless_id = rendergraph.get_bindless_id(rendergraph.get_resource("ViewportColor"_h));
         }
 
         rendergraph.execute(cmd, reg);
@@ -1224,6 +1226,8 @@ namespace smol::renderer
         }
 
         vkEndCommandBuffer(cmd);
+
+        smol::active_arena = nullptr;
 
         VkSemaphore wait_semaphores[] = {
             frame_data.swapchain_acquire_semaphore,
@@ -1461,9 +1465,12 @@ namespace smol::renderer
 
         ctx.cur_surface_transform = pre_transform;
         ctx.swapchain.extent = physical_extent;
-        ctx.logical_extent = logical_extent;
 
-        if (!ctx.use_offscreen_viewport) { ctx.render_extent = physical_extent; }
+        if (!ctx.use_offscreen_viewport)
+        {
+            ctx.render_extent = physical_extent;
+            ctx.logical_extent = logical_extent;
+        }
 
         VkSurfaceFormatKHR surface_format = select_surface_format(ctx.physical_device, ctx.surface);
         VkPresentModeKHR present_mode = VK_PRESENT_MODE_FIFO_KHR;
@@ -1675,6 +1682,7 @@ namespace smol::renderer
         vkResetCommandPool(ctx.device, frame_data.main_command_pool, 0);
 
         frame_data.transient_pool.reset();
+        frame_data.frame_allocator.reset();
 
         return VK_SUCCESS;
     }
@@ -1779,6 +1787,8 @@ namespace smol::renderer
                              frame_data.spot_light_buffer, frame_data.spot_light_allocation,
                              (void*&)frame_data.mapped_spot_lights);
         make_bindless(frame_data.spot_light_buffer, frame_data.spot_light_bindless_id);
+
+        frame_data.frame_allocator.init(2048 * 1024);
     }
 
     void shutdown_per_frame(per_frame_t& frame_data)

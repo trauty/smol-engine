@@ -18,17 +18,17 @@ namespace smol::renderer
 
     SMOL_API void register_renderer_feature(graph_builder_func_t builder);
 
-    SMOL_API rg_pass_t& add_mesh_pass(rendergraph_t& graph, const std::string& name, const std::string& target_pass_tag,
-                                      const std::vector<rg_resource_id>& reads,
+    SMOL_API rg_pass_t& add_mesh_pass(rendergraph_t& graph, u32_t name_hash, const char* debug_name,
+                                      const std::string& target_pass_tag, const std::vector<rg_resource_id>& reads,
                                       const std::vector<rg_resource_id>& writes, rg_resource_id depth);
 
     SMOL_API rg_pass_t&
-    add_fullscreen_pass(rendergraph_t& graph, const std::string& name, asset_t<smol::material_t> material,
+    add_fullscreen_pass(rendergraph_t& graph, u32_t name_hash, const char* debug_name, smol::material_t* material,
                         const std::vector<rg_resource_id>& reads, const std::vector<rg_resource_id>& writes,
                         std::function<void(rendergraph_t&, smol::material_t&)> on_execute = nullptr);
 
-    SMOL_API rg_pass_t& add_compute_pass(rendergraph_t& graph, const std::string& name,
-                                         asset_t<smol::material_t> material, u32_t dispatch_x, u32_t dispatch_y,
+    SMOL_API rg_pass_t& add_compute_pass(rendergraph_t& graph, u32_t name_hash, const char* debug_name,
+                                         smol::material_t* material, u32_t dispatch_x, u32_t dispatch_y,
                                          u32_t dispatch_z, const std::vector<rg_resource_id>& reads,
                                          const std::vector<rg_resource_id>& writes,
                                          std::function<void(rendergraph_t&, smol::material_t&)> on_execute = nullptr);

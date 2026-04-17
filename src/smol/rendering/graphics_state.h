@@ -18,11 +18,21 @@ namespace smol
 
         std::vector<named_material_t> materials;
 
-        smol::asset_t<smol::material_t> get_material(u32_t hash)
+        asset_t<smol::material_t> get_material(u32_t hash)
         {
             for (named_material_t& mat : materials)
             {
                 if (mat.name_hash == hash) { return mat.material; }
+            }
+
+            return {};
+        }
+
+        smol::material_t* get_material_raw(u32_t hash)
+        {
+            for (named_material_t& mat : materials)
+            {
+                if (mat.name_hash == hash) { return mat.material.get(); }
             }
 
             return {};

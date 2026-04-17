@@ -8,6 +8,7 @@
 #include <atomic>
 #include <concepts>
 #include <cstddef>
+#include <cstring>
 #include <deque>
 #include <optional>
 #include <utility>
@@ -198,7 +199,7 @@ namespace smol
             if (is_sync) { load_func(); }
             else
             {
-                smol::jobs::kick(std::move(load_func), nullptr, jobs::priority_e::LOW);
+                smol::jobs::kick_heavy(std::move(load_func), nullptr, jobs::priority_e::LOW);
             }
 
             return slot;

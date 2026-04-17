@@ -5,6 +5,7 @@
 #include "smol/assets/texture.h"
 #include "smol/defines.h"
 #include "smol/log.h"
+#include "smol/memory/linear_allocator.h"
 #include "smol/rendering/renderer_constants.h"
 #include "smol/rendering/shader_instance.h"
 #include "smol/rendering/vulkan.h"
@@ -241,6 +242,8 @@ namespace smol::renderer
         VmaAllocation spot_light_allocation = VK_NULL_HANDLE;
         gpu_spot_light_t* mapped_spot_lights = nullptr;
         u32_t spot_light_bindless_id = BINDLESS_NULL_HANDLE;
+
+        smol::linear_allocator_t frame_allocator;
     };
 
     struct render_context_t

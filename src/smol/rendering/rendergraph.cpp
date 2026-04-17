@@ -4,10 +4,13 @@
 #include "smol/log.h"
 #include "smol/profiling.h"
 #include "smol/rendering/renderer.h"
+#include "smol/rendering/renderer_constants.h"
 #include "smol/rendering/renderer_types.h"
 #include "smol/rendering/vulkan.h"
+#include "vulkan/vulkan_core.h"
 
 #include <cstddef>
+#include <cstdint>
 #include <queue>
 #include <string>
 #ifdef SMOL_ENABLE_PROFILING
@@ -21,69 +24,113 @@ namespace smol::renderer
 {
     void rendergraph_t::clear()
     {
-        resources.clear();
-        passes.clear();
+        active_resource_count = 0;
+        active_pass_count = 0;
+
         sorted_passes.clear();
         aliases.clear();
     }
 
-    rg_resource_id rendergraph_t::create_image(const std::string& name, const image_desc_t& desc)
+    rg_resource_id rendergraph_t::create_image(u32_t name_hash, const char* debug_name, const image_desc_t& desc)
     {
-        rg_resource_id id = static_cast<rg_resource_id>(resources.size());
-        resources.push_back(
-            {name, desc, VK_NULL_HANDLE, VK_NULL_HANDLE, BINDLESS_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED, false});
+        if (active_resource_count >= resources.size()) { resources.push_back({}); }
+
+        rg_resource_id id = active_resource_count++;
+        rg_resource_t& res = resources[id];
+
+        res.name_hash = name_hash;
+        res.debug_name = debug_name;
+        res.desc = desc;
+        res.image = VK_NULL_HANDLE;
+        res.view = VK_NULL_HANDLE;
+        res.bindless_id = BINDLESS_NULL_HANDLE;
+        res.cur_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+        res.is_imported = false;
+
         return id;
     }
 
-    rg_resource_id rendergraph_t::import_image(const std::string& name, VkImage image, VkImageView view,
+    rg_resource_id rendergraph_t::import_image(u32_t name_hash, const char* debug_name, VkImage image, VkImageView view,
                                                VkFormat format, u32_t width, u32_t height)
     {
-        rg_resource_id id = static_cast<rg_resource_id>(resources.size());
-        image_desc_t desc = {width, height, format, 0, VK_IMAGE_ASPECT_COLOR_BIT};
-        resources.push_back({name, desc, image, view, BINDLESS_NULL_HANDLE, VK_IMAGE_LAYOUT_UNDEFINED, true});
+        if (active_resource_count >= resources.size()) { resources.push_back({}); }
+
+        rg_resource_id id = active_resource_count++;
+        rg_resource_t& res = resources[id];
+
+        res.name_hash = name_hash;
+        res.debug_name = debug_name;
+        res.desc = {width, height, format, 0, VK_IMAGE_ASPECT_COLOR_BIT};
+        res.image = image;
+        res.view = view;
+        res.bindless_id = BINDLESS_NULL_HANDLE;
+        res.cur_layout = VK_IMAGE_LAYOUT_UNDEFINED;
+        res.is_imported = true;
+
         return id;
     }
 
-    rg_pass_t& rendergraph_t::add_pass(const std::string& name)
+    rg_pass_t& rendergraph_t::add_pass(u32_t name_hash, const char* debug_name)
     {
-        passes.push_back({name});
-        return passes.back();
+        if (active_pass_count >= passes.size()) { passes.push_back({}); }
+
+        rg_pass_t& pass = passes[active_pass_count++];
+
+        pass.name_hash = name_hash;
+        pass.debug_name = debug_name;
+        pass.color_writes.clear();
+        pass.storage_writes.clear();
+        pass.texture_reads.clear();
+        pass.depth_stencil = RG_NULL_ID;
+        pass.execute_callback = {};
+
+        return pass;
     }
 
     void rendergraph_t::compile(per_frame_t& frame_data)
     {
-        for (const rg_pass_t& pass : passes)
+        for (size_t i = 0; i < active_pass_count; i++)
         {
+            const rg_pass_t& pass = passes[i];
+
             for (rg_resource_id id : pass.color_writes)
             {
-                if (id == RG_NULL_ID) { SMOL_LOG_FATAL("RENDERGRAPH", "Pass '{}' has invalid color write", pass.name); }
+                if (id == RG_NULL_ID)
+                {
+                    SMOL_LOG_FATAL("RENDERGRAPH", "Pass '{}' has invalid color write", pass.debug_name);
+                }
             }
 
             for (rg_resource_id id : pass.texture_reads)
             {
                 if (id == RG_NULL_ID)
                 {
-                    SMOL_LOG_FATAL("RENDERGRAPH", "Pass '{}' has invalid texture read", pass.name);
+                    SMOL_LOG_FATAL("RENDERGRAPH", "Pass '{}' has invalid texture read", pass.debug_name);
                 }
             }
         }
 
-        std::vector<std::unordered_set<size_t>> adjacency_list(passes.size());
-        std::vector<size_t> in_degree(passes.size(), 0);
-        std::unordered_map<rg_resource_id, size_t> latest_writer;
+        std::vector<std::vector<size_t>> adjacency_list(active_pass_count);
+        std::vector<size_t> in_degree(active_pass_count, 0);
+        std::vector<size_t> latest_writer(active_resource_count, SIZE_MAX);
 
-        for (size_t i = 0; i < passes.size(); i++)
+        for (size_t i = 0; i < active_pass_count; i++)
         {
             rg_pass_t& pass = passes[i];
 
             auto add_dep = [&](rg_resource_id res)
             {
-                if (latest_writer.count(res))
+                if (latest_writer[res] != SIZE_MAX)
                 {
                     size_t writer_idx = latest_writer[res];
                     if (writer_idx != i)
                     {
-                        if (adjacency_list[writer_idx].insert(i).second) { in_degree[i]++; }
+                        auto& adj = adjacency_list[writer_idx];
+                        if (std::find(adj.begin(), adj.end(), i) == adj.end())
+                        {
+                            adj.push_back(i);
+                            in_degree[i]++;
+                        }
                     }
                 }
 
@@ -95,18 +142,23 @@ namespace smol::renderer
             if (pass.depth_stencil != RG_NULL_ID) { add_dep(pass.depth_stencil); }
         }
 
-        for (size_t i = 0; i < passes.size(); i++)
+        for (size_t i = 0; i < active_pass_count; i++)
         {
             rg_pass_t& pass = passes[i];
 
             for (rg_resource_id res : pass.texture_reads)
             {
-                if (latest_writer.count(res))
+                if (latest_writer[res] != SIZE_MAX)
                 {
                     size_t writer_idx = latest_writer[res];
                     if (writer_idx != i)
                     {
-                        if (adjacency_list[writer_idx].insert(i).second) { in_degree[i]++; }
+                        auto& adj = adjacency_list[writer_idx];
+                        if (std::find(adj.begin(), adj.end(), i) == adj.end())
+                        {
+                            adj.push_back(i);
+                            in_degree[i]++;
+                        }
                     }
                 }
             }
@@ -132,14 +184,15 @@ namespace smol::renderer
             }
         }
 
-        if (sorted_passes.size() != passes.size())
+        if (sorted_passes.size() != active_pass_count)
         {
             SMOL_LOG_FATAL("RENDERGRAPH", "Circular dependency detected");
             abort();
         }
 
-        for (rg_resource_t& res : resources)
+        for (size_t i = 0; i < active_resource_count; i++)
         {
+            rg_resource_t& res = resources[i];
             if (res.is_imported) { continue; }
 
             transient_image_t* transient = frame_data.transient_pool.acquire(res.desc);
@@ -294,16 +347,22 @@ namespace smol::renderer
         }
     }
 
-    rg_resource_id rendergraph_t::get_resource(const std::string& name) const
+    rg_resource_id rendergraph_t::get_resource(u32_t name_hash) const
     {
-        std::string search_name = name;
+        u32_t search_hash = name_hash;
 
-        auto it = aliases.find(name);
-        if (it != aliases.end()) { search_name = it->second; }
-
-        for (u32_t i = 0; i < resources.size(); i++)
+        for (const rg_alias_t& alias : aliases)
         {
-            if (resources[i].name == search_name) { return i; }
+            if (alias.alias_hash == search_hash)
+            {
+                search_hash = alias.target_hash;
+                break;
+            }
+        }
+
+        for (u32_t i = 0; i < active_resource_count; i++)
+        {
+            if (resources[i].name_hash == search_hash) { return i; }
         }
 
         return RG_NULL_ID;
@@ -313,6 +372,5 @@ namespace smol::renderer
 
     u32_t rendergraph_t::get_bindless_id(rg_resource_id id) const { return resources[id].bindless_id; }
 
-    void rendergraph_t::add_alias(const std::string& alias_name, const std::string& target_name)
-    { aliases[alias_name] = target_name; }
+    void rendergraph_t::add_alias(u32_t alias_name, u32_t target_name) { aliases.push_back({alias_name, target_name}); }
 } // namespace smol::renderer

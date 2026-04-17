@@ -19,7 +19,7 @@ namespace smol::jobs
 
     struct job_t
     {
-        std::function<void()> task;
+        job_function<64> task;
         counter_t* counter = nullptr;
     };
 
@@ -31,7 +31,7 @@ namespace smol::jobs
         std::mutex wake_mutex;
         std::condition_variable wake_cv;
 
-        bool push(const std::function<void()>& task, counter_t* counter)
+        bool push(job_function<64> task, counter_t* counter)
         {
             u32_t cur_tail = tail.fetch_add(1, std::memory_order_acq_rel);
             u32_t index = cur_tail & MASK;
@@ -92,6 +92,32 @@ namespace smol::jobs
         }
     } // namespace
 
+    namespace detail
+    {
+        void push_job(job_function<64> task, counter_t* counter, priority_e prio)
+        {
+            if (prio == priority_e::HIGH) { high_priority_queue.push(std::move(task), counter); }
+            else
+            {
+                low_priority_queue.push(std::move(task), counter);
+            }
+        }
+
+        void wake_threads(priority_e prio, bool wake_all)
+        {
+            if (prio == priority_e::HIGH)
+            {
+                if (wake_all) high_priority_queue.wake_cv.notify_all();
+                else high_priority_queue.wake_cv.notify_one();
+            }
+            else
+            {
+                if (wake_all) low_priority_queue.wake_cv.notify_all();
+                else low_priority_queue.wake_cv.notify_one();
+            }
+        }
+    } // namespace detail
+
     void init()
     {
         if (is_running) { return; }
@@ -123,45 +149,6 @@ namespace smol::jobs
         high_priority_workers.clear();
 
         if (low_priority_worker.joinable()) { low_priority_worker.join(); }
-    }
-
-    void kick(const std::function<void()>& task, counter_t* counter, priority_e prio)
-    {
-        if (counter) { counter->fetch_add(1, std::memory_order_relaxed); }
-
-        if (prio == priority_e::HIGH)
-        {
-            high_priority_queue.push(task, counter);
-            high_priority_queue.wake_cv.notify_one();
-        }
-        else if (prio == priority_e::LOW)
-        {
-            low_priority_queue.push(task, counter);
-            low_priority_queue.wake_cv.notify_one();
-        }
-    }
-
-    void dispatch(u32_t count, u32_t batch_size, const std::function<void(u32_t, u32_t)>& task, counter_t* counter,
-                  priority_e priority)
-    {
-        if (count == 0 || batch_size == 0) { return; }
-
-        u32_t job_count = (count + batch_size - 1) / batch_size;
-
-        if (counter) { counter->fetch_add(job_count, std::memory_order_relaxed); }
-
-        for (u32_t i = 0; i < count; i += batch_size)
-        {
-            u32_t end = std::min(i + batch_size, count);
-
-            std::function<void()> batch_task = [task, i, end]() -> void { task(i, end); };
-
-            if (priority == priority_e::HIGH) { high_priority_queue.push(batch_task, counter); }
-            else if (priority == priority_e::LOW) { low_priority_queue.push(batch_task, counter); }
-        }
-
-        if (priority == priority_e::HIGH) { high_priority_queue.wake_cv.notify_all(); }
-        else if (priority == priority_e::LOW) { low_priority_queue.wake_cv.notify_one(); }
     }
 
     // job stealing for main thread

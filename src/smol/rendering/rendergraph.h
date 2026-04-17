@@ -2,11 +2,9 @@
 
 #include "smol/defines.h"
 #include "smol/ecs_fwd.h"
+#include "smol/memory/arena_function.h"
 #include "smol/rendering/renderer_types.h"
 
-#include <functional>
-#include <string>
-#include <unordered_map>
 #include <vector>
 
 namespace smol::renderer
@@ -16,7 +14,9 @@ namespace smol::renderer
 
     struct SMOL_API rg_resource_t
     {
-        std::string name;
+        u32_t name_hash;
+        const char* debug_name = nullptr;
+
         image_desc_t desc;
 
         VkImage image = VK_NULL_HANDLE;
@@ -27,11 +27,13 @@ namespace smol::renderer
         bool is_imported = false;
     };
 
-    using pass_callback_t = std::function<void(VkCommandBuffer, ecs::registry_t&)>;
+    using pass_callback_t = smol::arena_function<void(VkCommandBuffer, ecs::registry_t&)>;
 
     struct SMOL_API rg_pass_t
     {
-        std::string name;
+        u32_t name_hash;
+        const char* debug_name = nullptr;
+
         std::vector<rg_resource_id> color_writes;
         std::vector<rg_resource_id> storage_writes;
         rg_resource_id depth_stencil = RG_NULL_ID;
@@ -40,31 +42,39 @@ namespace smol::renderer
         pass_callback_t execute_callback;
     };
 
+    struct rg_alias_t
+    {
+        u32_t alias_hash;
+        u32_t target_hash;
+    };
+
     class SMOL_API rendergraph_t
     {
       public:
         void clear();
 
-        rg_resource_id create_image(const std::string& name, const image_desc_t& desc);
-        rg_resource_id import_image(const std::string& name, VkImage image, VkImageView view, VkFormat format,
-                                    u32_t width, u32_t height);
+        rg_resource_id create_image(u32_t name_hash, const char* debug_name, const image_desc_t& desc);
+        rg_resource_id import_image(u32_t name_hash, const char* debug_name, VkImage image, VkImageView view,
+                                    VkFormat format, u32_t width, u32_t height);
 
-        rg_pass_t& add_pass(const std::string& name);
+        rg_pass_t& add_pass(u32_t name_hash, const char* debug_name);
 
         void compile(per_frame_t& frame_data);
         void execute(VkCommandBuffer cmd, ecs::registry_t& reg);
 
-        rg_resource_id get_resource(const std::string& name) const;
+        rg_resource_id get_resource(u32_t name_hash) const;
         VkImageLayout get_layout(rg_resource_id id) const;
         u32_t get_bindless_id(rg_resource_id id) const;
 
-        void add_alias(const std::string& alias_name, const std::string& target_name);
+        void add_alias(u32_t name_hash, u32_t alias_name);
 
       private:
+        u32_t active_resource_count = 0;
+        u32_t active_pass_count = 0;
+
         std::vector<rg_resource_t> resources;
         std::vector<rg_pass_t> passes;
         std::vector<size_t> sorted_passes;
-
-        std::unordered_map<std::string, std::string> aliases;
+        std::vector<rg_alias_t> aliases;
     };
 } // namespace smol::renderer
