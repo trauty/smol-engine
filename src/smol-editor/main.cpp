@@ -173,7 +173,7 @@ struct editor_t
             u32_t tex_id = smol::renderer::get_viewport_texture_id();
             if (tex_id != smol::renderer::BINDLESS_NULL_HANDLE)
             {
-                ImGui::Image((ImTextureID)(intptr_t)(tex_id + 1), viewport_size);
+                ImGui::Image((ImTextureID)(intptr_t)(tex_id), viewport_size);
             }
         }
         ImGui::End();

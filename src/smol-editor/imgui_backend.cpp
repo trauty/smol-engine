@@ -186,7 +186,7 @@ namespace smol::editor::imgui
         };
         vkUpdateDescriptorSets(renderer::ctx.device, 1, &write_desc, 0, nullptr);
 
-        io.Fonts->SetTexID((ImTextureID)(intptr_t)ctx.font_tex_bindless_id + 1);
+        io.Fonts->SetTexID((ImTextureID)(intptr_t)ctx.font_tex_bindless_id);
 
         {
             std::scoped_lock lock(renderer::res_system.deletion_mutex);
@@ -369,7 +369,7 @@ namespace smol::editor::imgui
                             };
                             vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-                            pc.object_buffer_id = (u32_t)(intptr_t)cmd_ptr->GetTexID() - 1;
+                            pc.object_buffer_id = (u32_t)(intptr_t)cmd_ptr->GetTexID();
                             vkCmdPushConstants(cmd, ctx.shader->pipeline_layout,
                                                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                                                sizeof(renderer::push_constants_t), &pc);

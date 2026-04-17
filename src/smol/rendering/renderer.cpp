@@ -23,9 +23,7 @@
 #include "smol/rendering/vulkan.h"
 #include "smol/systems/camera.h"
 #include "smol/time.h"
-#include "smol/vfs.h"
 #include "smol/window.h"
-#include "vulkan/vulkan_core.h"
 
 #include <SDL3/SDL_error.h>
 #include <SDL3/SDL_video.h>
@@ -825,7 +823,24 @@ namespace smol::renderer
 
             std::memcpy(frame_data.mapped_global_data->view.data, &cam.view, sizeof(mat4_t));
             std::memcpy(frame_data.mapped_global_data->projection.data, &cam.projection, sizeof(mat4_t));
-            std::memcpy(frame_data.mapped_global_data->view_proj.data, &cam.view_proj, sizeof(mat4_t));
+
+            mat4_t pre_rot_mat;
+            if (ctx.cur_surface_transform & VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR)
+            {
+                glm_rotate_z(pre_rot_mat, glm_rad(90.0f), pre_rot_mat);
+            }
+            else if (ctx.cur_surface_transform & VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR)
+            {
+                glm_rotate_z(pre_rot_mat, glm_rad(180.0f), pre_rot_mat);
+            }
+            else if (ctx.cur_surface_transform & VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR)
+            {
+                glm_rotate_z(pre_rot_mat, glm_rad(270.0f), pre_rot_mat);
+            }
+
+            mat4_t final_view_proj;
+            glm_mat4_mul(pre_rot_mat, cam.view_proj, final_view_proj);
+            std::memcpy(frame_data.mapped_global_data->view_proj.data, &final_view_proj, sizeof(mat4_t));
 
             vec4 planes[6];
             glm_frustum_planes(cam.view_proj, planes);
@@ -1422,34 +1437,41 @@ namespace smol::renderer
 
         if (surface_caps.currentExtent.width == 0 || surface_caps.currentExtent.height == 0) { return; }
 
-        VkExtent2D swapchain_extent;
-        if (surface_caps.currentExtent.width != UINT32_MAX) { swapchain_extent = surface_caps.currentExtent; }
+        VkExtent2D logical_extent;
+        if (surface_caps.currentExtent.width != UINT32_MAX) { logical_extent = surface_caps.currentExtent; }
         else
         {
             i32 w, h;
             smol::window::get_window_size(&w, &h);
 
-            swapchain_extent.width =
+            logical_extent.width =
                 std::clamp(static_cast<u32_t>(w), surface_caps.minImageExtent.width, surface_caps.maxImageExtent.width);
-            swapchain_extent.height = std::clamp(static_cast<u32_t>(h), surface_caps.minImageExtent.height,
-                                                 surface_caps.maxImageExtent.height);
+            logical_extent.height = std::clamp(static_cast<u32_t>(h), surface_caps.minImageExtent.height,
+                                               surface_caps.maxImageExtent.height);
         }
 
-        ctx.swapchain.extent = swapchain_extent;
-        VkSurfaceFormatKHR surface_format = select_surface_format(ctx.physical_device, ctx.surface);
+        VkSurfaceTransformFlagBitsKHR pre_transform = surface_caps.currentTransform;
+        VkExtent2D physical_extent = logical_extent;
 
+        if (pre_transform & (VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR | VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR))
+        {
+            physical_extent.width = logical_extent.height;
+            physical_extent.height = logical_extent.width;
+        }
+
+        ctx.cur_surface_transform = pre_transform;
+        ctx.swapchain.extent = physical_extent;
+        ctx.logical_extent = logical_extent;
+
+        if (!ctx.use_offscreen_viewport) { ctx.render_extent = physical_extent; }
+
+        VkSurfaceFormatKHR surface_format = select_surface_format(ctx.physical_device, ctx.surface);
         VkPresentModeKHR present_mode = VK_PRESENT_MODE_FIFO_KHR;
 
         u32_t desired_swapchain_images = surface_caps.minImageCount + 1;
         if ((surface_caps.maxImageCount > 0) && (desired_swapchain_images > surface_caps.maxImageCount))
         {
             desired_swapchain_images = surface_caps.maxImageCount;
-        }
-
-        VkSurfaceTransformFlagBitsKHR pre_transform = surface_caps.currentTransform;
-        if (surface_caps.supportedTransforms & VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR)
-        {
-            pre_transform = VK_SURFACE_TRANSFORM_IDENTITY_BIT_KHR;
         }
 
         VkSwapchainKHR old_swapchain = ctx.swapchain.handle;
@@ -1474,7 +1496,7 @@ namespace smol::renderer
             .minImageCount = desired_swapchain_images,
             .imageFormat = surface_format.format,
             .imageColorSpace = surface_format.colorSpace,
-            .imageExtent = swapchain_extent,
+            .imageExtent = physical_extent,
             .imageArrayLayers = 1,
             .imageUsage = VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT,
             .imageSharingMode = VK_SHARING_MODE_EXCLUSIVE,
@@ -1521,7 +1543,7 @@ namespace smol::renderer
             });
         }
 
-        ctx.swapchain.extent = {swapchain_extent.width, swapchain_extent.height};
+        ctx.swapchain.extent = {physical_extent.width, physical_extent.height};
         ctx.swapchain.format = surface_format.format;
 
         ctx.swapchain.depth_format = find_depth_format();
@@ -1530,7 +1552,7 @@ namespace smol::renderer
             .sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO,
             .imageType = VK_IMAGE_TYPE_2D,
             .format = ctx.swapchain.depth_format,
-            .extent = {swapchain_extent.width, swapchain_extent.height, 1},
+            .extent = {physical_extent.width, physical_extent.height, 1},
             .mipLevels = 1,
             .arrayLayers = 1,
             .samples = VK_SAMPLE_COUNT_1_BIT,
@@ -1960,8 +1982,14 @@ namespace smol::renderer
     {
         if (width > 0 && height > 0)
         {
-            ctx.render_extent.width = width;
-            ctx.render_extent.height = height;
+            ctx.logical_extent.width = width;
+            ctx.logical_extent.height = height;
+
+            if (ctx.use_offscreen_viewport)
+            {
+                ctx.render_extent.width = width;
+                ctx.render_extent.height = height;
+            }
         }
     }
 

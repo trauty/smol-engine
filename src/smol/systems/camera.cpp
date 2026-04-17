@@ -28,8 +28,8 @@ namespace smol::camera_system
 
     void update(ecs::registry_t& reg)
     {
-        u32_t cur_width = smol::renderer::ctx.render_extent.width;
-        u32_t cur_height = smol::renderer::ctx.render_extent.height;
+        u32_t cur_width = smol::renderer::ctx.logical_extent.width;
+        u32_t cur_height = smol::renderer::ctx.logical_extent.height;
 
         if (cur_width == 0 || cur_height == 0) { return; }
 

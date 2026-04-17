@@ -292,6 +292,8 @@ namespace smol::renderer
         u8* global_data_mapped = nullptr;
 
         VkExtent2D render_extent = {0, 0};
+        VkExtent2D logical_extent = {0, 0};
+        VkSurfaceTransformFlagBitsKHR cur_surface_transform;
         u32_t viewport_bindless_id = BINDLESS_NULL_HANDLE;
         bool use_offscreen_viewport = false;
     };
