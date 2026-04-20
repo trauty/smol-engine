@@ -49,9 +49,9 @@ int main(int argc, char* argv[])
         return -1;
     }
 
-    game_init = (game_init_func)smol::os::get_proc_address(game_lib, "smol_game_init");
-    game_update = (game_update_func)smol::os::get_proc_address(game_lib, "smol_game_update");
-    game_shutdown = (game_shutdown_func)smol::os::get_proc_address(game_lib, "smol_game_shutdown");
+    game_init = (game_init_func)smol::os::get_proc_address(game_lib, "smol_game_init_internal");
+    game_update = (game_update_func)smol::os::get_proc_address(game_lib, "smol_game_update_internal");
+    game_shutdown = (game_shutdown_func)smol::os::get_proc_address(game_lib, "smol_game_shutdown_internal");
 
     if (!game_init || !game_update || !game_shutdown)
     {

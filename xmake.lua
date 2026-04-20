@@ -101,7 +101,7 @@ target("smol-interface")
     add_includedirs("include", {public = true})
     add_includedirs("src", {public = true})
     
-    add_defines("CGLM_FORCE_LEFT_HANDED", "VK_NO_PROTOTYPES", {public = true})
+    add_defines("CGLM_FORCE_LEFT_HANDED", "VK_NO_PROTOTYPES", "CGLM_FORCE_DEPTH_ZERO_TO_ONE", {public = true})
     
     add_packages("vulkan-headers", "volk", "libsdl3", "cglm", "fmt", "entt", {public = true})
 target_end()

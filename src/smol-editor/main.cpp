@@ -1,10 +1,19 @@
-
 #include "imgui/imgui.h"
 #include "imgui/imgui_impl_sdl3.h"
 #include "imgui_backend.h"
+#include "smol-editor/editor_context.h"
+#include "smol-editor/panels/hierarchy.h"
+#include "smol-editor/panels/inspector.h"
+#include "smol-editor/panels/main_menu_bar.h"
+#include "smol-editor/panels/toolbar.h"
+#include "smol-editor/panels/viewport.h"
+#include "smol-editor/systems/camera.h"
+#include "smol/components/camera.h"
+#include "smol/components/transform.h"
+#include "smol/ecs.h"
 #include "smol/engine.h"
 #include "smol/game.h"
-#include "smol/input.h"
+#include "smol/hash.h"
 #include "smol/log.h"
 #include "smol/os.h"
 #include "smol/rendering/renderer.h"
@@ -36,17 +45,14 @@ const std::string LIB_EXT = ".so";
 std::filesystem::path source_lib_path;
 std::filesystem::path trigger_path;
 std::string source_lib_name;
-
 std::string cur_temp_lib_name = "";
-
-game_init_func game_init = nullptr;
-game_update_func game_update = nullptr;
-game_shutdown_func game_shutdown = nullptr;
 
 smol::os::lib_handle_t game_lib = nullptr;
 std::filesystem::file_time_type last_reload_time;
 
-bool load_game_dll(bool is_reload)
+typedef void (*editor_init_func)(smol::world_t*, smol::editor_context_t*, ImGuiContext*);
+
+bool load_game_dll(bool is_reload, smol::editor_context_t& ctx)
 {
     if (game_lib)
     {
@@ -89,11 +95,13 @@ bool load_game_dll(bool is_reload)
         return false;
     }
 
-    game_init = (game_init_func)smol::os::get_proc_address(game_lib, "smol_game_init");
-    game_update = (game_update_func)smol::os::get_proc_address(game_lib, "smol_game_update");
-    game_shutdown = (game_shutdown_func)smol::os::get_proc_address(game_lib, "smol_game_shutdown");
+    ctx.game_init = (game_init_func)smol::os::get_proc_address(game_lib, "smol_game_init_internal");
+    ctx.game_update = (game_update_func)smol::os::get_proc_address(game_lib, "smol_game_update_internal");
+    ctx.game_shutdown = (game_shutdown_func)smol::os::get_proc_address(game_lib, "smol_game_shutdown_internal");
 
-    if (!game_init || !game_update || !game_shutdown)
+    editor_init_func editor_init = (editor_init_func)smol::os::get_proc_address(game_lib, "smol_editor_init");
+
+    if (!ctx.game_init || !ctx.game_update || !ctx.game_shutdown)
     {
         SMOL_LOG_ERROR("EDITOR", "Could not find one or more game logic functions necessary");
         return false;
@@ -102,89 +110,81 @@ bool load_game_dll(bool is_reload)
     std::error_code trigger_ec;
     last_reload_time = std::filesystem::last_write_time(trigger_path, trigger_ec);
 
-    if (!is_reload) { game_init(&smol::engine::get_active_world()); }
+    if (!is_reload) { ctx.game_init(&smol::engine::get_active_world()); }
+
+    if (editor_init)
+    {
+        ctx.custom_panels.clear();
+        editor_init(&smol::engine::get_active_world(), &ctx, ImGui::GetCurrentContext());
+    }
 
     SMOL_LOG_INFO("EDITOR", "{}", is_reload ? "Successfully hot-reloaded game lib" : "Successfully loaded game lib");
     return true;
 }
 
-struct editor_t
+bool process_editor_event(const SDL_Event& event, smol::editor_context_t& ctx)
 {
-    std::chrono::steady_clock::time_point last_check_time = std::chrono::steady_clock::now();
+    ImGui_ImplSDL3_ProcessEvent(&event);
+    ImGuiIO& io = ImGui::GetIO();
 
-    bool process_event(const SDL_Event& event)
+    if (ctx.cur_mode == smol::editor_mode_e::EDIT) { return false; }
+
+    bool ignore_mouse =
+        io.WantCaptureMouse && (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN || event.type == SDL_EVENT_MOUSE_BUTTON_UP ||
+                                event.type == SDL_EVENT_MOUSE_MOTION || event.type == SDL_EVENT_MOUSE_WHEEL);
+
+    bool ignore_keyboard =
+        io.WantCaptureKeyboard &&
+        (event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP || event.type == SDL_EVENT_TEXT_INPUT);
+
+    return ignore_mouse || ignore_keyboard;
+}
+
+void update_editor_ui(smol::world_t& world, smol::editor_context_t& ctx)
+{
+    static std::chrono::steady_clock::time_point last_check_time = std::chrono::steady_clock::now();
+    std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
+
+    if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_check_time).count() > 250)
     {
-        ImGui_ImplSDL3_ProcessEvent(&event);
-        ImGuiIO& io = ImGui::GetIO();
+        last_check_time = now;
 
-        bool ignore_mouse = io.WantCaptureMouse &&
-                            (event.type == SDL_EVENT_MOUSE_BUTTON_DOWN || event.type == SDL_EVENT_MOUSE_BUTTON_UP ||
-                             event.type == SDL_EVENT_MOUSE_MOTION || event.type == SDL_EVENT_MOUSE_WHEEL);
+        std::error_code ec;
+        auto cur_time = std::filesystem::last_write_time(trigger_path, ec);
 
-        bool ignore_keyboard =
-            io.WantCaptureKeyboard &&
-            (event.type == SDL_EVENT_KEY_DOWN || event.type == SDL_EVENT_KEY_UP || event.type == SDL_EVENT_TEXT_INPUT);
-
-        return ignore_mouse || ignore_keyboard;
+        if (!ec && cur_time > last_reload_time)
+        {
+            SMOL_LOG_INFO("EDITOR", "Build system signaled completion. Attempting hot reload...");
+            load_game_dll(true, ctx);
+        }
     }
 
-    void update(smol::world_t& world)
+    ImGui_ImplSDL3_NewFrame();
+    ImGui::NewFrame();
+    ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(), ImGuiDockNodeFlags_None);
+
+    // ImGui::ShowDemoWindow();
+
+    smol::editor::panels::draw_main_menu_bar(world, ctx);
+    smol::editor::panels::draw_viewport(world, ctx);
+    smol::editor::panels::draw_hierarchy(world, ctx);
+    smol::editor::panels::draw_inspector(world, ctx);
+    smol::editor::panels::draw_toolbar(world, ctx);
+
+    for (smol::panel_draw_func custom_panel : ctx.custom_panels) { custom_panel(world, ctx); }
+
+    ImGui::Render();
+    smol::editor::imgui::submit(ImGui::GetDrawData());
+
+    if (ctx.cur_mode == smol::editor_mode_e::EDIT)
     {
-        auto now = std::chrono::steady_clock::now();
-        if (std::chrono::duration_cast<std::chrono::milliseconds>(now - last_check_time).count() > 250)
-        {
-            last_check_time = now;
-
-            std::error_code ec;
-            auto cur_time = std::filesystem::last_write_time(trigger_path, ec);
-
-            if (!ec && cur_time > last_reload_time)
-            {
-                SMOL_LOG_INFO("EDITOR", "Build system signaled completion. Attempting hot reload...");
-                load_game_dll(true);
-            }
-        }
-
-        ImGui_ImplSDL3_NewFrame();
-        ImGui::NewFrame();
-
-        ImGuiDockNodeFlags dockspace_flags = ImGuiDockNodeFlags_None;
-        ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(), dockspace_flags);
-
-        ImGui::ShowDemoWindow();
-
-        ImGui::PushStyleVar(ImGuiStyleVar_WindowPadding, ImVec2{0, 0});
-        if (ImGui::Begin("Scene Viewport"))
-        {
-            ImVec2 viewport_size = ImGui::GetContentRegionAvail();
-            ImVec2 viewport_pos = ImGui::GetCursorScreenPos();
-
-            static ImVec2 last_size = {0.0f, 0.0f};
-            if (viewport_size.x > 0.0f && viewport_size.y > 0.0f &&
-                (viewport_size.x != last_size.x || viewport_size.y != last_size.y))
-            {
-                smol::renderer::set_render_resolution((u32_t)viewport_size.x, (u32_t)viewport_size.y);
-                last_size = viewport_size;
-            }
-
-            smol::input::set_viewport_offset(viewport_pos.x, viewport_pos.y);
-            smol::input::set_viewport_size(viewport_size.x, viewport_size.y);
-
-            u32_t tex_id = smol::renderer::get_viewport_texture_id();
-            if (tex_id != smol::renderer::BINDLESS_NULL_HANDLE)
-            {
-                ImGui::Image((ImTextureID)(intptr_t)(tex_id), viewport_size);
-            }
-        }
-        ImGui::End();
-        ImGui::PopStyleVar();
-
-        ImGui::Render();
-        smol::editor::imgui::submit(ImGui::GetDrawData());
-
-        if (game_update) { game_update(&smol::engine::get_active_world()); }
+        smol::editor::camera_system::update(world.registry, ctx.is_viewport_hovered);
     }
-};
+    else if (ctx.cur_mode == smol::editor_mode_e::PLAY)
+    {
+        if (ctx.game_update) { ctx.game_update(&smol::engine::get_active_world()); }
+    }
+}
 
 int main(i32 argc, char** argv)
 {
@@ -246,27 +246,35 @@ int main(i32 argc, char** argv)
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
     io.ConfigFlags |= ImGuiConfigFlags_DockingEnable;
+    io.Fonts->AddFontDefaultVector();
     ImGui_ImplSDL3_InitForVulkan(smol::window::get_window());
     smol::editor::imgui::init();
 
     smol::engine::create_scene();
     smol::world_t& cur_world = smol::engine::get_active_world();
 
-    if (!load_game_dll(false))
+    static smol::editor_context_t editor_ctx;
+
+    if (!load_game_dll(false, editor_ctx))
     {
         SMOL_LOG_ERROR("EDITOR", "Initial load of game lib failed. Exiting...");
         return -1;
     }
 
-    static editor_t editor;
-
-    smol::engine::set_event_callback([](const SDL_Event& event) { return editor.process_event(event); });
-    smol::engine::set_ui_callback([]() { editor.update(smol::engine::get_active_world()); });
+    smol::engine::set_event_callback([&](const SDL_Event& event) { return process_editor_event(event, editor_ctx); });
+    smol::engine::set_ui_callback([&]() { update_editor_ui(cur_world, editor_ctx); });
 
     cur_world.init();
+
+    editor_ctx.editor_camera = cur_world.registry.create();
+    cur_world.registry.emplace<smol::transform_t>(editor_ctx.editor_camera);
+    cur_world.registry.emplace<smol::camera_t>(editor_ctx.editor_camera);
+    cur_world.registry.emplace<smol::editor::editor_camera_tag>(editor_ctx.editor_camera);
+    cur_world.registry.emplace<smol::active_camera_tag>(editor_ctx.editor_camera);
+
     smol::engine::run();
 
-    if (game_shutdown) { game_shutdown(&smol::engine::get_active_world()); }
+    if (editor_ctx.game_shutdown) { editor_ctx.game_shutdown(&smol::engine::get_active_world()); }
 
     vkDeviceWaitIdle(smol::renderer::ctx.device);
 

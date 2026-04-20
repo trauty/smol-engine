@@ -2,6 +2,7 @@
 
 #include "defines.h"
 #include "smol/defines.h"
+#include "smol/math.h"
 
 #include <functional>
 #include <string>
@@ -129,6 +130,10 @@ namespace smol::input
     SMOL_API float get_mouse_x();
 
     SMOL_API float get_mouse_y();
+
+    SMOL_API vec2_t get_mouse_delta();
+
+    SMOL_API void set_mouse_relative_mode(bool is_relative);
 
     SMOL_API float get_scroll_delta();
 

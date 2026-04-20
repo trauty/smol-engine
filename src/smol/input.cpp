@@ -1,6 +1,8 @@
 #include "input.h"
 
+#include "SDL3/SDL_mouse.h"
 #include "smol/hash.h"
+#include "smol/window.h"
 
 #include <SDL3/SDL_events.h>
 #include <SDL3/SDL_scancode.h>
@@ -23,6 +25,8 @@ namespace smol::input
 
         float mouse_x = 0.0f;
         float mouse_y = 0.0f;
+        float delta_mouse_x = 0.0f;
+        float delta_mouse_y = 0.0f;
         float scroll_delta = 0.0f;
 
         float viewport_offset_x = 0.0f;
@@ -170,6 +174,11 @@ namespace smol::input
 
     float get_mouse_y() { return input_state.mouse_y; }
 
+    vec2_t get_mouse_delta() { return {input_state.delta_mouse_x, input_state.delta_mouse_y}; }
+
+    void set_mouse_relative_mode(bool is_relative)
+    { SDL_SetWindowRelativeMouseMode(smol::window::get_window(), is_relative); }
+
     float get_scroll_delta() { return input_state.scroll_delta; }
 
     void bind_button(const std::string& action_name, key_t key)
@@ -266,6 +275,9 @@ namespace smol::input
             std::memcpy(input_state.prev_mouse, input_state.cur_mouse, sizeof(input_state.cur_mouse));
             input_state.scroll_delta = 0.0f;
 
+            input_state.delta_mouse_x = 0.0f;
+            input_state.delta_mouse_y = 0.0f;
+
             processHoldEvents();
         }
 
@@ -317,6 +329,10 @@ namespace smol::input
 
                 input_state.mouse_x = input_state.raw_mouse_x - input_state.viewport_offset_x;
                 input_state.mouse_y = input_state.raw_mouse_y - input_state.viewport_offset_y;
+
+                input_state.delta_mouse_x += event.motion.xrel;
+                input_state.delta_mouse_y += event.motion.yrel;
+
                 break;
 
             case SDL_EVENT_MOUSE_WHEEL: input_state.scroll_delta = event.wheel.y; break;

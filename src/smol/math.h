@@ -1,6 +1,7 @@
 #pragma once
 
 #include "cglm/euler.h"
+#include "cglm/util.h"
 #include "cglm/vec3.h"
 #include "defines.h"
 
@@ -9,6 +10,12 @@
 
 namespace smol
 {
+    namespace math
+    {
+        inline f32 deg_to_rad(f32 deg) { return glm_rad(deg); }
+        inline f32 rad_to_deg(f32 rad) { return glm_deg(rad); }
+    } // namespace math
+
     struct SMOL_API vec2_t
     {
         float x, y;
@@ -89,6 +96,13 @@ namespace smol
         float length() const { return glm_vec3_norm(const_cast<float*>(&x)); }
         float length_squared() const { return glm_vec3_norm2(const_cast<float*>(&x)); }
 
+        static vec3_t right() { return {1.0f, 0.0f, 0.0f}; }
+        static vec3_t left() { return {-1.0f, 0.0f, 0.0f}; }
+        static vec3_t up() { return {0.0f, 1.0f, 0.0f}; }
+        static vec3_t down() { return {0.0f, -1.0f, 0.0f}; }
+        static vec3_t forward() { return {0.0f, 0.0f, 1.0f}; }
+        static vec3_t back() { return {0.0f, 0.0f, -1.0f}; }
+
         vec3_t operator+(vec3_t other) const { return {x + other.x, y + other.y, z + other.z}; }
         vec3_t operator-(vec3_t other) const { return {x - other.x, y - other.y, z - other.z}; }
         vec3_t operator*(vec3_t other) const { return {x * other.x, y * other.y, z * other.z}; }
@@ -161,6 +175,37 @@ namespace smol
         {
             quat_t res;
             glm_quat_slerp(from, to, t, res);
+            return res;
+        }
+
+        static quat_t angle_axis(f32 angle_radians, vec3_t axis)
+        {
+            quat_t dest;
+            glm_quatv(dest, angle_radians, axis);
+            return dest;
+        }
+
+        vec3_t right() const
+        {
+            vec3_t res;
+            vec3_t global_right = {1.0f, 0.0f, 0.0f};
+            glm_quat_rotatev(const_cast<float*>(&x), global_right, res);
+            return res;
+        }
+
+        vec3_t up() const
+        {
+            vec3_t res;
+            vec3_t global_up = {0.0f, 1.0f, 0.0f};
+            glm_quat_rotatev(const_cast<float*>(&x), global_up, res);
+            return res;
+        }
+
+        vec3_t forward() const
+        {
+            vec3_t res;
+            vec3_t global_fwd = {0.0f, 0.0f, 1.0f};
+            glm_quat_rotatev(const_cast<float*>(&x), global_fwd, res);
             return res;
         }
 
@@ -265,6 +310,10 @@ namespace smol
             glm_perspective(fovy, aspect, nearVal, farVal, res);
             return res;
         }
+
+        vec3_t right() const { return {m00, m01, m02}; }
+        vec3_t up() const { return {m10, m11, m12}; }
+        vec3_t forward() const { return {m20, m21, m22}; }
 
         mat4_t operator*(const mat4_t& other) const
         {

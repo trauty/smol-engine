@@ -3,14 +3,20 @@
 #include "smol/physics/physics_world.h"
 
 #include <vector>
+
+namespace entt { struct meta_ctx; }
+
 namespace smol
 {
+    namespace reflection { using ctx_t = entt::meta_ctx; }
+
     using system_func_t = void (*)(ecs::registry_t&);
 
     struct SMOL_API world_t
     {
         std::string name;
         ecs::registry_t registry;
+        reflection::ctx_t* reflection_ctx;
         physics_world_t physics;
 
         std::vector<system_func_t> init_systems;

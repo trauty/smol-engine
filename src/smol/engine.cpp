@@ -6,6 +6,7 @@
 #include "smol/jobs.h"
 #include "smol/log.h"
 #include "smol/profiling.h"
+#include "smol/reflection.h"
 #include "smol/rendering/renderer.h"
 #include "smol/rendering/renderer_types.h"
 #include "smol/systems/camera.h"
@@ -59,6 +60,7 @@ namespace smol::engine
 
         SMOL_LOG_INFO("ENGINE", "Starting engine...");
 
+        smol::reflection::register_types();
         smol::jobs::init();
 
         // SDL_SetHintWithPriority(SDL_HINT_SHUTDOWN_DBUS_ON_QUIT, "1", SDL_HintPriority::SDL_HINT_OVERRIDE);
@@ -163,13 +165,13 @@ namespace smol::engine
                 accumulator -= fixed_timestep;
             }
 
+            if (user_ui_cb) { user_ui_cb(); }
+
             // smol::physics::interpolation_alpha = static_cast<f32>(accumulator / fixed_timestep);
             active_scene->update();
 
             smol::transform_system::update(active_scene->registry);
             smol::camera_system::update(active_scene->registry);
-
-            if (user_ui_cb) { user_ui_cb(); }
 
             if (!is_suspended) { smol::renderer::render(active_scene->registry); }
 
@@ -212,6 +214,8 @@ namespace smol::engine
         if (active_scene) { active_scene->shutdown(); }
 
         active_scene = std::make_unique<smol::world_t>();
+
+        active_scene->reflection_ctx = &smol::reflection::get_engine_context();
 
         if (!active_scene) { SMOL_LOG_ERROR("ENGINE", "Could not create scene"); }
     }
