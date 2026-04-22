@@ -10,7 +10,14 @@ namespace smol::editor::panels
 {
     void draw_toolbar(world_t& world, editor_context_t& ctx)
     {
-        ImGui::Begin("Toolbar");
+        ImGui::SetNextWindowSizeConstraints(ImVec2(0.0f, 48.0f), ImVec2(FLT_MAX, 48.0f));
+
+        ImGuiWindowClass window_class;
+        window_class.DockNodeFlagsOverrideSet = ImGuiDockNodeFlags_NoResize;
+        ImGui::SetNextWindowClass(&window_class);
+
+        ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoScrollbar;
+        ImGui::Begin("Toolbar", nullptr, flags);
 
         if (ctx.cur_mode == editor_mode_e::EDIT)
         {

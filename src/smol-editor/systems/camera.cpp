@@ -1,5 +1,6 @@
 #include "camera.h"
 
+#include "imgui.h"
 #include "smol/components/camera.h"
 #include "smol/components/transform.h"
 #include "smol/ecs.h"
@@ -23,12 +24,14 @@ namespace smol::editor::camera_system
         {
             is_moving = true;
             smol::input::set_mouse_relative_mode(true);
+            ImGui::GetIO().ConfigFlags |= ImGuiConfigFlags_NoMouse;
         }
 
         if (!smol::input::get_mouse_button(smol::input::mouse_button_t::Right))
         {
             is_moving = false;
             smol::input::set_mouse_relative_mode(false);
+            ImGui::GetIO().ConfigFlags &= ~ImGuiConfigFlags_NoMouse;
         }
 
         for (ecs::entity_t entity : view)
@@ -49,7 +52,7 @@ namespace smol::editor::camera_system
                 if (smol::input::get_key(smol::input::key_t::A)) { transform.local_position -= right * speed; }
 
                 vec2_t mouse_delta = smol::input::get_mouse_delta();
-                f32 mouse_sensitity = 0.002f;
+                f32 mouse_sensitity = 0.0015f;
 
                 if (mouse_delta.x != 0.0f || mouse_delta.y != 0.0f)
                 {

@@ -1,6 +1,7 @@
 #include "imgui/imgui.h"
 #include "imgui/imgui_impl_sdl3.h"
 #include "imgui_backend.h"
+#include "imgui_internal.h"
 #include "smol-editor/editor_context.h"
 #include "smol-editor/panels/hierarchy.h"
 #include "smol-editor/panels/inspector.h"
@@ -161,7 +162,49 @@ void update_editor_ui(smol::world_t& world, smol::editor_context_t& ctx)
 
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
-    ImGui::DockSpaceOverViewport(0, ImGui::GetMainViewport(), ImGuiDockNodeFlags_None);
+
+    ImGuiID dockspace_id = ImGui::GetID("MainDockSpace");
+
+    static bool first_time = true;
+    if (first_time)
+    {
+        first_time = false;
+
+        const char* ini_file = ImGui::GetIO().IniFilename;
+        if (!ini_file || !std::filesystem::exists(ini_file))
+        {
+            ImGui::DockBuilderRemoveNode(dockspace_id);
+            ImGui::DockBuilderAddNode(dockspace_id, ImGuiDockNodeFlags_DockSpace);
+            ImGui::DockBuilderSetNodeSize(dockspace_id, ImGui::GetMainViewport()->Size);
+
+            f32 view_w = ImGui::GetMainViewport()->Size.x;
+            f32 view_h = ImGui::GetMainViewport()->Size.y;
+
+            ImGuiID dock_main = dockspace_id;
+
+            ImGuiID dock_toolbar =
+                ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Up, 48.0f / view_h, nullptr, &dock_main);
+            ImGuiID dock_sidebars = ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Right, 0.15f, nullptr, &dock_main);
+
+            ImGuiID dock_hierarchy =
+                ImGui::DockBuilderSplitNode(dock_sidebars, ImGuiDir_Up, 0.5f, nullptr, &dock_sidebars);
+            ImGuiID dock_inspector = dock_sidebars;
+
+            ImGuiID dock_viewport = dock_main;
+
+            ImGui::DockBuilderDockWindow("Toolbar", dock_toolbar);
+            ImGui::DockBuilderDockWindow("Scene Viewport", dock_viewport);
+            ImGui::DockBuilderDockWindow("Hierarchy", dock_hierarchy);
+            ImGui::DockBuilderDockWindow("Inspector", dock_inspector);
+
+            ImGuiDockNode* toolbar_node = ImGui::DockBuilderGetNode(dock_toolbar);
+            if (toolbar_node) { toolbar_node->LocalFlags |= ImGuiDockNodeFlags_NoTabBar; }
+
+            ImGui::DockBuilderFinish(dockspace_id);
+        }
+    }
+
+    ImGui::DockSpaceOverViewport(dockspace_id, ImGui::GetMainViewport(), ImGuiDockNodeFlags_None);
 
     // ImGui::ShowDemoWindow();
 
