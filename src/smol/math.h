@@ -1,6 +1,8 @@
 #pragma once
 
 #include "cglm/euler.h"
+#include "cglm/handed/euler_to_quat_lh.h"
+#include "cglm/quat.h"
 #include "cglm/util.h"
 #include "cglm/vec3.h"
 #include "defines.h"
@@ -162,6 +164,15 @@ namespace smol
         {
             quat_t dest;
             glm_euler_zyx_quat(euler_angles, dest);
+            return dest;
+        }
+
+        static vec3_t to_euler(quat_t rot)
+        {
+            vec3_t dest;
+            mat4 rot_mat;
+            glm_quat_mat4(rot, rot_mat);
+            glm_euler_angles(rot_mat, dest);
             return dest;
         }
 

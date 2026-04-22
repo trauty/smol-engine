@@ -34,10 +34,37 @@ namespace smol::editor::panels
                 smol::reflection::type_t field_type = data.type();
                 smol::reflection::any_t field_value = data.get(instance);
 
-                if (field_type == smol::reflection::resolve<i32_t>(*world.reflection_ctx))
+                if (field_type == smol::reflection::resolve<i32>(*world.reflection_ctx))
+                {
+                    i32 val = field_value.cast<i32>();
+                    if (ImGui::DragInt(label, &val))
+                    {
+                        data.set(instance, val);
+                        was_modified = true;
+                    }
+                }
+                else if (field_type == smol::reflection::resolve<i32_t>(*world.reflection_ctx))
                 {
                     i32_t val = field_value.cast<i32_t>();
                     if (ImGui::DragInt(label, &val))
+                    {
+                        data.set(instance, val);
+                        was_modified = true;
+                    }
+                }
+                else if (field_type == smol::reflection::resolve<u32>(*world.reflection_ctx))
+                {
+                    u32 val = field_value.cast<u32>();
+                    if (ImGui::DragScalar(label, ImGuiDataType_U32, &val))
+                    {
+                        data.set(instance, val);
+                        was_modified = true;
+                    }
+                }
+                else if (field_type == smol::reflection::resolve<u32_t>(*world.reflection_ctx))
+                {
+                    u32_t val = field_value.cast<u32_t>();
+                    if (ImGui::DragScalar(label, ImGuiDataType_U32, &val))
                     {
                         data.set(instance, val);
                         was_modified = true;
@@ -61,15 +88,6 @@ namespace smol::editor::panels
                         was_modified = true;
                     }
                 }
-                else if (field_type == smol::reflection::resolve<smol::vec3_t>(*world.reflection_ctx))
-                {
-                    smol::vec3_t vec = field_value.cast<smol::vec3_t>();
-                    if (ImGui::DragFloat3(label, &vec.x, 0.1f))
-                    {
-                        data.set(instance, vec);
-                        was_modified = true;
-                    }
-                }
                 else if (field_type == smol::reflection::resolve<std::string>(*world.reflection_ctx))
                 {
                     std::basic_string<char> str = field_value.cast<std::string>();
@@ -80,6 +98,52 @@ namespace smol::editor::panels
                     {
                         data.set(instance, std::string(str.data()));
                         was_modified = true;
+                    }
+                }
+                else if (field_type == smol::reflection::resolve<smol::vec3_t>(*world.reflection_ctx))
+                {
+                    smol::vec3_t vec = field_value.cast<smol::vec3_t>();
+                    if (ImGui::DragFloat3(label, &vec.x, 0.1f))
+                    {
+                        data.set(instance, vec);
+                        was_modified = true;
+                    }
+                }
+                else if (field_type.is_enum())
+                {
+                    i32 cur_val = field_value.cast<i32>();
+
+                    const char* preview_name = "Unknown";
+                    for (auto [enum_data_id, enum_data] : field_type.data())
+                    {
+                        if (enum_data.get({}).cast<i32>() == cur_val)
+                        {
+                            preview_name = enum_data.custom()
+                                               ? static_cast<smol::reflection::editor_prop_t*>(enum_data.custom())->name
+                                               : "Selected";
+                        }
+                    }
+
+                    if (ImGui::BeginCombo(label, preview_name))
+                    {
+                        for (auto [enum_data_id, enum_data] : field_type.data())
+                        {
+                            i32 enum_val = enum_data.get({}).cast<i32>();
+                            const char* enum_name =
+                                enum_data.custom()
+                                    ? static_cast<smol::reflection::editor_prop_t*>(enum_data.custom())->name
+                                    : "Option";
+
+                            bool is_selected = (cur_val == enum_val);
+                            if (ImGui::Selectable(enum_name, is_selected))
+                            {
+                                data.set(instance, enum_val);
+                                was_modified = true;
+                            }
+                            if (is_selected) { ImGui::SetItemDefaultFocus(); }
+                        }
+
+                        ImGui::EndCombo();
                     }
                 }
             }
@@ -98,7 +162,7 @@ namespace smol::editor::panels
             {
                 for (auto [id, type] : smol::reflection::resolve(*world.reflection_ctx))
                 {
-                    if (smol::reflection::func_t get_func = type.func("get_component"_h); get_func)
+                    if (smol::reflection::func_t get_func = type.func("get"_h); get_func)
                     {
                         smol::reflection::any_t instance =
                             get_func.invoke({}, smol::reflection::forward_as_meta(world.registry), selected_entity);
@@ -151,7 +215,7 @@ namespace smol::editor::panels
                     for (auto [id, type] : smol::reflection::resolve(*world.reflection_ctx))
                     {
                         smol::reflection::func_t add_func = type.func("add"_h);
-                        smol::reflection::func_t get_func = type.func("get_component"_h);
+                        smol::reflection::func_t get_func = type.func("get"_h);
 
                         if (add_func && get_func)
                         {

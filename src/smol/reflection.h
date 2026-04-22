@@ -27,7 +27,14 @@ namespace smol::reflection
     template <typename T>
     any_t get_component(smol::ecs::registry_t& reg, smol::ecs::entity_t entity)
     {
-        if (reg.all_of<T>(entity)) { return any_t{std::in_place_type<T&>, reg.get<T>(entity)}; }
+        if (reg.all_of<T>(entity))
+        {
+            if constexpr (std::is_empty_v<T>) { return any_t{std::in_place_type<T>}; }
+            else
+            {
+                return any_t{std::in_place_type<T&>, reg.get<T>(entity)};
+            }
+        }
         return {};
     }
 
