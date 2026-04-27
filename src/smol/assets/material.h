@@ -3,6 +3,7 @@
 #include "smol/assets/shader.h"
 #include "smol/assets/texture.h"
 #include "smol/defines.h"
+#include "smol/engine.h"
 #include "smol/log.h"
 #include "smol/rendering/renderer_types.h"
 #include "smol/rendering/samplers.h"
@@ -18,23 +19,24 @@ namespace smol
 
     struct SMOL_API material_t
     {
-        asset_t<shader_t> shader;
+        asset_handle_t shader_handle;
         std::vector<u8> data;
 
-        std::unordered_map<u32_t, asset_t<texture_t>> bound_textures;
+        std::unordered_map<u32_t, asset_handle_t> bound_textures;
 
         u32_t heap_offset[renderer::MAX_FRAMES_IN_FLIGHT];
         u32_t dirty_frames = renderer::MAX_FRAMES_IN_FLIGHT;
         u32_t last_synced_frame = renderer::BINDLESS_NULL_HANDLE;
 
         material_t() = default;
-        material_t(asset_t<shader_t> target_shader);
+        material_t(asset_handle_t target_shader);
 
         void sync();
 
         template <typename T>
         void set_property(u32_t name_hash, const T& value)
         {
+            shader_t* shader = smol::engine::get_asset_registry().get<shader_t>(shader_handle);
             if (!shader) { return; }
 
             const std::unordered_map<u32_t, shader_member_t>& members = shader->module.members;
@@ -59,12 +61,13 @@ namespace smol
             dirty_frames = renderer::MAX_FRAMES_IN_FLIGHT;
         }
 
-        void set_texture(u32_t name_hash, const asset_t<texture_t>& tex)
+        void set_texture(u32_t name_hash, asset_handle_t tex_handle)
         {
+            texture_t* tex = smol::engine::get_asset_registry().get<texture_t>(tex_handle);
             if (tex)
             {
                 set_property<u32_t>(name_hash, tex->bindless_id);
-                bound_textures[name_hash] = tex;
+                bound_textures[name_hash] = tex_handle;
             }
         }
 
@@ -75,7 +78,7 @@ namespace smol
     template <>
     struct SMOL_API asset_loader_t<material_t>
     {
-        static std::optional<material_t> load(const std::string& path, asset_t<shader_t> target_shader);
+        static std::optional<material_t> load(const std::string& path, asset_handle_t target_shader);
         static void unload(material_t& mat);
     };
 } // namespace smol

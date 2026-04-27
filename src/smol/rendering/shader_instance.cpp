@@ -1,7 +1,9 @@
 #include "shader_instance.h"
 
+#include "smol/asset.h"
 #include "smol/assets/shader_format.h"
 #include "smol/defines.h"
+#include "smol/engine.h"
 #include "smol/log.h"
 #include "smol/rendering/renderer.h"
 #include "smol/rendering/renderer_resources.h"
@@ -12,19 +14,19 @@
 
 namespace smol
 {
-    shader_instance_t::shader_instance_t(asset_t<shader_t> target_shader) { init(target_shader); }
+    shader_instance_t::shader_instance_t(asset_handle_t target_shader) { init(target_shader); }
 
     shader_instance_t::~shader_instance_t() { shutdown(); }
 
-    void shader_instance_t::init(asset_t<shader_t> target_shader)
+    void shader_instance_t::init(asset_handle_t target_shader)
     {
-        if (!target_shader)
+        if (!target_shader.is_valid())
         {
             SMOL_LOG_ERROR("SHADER_INSTANCE", "Cannot init with a null shader");
             return;
         }
 
-        shader = target_shader;
+        shader_handle = target_shader;
 
         for (u32_t i = 0; i < renderer::MAX_FRAMES_IN_FLIGHT; i++) { sets[i].clear(); }
 
@@ -33,7 +35,7 @@ namespace smol
 
     void shader_instance_t::shutdown()
     {
-        if (!is_initialized || !shader) { return; }
+        if (!is_initialized || !shader_handle.is_valid()) { return; }
 
         for (u32_t i = 0; i < renderer::MAX_FRAMES_IN_FLIGHT; i++)
         {
@@ -53,7 +55,7 @@ namespace smol
 
         bound_resources.clear();
         is_initialized = false;
-        shader.release();
+        smol::engine::get_asset_registry().release<shader_t>(shader_handle);
     }
 
     void shader_instance_t::sync()
@@ -61,6 +63,8 @@ namespace smol
         if (!is_initialized || dirty_frames == 0) { return; }
 
         u32_t cur_frame = renderer::ctx.cur_frame;
+
+        shader_t* shader = smol::engine::get_asset_registry().get<shader_t>(shader_handle);
 
         if (sets[cur_frame].empty())
         {
@@ -158,6 +162,8 @@ namespace smol
 
         u32_t cur_frame = renderer::ctx.cur_frame;
         if (sets[cur_frame].empty()) { return; }
+
+        shader_t* shader = smol::engine::get_asset_registry().get<shader_t>(shader_handle);
 
         VkPipelineBindPoint bind_point =
             shader->is_compute ? VK_PIPELINE_BIND_POINT_COMPUTE : VK_PIPELINE_BIND_POINT_GRAPHICS;

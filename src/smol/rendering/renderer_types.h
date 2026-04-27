@@ -284,10 +284,10 @@ namespace smol::renderer
 
         std::vector<VkSampler> samplers;
 
-        asset_t<shader_t> culling_shader;
+        asset_handle_t culling_shader;
         shader_instance_t culling_instance;
 
-        asset_t<texture_t> default_tex;
+        asset_handle_t default_tex;
 
         VkDeviceSize global_data_aligned_size = 0;
         VkBuffer global_data_buffer = VK_NULL_HANDLE;

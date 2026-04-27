@@ -1,7 +1,9 @@
 #pragma once
 
+#include "smol/asset.h"
 #include "smol/asset_types.h"
 #include "smol/defines.h"
+#include "smol/hash.h"
 #include "smol/jobs.h"
 #include "smol/log.h"
 
@@ -72,38 +74,58 @@ namespace smol
         }
 
         template <typename T, typename... Args>
-        typename asset_pool_t<T>::slot_t* load_async(const std::string& path, Args&&... args)
+        asset_handle_t load_async(const std::string& path, Args&&... args)
         { return internal_load<T>(path, false, std::forward<Args>(args)...); }
 
         template <typename T, typename... Args>
-        typename asset_pool_t<T>::slot_t* load_sync(const std::string& path, Args&&... args)
+        asset_handle_t load_sync(const std::string& path, Args&&... args)
         { return internal_load<T>(path, true, std::forward<Args>(args)...); }
 
         template <typename T>
-        void release(typename asset_pool_t<T>::slot_t* slot)
+        T* get(asset_handle_t handle)
         {
-            if (!slot) { return; }
+            if (!handle.is_valid()) { return nullptr; }
 
-            if (slot->ref_count.fetch_sub(1) == 1)
+            std::scoped_lock lock(lookup_mutex);
+            auto it = lookup.find(handle.uuid);
+
+            if (it != lookup.end() && it->second.type_id == get_asset_type_id<T>())
             {
+                typename asset_pool_t<T>::slot_t* slot =
+                    static_cast<typename asset_pool_t<T>::slot_t*>(it->second.slot_ptr);
+                if (slot->state.load(std::memory_order_acquire) == asset_state_e::READY) { return &slot->data; }
+            }
+
+            return nullptr;
+        }
+
+        template <typename T>
+        void release(asset_handle_t handle)
+        {
+            if (!handle.is_valid()) { return; }
+
+            std::scoped_lock map_lock(lookup_mutex);
+            auto it = lookup.find(handle.uuid);
+
+            if (it != lookup.end() && it->second.type_id == get_asset_type_id<T>())
+            {
+                typename asset_pool_t<T>::slot_t* slot =
+                    static_cast<typename asset_pool_t<T>::slot_t*>(it->second.slot_ptr);
+
+                if (slot->ref_count.fetch_sub(1) == 1)
                 {
-                    std::scoped_lock map_lock(lookup_mutex);
+                    if constexpr (has_asset_unload<T>) { asset_loader_t<T>::unload(slot->data); }
 
-                    if (slot->ref_count.load() > 0) { return; }
+                    slot->data = T();
+                    slot->state = asset_state_e::UNLOADED;
 
-                    lookup.erase(slot->path);
+                    asset_pool_t<T>& pool = get_pool<T>();
+                    std::scoped_lock pool_lock(pool.pool_mutex);
+                    pool.free_indices.push_back(slot->id);
+
+                    SMOL_LOG_INFO("ASSET", "Unloaded asset: {}", slot->path);
+                    lookup.erase(it);
                 }
-
-                if constexpr (has_asset_unload<T>) { asset_loader_t<T>::unload(slot->data); }
-
-                slot->data = T();
-                slot->state = asset_state_e::UNLOADED;
-
-                asset_pool_t<T>& pool = get_pool<T>();
-                std::scoped_lock pool_lock(pool.pool_mutex);
-                pool.free_indices.push_back(slot->id);
-
-                SMOL_LOG_INFO("ASSET", "Unloaded asset: {}", slot->path);
             }
         }
 
@@ -114,9 +136,10 @@ namespace smol
         {
             void* slot_ptr;
             size_t type_id;
+            std::string path;
         };
 
-        std::unordered_map<std::string, lookup_entry_t> lookup;
+        std::unordered_map<uuid_t, lookup_entry_t> lookup;
         std::mutex lookup_mutex;
 
         template <typename T>
@@ -140,12 +163,14 @@ namespace smol
         template <typename T, typename... Args>
         typename asset_pool_t<T>::slot_t* internal_load(const std::string& path, bool is_sync, Args&&... args)
         {
+            uuid_t uuid = smol::hash_string(path.c_str());
+
             asset_pool_t<T>& pool = get_pool<T>();
             const size_t type_id = get_asset_type_id<T>();
 
             std::unique_lock map_lock(lookup_mutex);
 
-            auto it = lookup.find(path);
+            auto it = lookup.find(uuid);
             if (it != lookup.end() && it->second.type_id == type_id)
             {
                 typename asset_pool_t<T>::slot_t* slot =
@@ -176,7 +201,7 @@ namespace smol
             slot->state = asset_state_e::QUEUED;
             slot->ref_count = 1;
 
-            lookup[path] = {slot, type_id};
+            lookup[uuid] = {slot, type_id, path};
 
             map_lock.unlock();
 
@@ -202,7 +227,7 @@ namespace smol
                 smol::jobs::kick_heavy(std::move(load_func), nullptr, jobs::priority_e::LOW);
             }
 
-            return slot;
+            return asset_handle_t{uuid};
         }
     };
 

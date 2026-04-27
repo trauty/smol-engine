@@ -11,8 +11,10 @@
 
 namespace smol
 {
-    material_t::material_t(asset_t<shader_t> target_shader) : shader(target_shader)
+    material_t::material_t(asset_handle_t target_shader) : shader_handle(target_shader)
     {
+        shader_t* shader = smol::engine::get_asset_registry().get<shader_t>(target_shader);
+
         for (u32_t i = 0; i < renderer::MAX_FRAMES_IN_FLIGHT; i++) { heap_offset[i] = renderer::BINDLESS_NULL_HANDLE; }
 
         if (!shader)
@@ -48,10 +50,10 @@ namespace smol
         }
     }
 
-    std::optional<material_t> asset_loader_t<material_t>::load(const std::string& path, asset_t<shader_t> target_shader)
+    std::optional<material_t> asset_loader_t<material_t>::load(const std::string& path, asset_handle_t target_shader)
     {
         material_t mat(target_shader);
-        if (!mat.shader) { return std::nullopt; }
+        if (!mat.shader_handle.is_valid()) { return std::nullopt; }
         return mat;
     }
 
@@ -67,6 +69,6 @@ namespace smol
 
         mat.data.clear();
         mat.bound_textures.clear();
-        mat.shader.release();
+        smol::engine::get_asset_registry().release<shader_t>(mat.shader_handle);
     }
 }; // namespace smol

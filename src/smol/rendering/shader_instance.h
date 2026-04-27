@@ -25,7 +25,7 @@ namespace smol
 
     struct SMOL_API shader_instance_t
     {
-        asset_t<shader_t> shader;
+        asset_handle_t shader_handle;
 
         std::unordered_map<u32_t, bound_resource_t> bound_resources;
         std::unordered_map<u32_t, VkDescriptorSet> sets[renderer::MAX_FRAMES_IN_FLIGHT];
@@ -35,10 +35,10 @@ namespace smol
         bool is_initialized = false;
 
         shader_instance_t() = default;
-        shader_instance_t(asset_t<shader_t> target_shader);
+        shader_instance_t(asset_handle_t target_shader);
         ~shader_instance_t();
 
-        void init(asset_t<shader_t> target_shader);
+        void init(asset_handle_t target_shader);
         void shutdown();
         void sync();
 

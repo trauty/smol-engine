@@ -1,6 +1,6 @@
 #pragma once
 
-#include "smol/asset.h"
+#include "smol/asset_fwd.h"
 #include "smol/defines.h"
 #include "smol/math.h"
 #include "smol/rendering/vulkan.h"

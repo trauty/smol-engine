@@ -1,5 +1,6 @@
 
 #include "smol-cooker/cache_manager.h"
+#include "smol-cooker/material_cooker.h"
 #include "smol-cooker/mesh_cooker.h"
 #include "smol-cooker/shader_cooker.h"
 #include "smol-cooker/texture_cooker.h"
@@ -130,6 +131,16 @@ int main(i32 argc, char** argv)
                     }
 
                     cache.update_cache(out_path.generic_string(), deps);
+                }
+            }
+            else if (ext == ".mat")
+            {
+                out_path.replace_extension(".smolmat");
+
+                if (cache.needs_cooking(out_path.generic_string(), {path}))
+                {
+                    smol::cooker::material::cook_material(path, out_path.generic_string());
+                    cache.update_cache(out_path.generic_string(), {path});
                 }
             }
         }

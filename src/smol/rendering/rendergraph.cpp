@@ -16,8 +16,7 @@
 #ifdef SMOL_ENABLE_PROFILING
     #include <tracy/TracyVulkan.hpp>
 #endif
-#include <unordered_map>
-#include <unordered_set>
+
 #include <vector>
 
 namespace smol::renderer

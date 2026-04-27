@@ -2,7 +2,6 @@
 
 #include "smol/asset.h"
 #include "smol/assets/material.h"
-#include "smol/assets/shader.h"
 #include "smol/defines.h"
 #include "smol/ecs_fwd.h"
 #include "smol/rendering/renderer_types.h"
