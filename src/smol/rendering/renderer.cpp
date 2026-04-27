@@ -11,6 +11,7 @@
 #include "smol/components/transform.h"
 #include "smol/defines.h"
 #include "smol/ecs_fwd.h"
+#include "smol/engine.h"
 #include "smol/hash.h"
 #include "smol/log.h"
 #include "smol/math.h"
@@ -155,20 +156,22 @@ namespace smol::renderer
 
         pass.execute_callback = [&graph, material, on_execute](VkCommandBuffer cmd, ecs::registry_t& reg)
         {
-            if (!material || !material->shader || !material->shader->ready()) { return; }
+            if (!material || !material->shader_handle.is_valid()) { return; }
 
             if (on_execute) { on_execute(graph, *material); }
 
             material->sync();
 
+            shader_t* shader = smol::engine::get_asset_registry().get<shader_t>(material->shader_handle);
+
             per_frame_t& frame_data = ctx.per_frame_objects[ctx.cur_frame];
 
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, material->shader->pipeline);
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shader->pipeline);
 
             VkDescriptorSet sets[] = {res_system.global_set, res_system.frame_set};
 
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, material->shader->pipeline_layout, 0, 2, sets,
-                                    1, &frame_data.global_data_offset);
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shader->pipeline_layout, 0, 2, sets, 1,
+                                    &frame_data.global_data_offset);
 
             push_constants_t pc_data = {
                 frame_data.object_bindless_id,
@@ -176,9 +179,8 @@ namespace smol::renderer
                 material->heap_offset[ctx.cur_frame],
             };
 
-            vkCmdPushConstants(cmd, material->shader->pipeline_layout,
-                               VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0, sizeof(push_constants_t),
-                               &pc_data);
+            vkCmdPushConstants(cmd, shader->pipeline_layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT,
+                               0, sizeof(push_constants_t), &pc_data);
 
             vkCmdDraw(cmd, 3, 1, 0, 0);
         };
@@ -199,19 +201,21 @@ namespace smol::renderer
         pass.execute_callback = [&graph, material, dispatch_x, dispatch_y, dispatch_z, on_execute](VkCommandBuffer cmd,
                                                                                                    ecs::registry_t& reg)
         {
-            if (!material || !material->shader || !material->shader->ready()) { return; }
+            if (!material || !material->shader_handle.is_valid()) { return; }
 
             if (on_execute) { on_execute(graph, *material); }
 
             material->sync();
 
+            shader_t* shader = smol::engine::get_asset_registry().get<shader_t>(material->shader_handle);
+
             per_frame_t& frame_data = ctx.per_frame_objects[ctx.cur_frame];
 
             VkDescriptorSet sets[] = {res_system.global_set, res_system.frame_set};
 
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, material->shader->pipeline);
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, material->shader->pipeline_layout, 0, 2, sets,
-                                    1, &frame_data.global_data_offset);
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, shader->pipeline);
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, shader->pipeline_layout, 0, 2, sets, 1,
+                                    &frame_data.global_data_offset);
 
             push_constants_t pc_data = {
                 frame_data.object_bindless_id,
@@ -219,8 +223,8 @@ namespace smol::renderer
                 material->heap_offset[ctx.cur_frame],
             };
 
-            vkCmdPushConstants(cmd, material->shader->pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
-                               sizeof(push_constants_t), &pc_data);
+            vkCmdPushConstants(cmd, shader->pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0, sizeof(push_constants_t),
+                               &pc_data);
 
             vkCmdDispatch(cmd, dispatch_x, dispatch_y, dispatch_z);
         };
@@ -651,10 +655,12 @@ namespace smol::renderer
         };
         vkUpdateDescriptorSets(ctx.device, 1, &write_desc, 0, nullptr);
 
-        ctx.culling_shader = smol::load_asset_sync<shader_t>("engine://assets/shaders/culling.slang");
+        ctx.culling_shader =
+            smol::engine::get_asset_registry().load_sync<shader_t>("engine://assets/shaders/culling.slang");
         ctx.culling_instance.init(ctx.culling_shader);
 
-        ctx.default_tex = smol::load_asset_sync<texture_t>("engine://assets/textures/default_white.png");
+        ctx.default_tex =
+            smol::engine::get_asset_registry().load_sync<texture_t>("engine://assets/textures/default_white.png");
 
         return true;
     }
@@ -662,8 +668,8 @@ namespace smol::renderer
     void reset_assets()
     {
         ctx.culling_instance.shutdown();
-        ctx.culling_shader.release();
-        ctx.default_tex.release();
+        smol::engine::get_asset_registry().release<shader_t>(ctx.culling_shader);
+        smol::engine::get_asset_registry().release<texture_t>(ctx.default_tex);
         rendergraph.clear();
         custom_renderer_features.clear();
     }
@@ -954,22 +960,28 @@ namespace smol::renderer
         reg.sort<mesh_renderer_t>(
             [&](const mesh_renderer_t& lhs, const mesh_renderer_t& rhs)
             {
-                if (!lhs.material->shader || !rhs.material->shader)
+                material_t* lhs_mat = smol::engine::get_asset_registry().get<material_t>(lhs.material);
+                material_t* rhs_mat = smol::engine::get_asset_registry().get<material_t>(rhs.material);
+
+                if (!lhs_mat->shader_handle || !rhs_mat->shader_handle)
                 {
-                    return lhs.material->shader > rhs.material->shader;
+                    return lhs_mat->shader_handle > lhs_mat->shader_handle;
                 }
 
-                u32_t l_key = get_blend_key(lhs.material->shader->module.blend_mode);
-                u32_t r_key = get_blend_key(rhs.material->shader->module.blend_mode);
+                shader_t* lhs_shader = smol::engine::get_asset_registry().get<shader_t>(lhs_mat->shader_handle);
+                shader_t* rhs_shader = smol::engine::get_asset_registry().get<shader_t>(rhs_mat->shader_handle);
+
+                u32_t l_key = get_blend_key(lhs_shader->module.blend_mode);
+                u32_t r_key = get_blend_key(rhs_shader->module.blend_mode);
 
                 if (l_key != r_key) { return l_key < r_key; }
 
-                if (lhs.material->shader->pipeline != rhs.material->shader->pipeline)
+                if (lhs_shader->pipeline != rhs_shader->pipeline)
                 {
-                    return lhs.material->shader->pipeline < rhs.material->shader->pipeline;
+                    return lhs_shader->pipeline < rhs_shader->pipeline;
                 }
 
-                return lhs.material.get() < rhs.material.get();
+                return lhs_mat < rhs_mat;
             });
 
         u32_t cur_object_id = 0;
@@ -979,18 +991,22 @@ namespace smol::renderer
         auto view = reg.view<transform_t, mesh_renderer_t>();
         for (auto [entity, transform, renderer] : view.each())
         {
-            if (!renderer.active || !renderer.mesh || !renderer.material || !renderer.material->shader) { continue; }
+            if (!renderer.active || !renderer.mesh || !renderer.material.is_valid()) { continue; }
 
-            renderer.material->sync();
+            material_t* mat = smol::engine::get_asset_registry().get<material_t>(renderer.material);
 
-            if (renderer.material->shader->pipeline != last_pipeline)
+            mat->sync();
+
+            shader_t* shader = smol::engine::get_asset_registry().get<shader_t>(mat->shader_handle);
+
+            if (shader->pipeline != last_pipeline)
             {
-                last_pipeline = renderer.material->shader->pipeline;
+                last_pipeline = shader->pipeline;
                 frame_data.active_pipelines.push_back({
                     last_pipeline,
-                    renderer.material->shader->pipeline_layout,
+                    shader->pipeline_layout,
                     static_cast<u32_t>(frame_data.active_pipelines.size()),
-                    get_blend_key(renderer.material->shader->module.blend_mode),
+                    get_blend_key(shader->module.blend_mode),
                 });
             }
 
@@ -1002,17 +1018,19 @@ namespace smol::renderer
             glm_mat4_transpose(normal_mat);
             std::memcpy(obj_data.normal_matrix.data, &normal_mat, sizeof(mat4_t));
 
-            obj_data.material_offset = renderer.material->heap_offset[ctx.cur_frame];
-            obj_data.vertex_buffer_id = renderer.mesh->vertex_bindless_id;
-            obj_data.index_buffer_id = renderer.mesh->index_bindless_id;
+            mesh_t* mesh = smol::engine::get_asset_registry().get<mesh_t>(renderer.mesh);
 
-            obj_data.vertex_count = renderer.mesh->vertex_count;
-            obj_data.index_count = renderer.mesh->index_count;
+            obj_data.material_offset = mat->heap_offset[ctx.cur_frame];
+            obj_data.vertex_buffer_id = mesh->vertex_bindless_id;
+            obj_data.index_buffer_id = mesh->index_bindless_id;
+
+            obj_data.vertex_count = mesh->vertex_count;
+            obj_data.index_count = mesh->index_count;
 
             obj_data.pipeline_index = frame_data.active_pipelines.back().pipeline_index;
 
             vec3_t world_center;
-            vec3_t local_c = renderer.mesh->local_center;
+            vec3_t local_c = mesh->local_center;
             glm_mat4_mulv3(transform.world_mat, local_c, 1.0f, world_center);
 
             obj_data.bounding_sphere_center.data.x = world_center.x;
@@ -1028,7 +1046,7 @@ namespace smol::renderer
                 glm_vec3_norm((vec3){transform.world_mat[2][0], transform.world_mat[2][1], transform.world_mat[2][2]});
 
             f32 max_scale = std::max({scale_x, scale_y, scale_z});
-            obj_data.bounding_sphere_radius = renderer.mesh->local_radius * max_scale;
+            obj_data.bounding_sphere_radius = mesh->local_radius * max_scale;
 
             cur_object_id++;
         }
@@ -1108,12 +1126,14 @@ namespace smol::renderer
             ctx.culling_instance.set_buffer("indirect_commands"_h, frame_data.indirect_buffer);
             ctx.culling_instance.sync();
 
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, ctx.culling_shader->pipeline);
+            shader_t* culling_shader = smol::engine::get_asset_registry().get<shader_t>(ctx.culling_shader);
+
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, culling_shader->pipeline);
 
             VkDescriptorSet sets[] = {res_system.global_set, res_system.frame_set};
 
-            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, ctx.culling_shader->pipeline_layout, 0, 2,
-                                    sets, 1, &frame_data.global_data_offset);
+            vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, culling_shader->pipeline_layout, 0, 2, sets, 1,
+                                    &frame_data.global_data_offset);
 
             ctx.culling_instance.bind(cmd);
 
@@ -1122,7 +1142,8 @@ namespace smol::renderer
                 res_system.material_heap.bindless_id,
                 0,
             };
-            vkCmdPushConstants(cmd, ctx.culling_shader->pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
+
+            vkCmdPushConstants(cmd, culling_shader->pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
                                sizeof(push_constants_t), &pc_data);
 
             vkCmdDispatch(cmd, (cur_object_id + 63) / 64, 1, 1);

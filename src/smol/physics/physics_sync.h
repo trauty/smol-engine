@@ -10,7 +10,7 @@
 
 #include "smol/components/physics.h"
 #include "smol/components/transform.h"
-#include "smol/ecs.h"
+#include "smol/ecs_fwd.h"
 #include "smol/math.h"
 #include "smol/physics/physics_world.h"
 

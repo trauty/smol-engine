@@ -18,7 +18,6 @@
 #include "Jolt/RegisterTypes.h"
 #include "smol/components/physics.h"
 #include "smol/components/transform.h"
-#include "smol/ecs.h"
 #include "smol/ecs_fwd.h"
 #include "smol/log.h"
 #include "smol/physics/jolt_job_system_int.h"

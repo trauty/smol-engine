@@ -30,6 +30,20 @@ namespace smol
         return hash;
     }
 
+    template <typename T>
+    constexpr u64_t get_type_id()
+    {
+#if defined(__GNUC__) || defined(__clang__)
+        constexpr const char* sig = __PRETTY_FUNCTION__;
+#elif defined(_MSC_VER)
+        constexpr const char* sig = __FUNC_SIG__;
+#else
+    #error "Compiler not supported"
+#endif
+
+        return hash_string64(sig);
+    }
+
     constexpr u32_t operator""_h(const char* str, size_t len) { return hash_string(std::string_view(str, len)); }
     constexpr u64_t operator""_h64(const char* str, size_t len) { return hash_string64(std::string_view(str, len)); }
 } // namespace smol

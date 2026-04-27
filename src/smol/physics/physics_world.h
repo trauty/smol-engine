@@ -9,7 +9,7 @@
 #include "Jolt/Physics/Collision/BroadPhase/BroadPhaseLayer.h"
 #include "Jolt/Physics/Collision/ObjectLayer.h"
 #include "jolt_job_system_int.h"
-#include "smol/ecs.h"
+#include "smol/ecs_fwd.h"
 
 namespace smol
 {

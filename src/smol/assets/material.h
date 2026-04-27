@@ -5,7 +5,7 @@
 #include "smol/defines.h"
 #include "smol/engine.h"
 #include "smol/log.h"
-#include "smol/rendering/renderer_types.h"
+#include "smol/rendering/renderer_constants.h"
 #include "smol/rendering/samplers.h"
 
 #include <climits>

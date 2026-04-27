@@ -1,6 +1,5 @@
 #pragma once
 
-#include "smol/asset.h"
 #include "smol/assets/material.h"
 #include "smol/defines.h"
 #include "smol/ecs_fwd.h"

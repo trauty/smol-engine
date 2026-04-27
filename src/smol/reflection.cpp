@@ -168,8 +168,8 @@ namespace smol::reflection
             .custom<editor_prop_t>("Radius");
 
         // rendering
-        factory<smol::asset_t<smol::mesh_t>>{}.type("asset_mesh"_h);
-        factory<smol::asset_t<smol::material_t>>{}.type("asset_material"_h);
+        // factory<smol::asset_t<smol::mesh_t>>{}.type("asset_mesh"_h);
+        // factory<smol::asset_t<smol::material_t>>{}.type("asset_material"_h);
 
         factory<smol::mesh_renderer_t>{}
             .type("mesh_renderer_t"_h)

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "smol/ecs.h"
 #include "smol/physics/physics_world.h"
 
 #include <vector>

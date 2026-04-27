@@ -6,6 +6,7 @@
 #include "smol/assets/shader.h"
 #include "smol/defines.h"
 #include "smol/ecs_fwd.h"
+#include "smol/engine.h"
 #include "smol/hash.h"
 #include "smol/math.h"
 #include "smol/rendering/renderer.h"
@@ -23,8 +24,8 @@ namespace smol::editor::imgui
 {
     struct imgui_ctx_t
     {
-        asset_t<shader_t> shader;
-        asset_t<material_t> material;
+        asset_handle_t shader;
+        asset_handle_t material;
 
         VkImage font_image = VK_NULL_HANDLE;
         VmaAllocation font_alloc = VK_NULL_HANDLE;
@@ -54,8 +55,8 @@ namespace smol::editor::imgui
             ctx.vertex_buffer_bindless_id[i] = renderer::BINDLESS_NULL_HANDLE;
         }
 
-        ctx.shader = smol::load_asset_sync<shader_t>("engine://assets/shaders/imgui.slang");
-        ctx.material = smol::load_asset_sync<material_t>("imgui_mat", ctx.shader);
+        ctx.shader = smol::engine::get_asset_registry().load_sync<shader_t>("engine://assets/shaders/imgui.slang");
+        ctx.material = smol::engine::get_asset_registry().load_sync<material_t>("imgui_mat", ctx.shader);
 
         ImGuiIO& io = ImGui::GetIO();
         u8* pixels;
@@ -316,24 +317,28 @@ namespace smol::editor::imgui
                         -1.0f - draw_data->DisplayPos.y * scale.y,
                     };
 
-                    ctx.material->set_property("scale"_h, scale);
-                    ctx.material->set_property("translate"_h, translate);
-                    ctx.material->set_property("vertex_buffer_id"_h, ctx.vertex_buffer_bindless_id[cur_frame]);
-                    ctx.material->sync();
+                    material_t* mat = smol::engine::get_asset_registry().get<material_t>(ctx.material);
 
-                    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.shader->pipeline);
+                    mat->set_property("scale"_h, scale);
+                    mat->set_property("translate"_h, translate);
+                    mat->set_property("vertex_buffer_id"_h, ctx.vertex_buffer_bindless_id[cur_frame]);
+                    mat->sync();
+
+                    shader_t* shader = smol::engine::get_asset_registry().get<shader_t>(mat->shader_handle);
+
+                    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shader->pipeline);
 
                     VkDescriptorSet sets[] = {renderer::res_system.global_set, renderer::res_system.frame_set};
 
                     vkCmdBindDescriptorSets(
-                        cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, ctx.shader->pipeline_layout, 0, 2, sets, 1,
+                        cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shader->pipeline_layout, 0, 2, sets, 1,
                         &renderer::ctx.per_frame_objects[renderer::ctx.cur_frame].global_data_offset);
 
                     vkCmdBindIndexBuffer(cmd, ctx.index_buffer[cur_frame], 0, VK_INDEX_TYPE_UINT32);
 
                     renderer::push_constants_t pc = {
                         .material_buffer_id = renderer::res_system.material_heap.bindless_id,
-                        .custom_data = ctx.material->heap_offset[cur_frame],
+                        .custom_data = mat->heap_offset[cur_frame],
                     };
 
                     VkViewport viewport = {0, 0, draw_data->DisplaySize.x, draw_data->DisplaySize.y, 0.0f, 1.0f};
@@ -370,7 +375,7 @@ namespace smol::editor::imgui
                             vkCmdSetScissor(cmd, 0, 1, &scissor);
 
                             pc.object_buffer_id = (u32_t)(intptr_t)cmd_ptr->GetTexID();
-                            vkCmdPushConstants(cmd, ctx.shader->pipeline_layout,
+                            vkCmdPushConstants(cmd, shader->pipeline_layout,
                                                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                                                sizeof(renderer::push_constants_t), &pc);
                             vkCmdDrawIndexed(cmd, cmd_ptr->ElemCount, 1, cmd_ptr->IdxOffset + global_index_offset, 0,
@@ -411,8 +416,8 @@ namespace smol::editor::imgui
             renderer::res_system.texture_heap.release(ctx.font_tex_bindless_id);
         }
 
-        ctx.material.release();
-        ctx.shader.release();
+        smol::engine::get_asset_registry().release<material_t>(ctx.material);
+        smol::engine::get_asset_registry().release<shader_t>(ctx.shader);
     }
 
     void submit(ImDrawData* draw_data) { ctx.draw_data = draw_data; }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "smol/asset.h"
+#include "smol/asset_loader.h"
 #include "smol/asset_types.h"
 #include "smol/defines.h"
 #include "smol/hash.h"
@@ -26,13 +27,6 @@
 namespace smol
 {
     template <typename T>
-    struct asset_loader_t
-    {
-        // static std::optional<T> load(const std::string& path, Args...);
-        // static void unload(T& asset);
-    };
-
-    template <typename T>
     concept has_asset_unload = requires(T& asset) {
         { asset_loader_t<T>::unload(asset) } -> std::same_as<void>;
     };
@@ -49,6 +43,7 @@ namespace smol
         {
             T data;
             asset_id_t id = 0;
+            uuid_t uuid = 0;
             std::atomic<asset_state_e> state = asset_state_e::UNLOADED;
             std::atomic<i32_t> ref_count = 0;
             std::string path;
@@ -58,8 +53,6 @@ namespace smol
         std::vector<asset_id_t> free_indices;
         std::mutex pool_mutex;
     };
-
-    SMOL_API size_t get_next_asset_type_id();
 
     class asset_registry_t
     {
@@ -86,15 +79,13 @@ namespace smol
         {
             if (!handle.is_valid()) { return nullptr; }
 
-            std::scoped_lock lock(lookup_mutex);
-            auto it = lookup.find(handle.uuid);
+            asset_pool_t<T>& pool = get_pool<T>();
 
-            if (it != lookup.end() && it->second.type_id == get_asset_type_id<T>())
-            {
-                typename asset_pool_t<T>::slot_t* slot =
-                    static_cast<typename asset_pool_t<T>::slot_t*>(it->second.slot_ptr);
-                if (slot->state.load(std::memory_order_acquire) == asset_state_e::READY) { return &slot->data; }
-            }
+            if (handle.pool_index >= pool.slots.size()) { return nullptr; }
+            typename asset_pool_t<T>::slot_t& slot = pool.slots[handle.pool_index];
+            if (slot.uuid != handle.uuid) { return nullptr; }
+
+            if (slot.state.load(std::memory_order_acquire) == asset_state_e::READY) { return &slot.data; }
 
             return nullptr;
         }
@@ -104,38 +95,38 @@ namespace smol
         {
             if (!handle.is_valid()) { return; }
 
-            std::scoped_lock map_lock(lookup_mutex);
-            auto it = lookup.find(handle.uuid);
+            asset_pool_t<T>& pool = get_pool<T>();
 
-            if (it != lookup.end() && it->second.type_id == get_asset_type_id<T>())
+            if (handle.pool_index >= pool.slots.size()) { return; }
+            typename asset_pool_t<T>::slot_t& slot = pool.slots[handle.pool_index];
+            if (slot.uuid != handle.uuid) { return; }
+
+            if (slot.ref_count.fetch_sub(1) == 1)
             {
-                typename asset_pool_t<T>::slot_t* slot =
-                    static_cast<typename asset_pool_t<T>::slot_t*>(it->second.slot_ptr);
+                if constexpr (has_asset_unload<T>) { asset_loader_t<T>::unload(slot.data); }
 
-                if (slot->ref_count.fetch_sub(1) == 1)
-                {
-                    if constexpr (has_asset_unload<T>) { asset_loader_t<T>::unload(slot->data); }
+                slot.data = T();
+                slot.uuid = 0;
+                slot.state = asset_state_e::UNLOADED;
 
-                    slot->data = T();
-                    slot->state = asset_state_e::UNLOADED;
+                std::scoped_lock pool_lock(pool.pool_mutex);
+                pool.free_indices.push_back(slot.id);
 
-                    asset_pool_t<T>& pool = get_pool<T>();
-                    std::scoped_lock pool_lock(pool.pool_mutex);
-                    pool.free_indices.push_back(slot->id);
+                SMOL_LOG_INFO("ASSET", "Unloaded asset: {}", slot.path);
 
-                    SMOL_LOG_INFO("ASSET", "Unloaded asset: {}", slot->path);
-                    lookup.erase(it);
-                }
+                std::scoped_lock map_lock(lookup_mutex);
+                lookup.erase(handle.uuid);
             }
         }
 
       private:
-        std::vector<std::unique_ptr<asset_pool_base_t>> pools;
+        std::unordered_map<u64_t, std::unique_ptr<asset_pool_base_t>> pools;
+        std::mutex pools_mutex;
 
         struct lookup_entry_t
         {
             void* slot_ptr;
-            size_t type_id;
+            u64_t type_id;
             std::string path;
         };
 
@@ -143,25 +134,29 @@ namespace smol
         std::mutex lookup_mutex;
 
         template <typename T>
-        static size_t get_asset_type_id()
-        {
-            static size_t id = get_next_asset_type_id();
-            return id;
-        }
+        static u64_t get_asset_type_id()
+        { return smol::get_type_id<T>(); }
 
         template <typename T>
         asset_pool_t<T>& get_pool()
         {
-            size_t id = get_asset_type_id<T>();
+            static asset_pool_t<T>* cached_pool = nullptr;
 
-            if (id >= pools.size()) { pools.resize(id + 1); }
-            if (!pools[id]) { pools[id] = std::make_unique<asset_pool_t<T>>(); }
+            if (!cached_pool)
+            {
+                u64_t id = get_asset_type_id<T>();
+                std::scoped_lock lock(pools_mutex);
 
-            return static_cast<asset_pool_t<T>&>(*pools[id]);
+                if (pools.find(id) == pools.end()) { pools[id] = std::make_unique<asset_pool_t<T>>(); }
+
+                cached_pool = static_cast<asset_pool_t<T>*>(pools[id].get());
+            }
+
+            return *cached_pool;
         }
 
         template <typename T, typename... Args>
-        typename asset_pool_t<T>::slot_t* internal_load(const std::string& path, bool is_sync, Args&&... args)
+        asset_handle_t internal_load(const std::string& path, bool is_sync, Args&&... args)
         {
             uuid_t uuid = smol::hash_string(path.c_str());
 
@@ -176,7 +171,7 @@ namespace smol
                 typename asset_pool_t<T>::slot_t* slot =
                     static_cast<typename asset_pool_t<T>::slot_t*>(it->second.slot_ptr);
                 slot->ref_count.fetch_add(1);
-                return slot;
+                return asset_handle_t{uuid, slot->id};
             }
 
             typename asset_pool_t<T>::slot_t* slot = nullptr;
@@ -198,6 +193,7 @@ namespace smol
             }
 
             slot->path = path;
+            slot->uuid = uuid;
             slot->state = asset_state_e::QUEUED;
             slot->ref_count = 1;
 
@@ -227,7 +223,7 @@ namespace smol
                 smol::jobs::kick_heavy(std::move(load_func), nullptr, jobs::priority_e::LOW);
             }
 
-            return asset_handle_t{uuid};
+            return asset_handle_t{uuid, slot->id};
         }
     };
 

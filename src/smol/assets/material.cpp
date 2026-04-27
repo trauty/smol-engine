@@ -1,5 +1,6 @@
 #include "material.h"
 
+#include "entt/core/type_info.hpp"
 #include "smol/asset.h"
 #include "smol/assets/shader.h"
 #include "smol/log.h"

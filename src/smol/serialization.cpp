@@ -84,6 +84,7 @@ namespace smol::serialization
                                 vec3_t vec = field_value.cast<smol::vec3_t>();
                                 entity_json["components"][type_hash_str][prop_hash_str] = {vec.x, vec.y, vec.z};
                             }
+                            /*
                             else if (field_type ==
                                      smol::reflection::resolve<smol::asset_t<smol::mesh_t>>(*world.reflection_ctx))
                             {
@@ -96,7 +97,7 @@ namespace smol::serialization
                                 smol::asset_t<smol::material_t> handle =
                                     field_value.cast<smol::asset_t<smol::material_t>>();
                                 entity_json["components"][type_hash_str][prop_hash_str] = handle.slot->path;
-                            }
+                            }*/
                         }
                     }
                 }
@@ -174,6 +175,7 @@ namespace smol::serialization
                                     {
                                         data.set(instance, vec3_t(prop_val[0], prop_val[1], prop_val[2]));
                                     }
+                                    /*
                                     else if (field_type == smol::reflection::resolve<smol::asset_t<smol::mesh_t>>(
                                                                *world.reflection_ctx))
                                     {
@@ -195,7 +197,7 @@ namespace smol::serialization
                                                 smol::load_asset_sync<>(asset_path);
                                             data.set(instance, loaded_mat);
                                         }
-                                    }
+                                    }*/
                                 }
                             }
 
