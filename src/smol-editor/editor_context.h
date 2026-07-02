@@ -43,5 +43,11 @@ namespace smol
         game_shutdown_func game_shutdown = nullptr;
 
         std::vector<panel_draw_func> custom_panels;
+
+        std::string project_dir;
+        std::string pending_scene_path;
+        std::string current_scene_path;
+        bool pending_scene_load = false;
+        bool pending_scene_save = false;
     };
 } // namespace smol

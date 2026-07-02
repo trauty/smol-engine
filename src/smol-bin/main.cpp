@@ -1,9 +1,11 @@
+#include "smol/asset_meta.h"
 #include "smol/ecs_fwd.h"
 #include "smol/engine.h"
 #include "smol/game.h"
 #include "smol/world.h"
 
 #include <SDL3/SDL_main.h>
+#include <SDL3/SDL_filesystem.h>
 
 #ifdef SMOL_STATIC_LINK
 extern "C" void smol_game_init(smol::world_t* world);
@@ -28,6 +30,9 @@ smol::os::lib_handle_t game_lib = nullptr;
 int main(int argc, char* argv[])
 {
     if (!smol::engine::init(SMOL_GAME_NAME, 1280, 720)) { return -1; }
+
+    const char* base_path = SDL_GetBasePath();
+    if (base_path) { smol::asset_meta::init(std::string(base_path) + "assets/guid_map.json"); }
 
     smol::engine::create_scene();
     smol::world_t& cur_world = smol::engine::get_active_world();

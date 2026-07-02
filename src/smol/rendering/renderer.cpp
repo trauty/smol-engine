@@ -962,6 +962,7 @@ namespace smol::renderer
             {
                 material_t* lhs_mat = smol::engine::get_asset_registry().get<material_t>(lhs.material);
                 material_t* rhs_mat = smol::engine::get_asset_registry().get<material_t>(rhs.material);
+                if (!lhs_mat || !rhs_mat) { return lhs_mat > rhs_mat; }
 
                 if (!lhs_mat->shader_handle || !rhs_mat->shader_handle)
                 {
@@ -994,10 +995,12 @@ namespace smol::renderer
             if (!renderer.active || !renderer.mesh || !renderer.material.is_valid()) { continue; }
 
             material_t* mat = smol::engine::get_asset_registry().get<material_t>(renderer.material);
+            if (!mat) { continue; }
 
             mat->sync();
 
             shader_t* shader = smol::engine::get_asset_registry().get<shader_t>(mat->shader_handle);
+            if (!shader) { continue; }
 
             if (shader->pipeline != last_pipeline)
             {
@@ -1019,6 +1022,7 @@ namespace smol::renderer
             std::memcpy(obj_data.normal_matrix.data, &normal_mat, sizeof(mat4_t));
 
             mesh_t* mesh = smol::engine::get_asset_registry().get<mesh_t>(renderer.mesh);
+            if (!mesh) { continue; }
 
             obj_data.material_offset = mat->heap_offset[ctx.cur_frame];
             obj_data.vertex_buffer_id = mesh->vertex_bindless_id;
