@@ -14,7 +14,7 @@ namespace smol::input
     using action_id_t = u32_t;
     using listener_id_t = u32_t;
 
-    enum class key_t : u32_t
+    enum class key_e : u32_t
     {
         Unknown = 0,
 
@@ -89,7 +89,7 @@ namespace smol::input
         Count
     };
 
-    enum class mouse_button_t : uint8_t
+    enum class mouse_button_e : uint8_t
     {
         Left = 0,
         Middle,
@@ -106,24 +106,24 @@ namespace smol::input
 
     struct SMOL_API input_context_t
     {
-        action_id_t actionId;
+        action_id_t action_id;
         input_state_t state;
-        key_t key;
+        key_e key;
     };
 
     using input_callback_t = std::function<void(const input_context_t&)>;
 
-    SMOL_API bool get_key(key_t key);
+    SMOL_API bool get_key(key_e key);
 
-    SMOL_API bool get_key_down(key_t key);
+    SMOL_API bool get_key_down(key_e key);
 
-    SMOL_API bool get_key_up(key_t key);
+    SMOL_API bool get_key_up(key_e key);
 
-    SMOL_API bool get_mouse_button(mouse_button_t button);
+    SMOL_API bool get_mouse_button(mouse_button_e button);
 
-    SMOL_API bool get_mouse_button_down(mouse_button_t button);
+    SMOL_API bool get_mouse_button_down(mouse_button_e button);
 
-    SMOL_API bool get_mouse_button_up(mouse_button_t button);
+    SMOL_API bool get_mouse_button_up(mouse_button_e button);
 
     SMOL_API void get_mouse_position(float* x, float* y);
 
@@ -137,13 +137,13 @@ namespace smol::input
 
     SMOL_API float get_scroll_delta();
 
-    SMOL_API void bind_button(const std::string& action_name, key_t key);
+    SMOL_API void bind_button(const std::string& action_name, key_e key);
 
     SMOL_API listener_id_t on_action(const std::string& action_name, input_state_t state, input_callback_t callback);
 
     SMOL_API void remove_listener(listener_id_t id);
 
-    SMOL_API void unbind_button(const std::string& action_name, key_t key);
+    SMOL_API void unbind_button(const std::string& action_name, key_e key);
 
     SMOL_API void unbind_all_buttons(const std::string& action_name);
 

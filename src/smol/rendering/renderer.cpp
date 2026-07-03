@@ -821,40 +821,61 @@ namespace smol::renderer
             }
         }
 
-        ecs::entity_t active_cam = camera_system::get_active_camera(reg);
-        if (active_cam != ecs::NULL_ENTITY)
+        mat4_t pre_rot_mat = mat4_t::identity();
+        if (ctx.cur_surface_transform & VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR)
         {
-            camera_t& cam = reg.get<camera_t>(active_cam);
-            transform_t& cam_transform = reg.get<transform_t>(active_cam);
+            glm_rotate_z(pre_rot_mat, glm_rad(90.0f), pre_rot_mat);
+        }
+        else if (ctx.cur_surface_transform & VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR)
+        {
+            glm_rotate_z(pre_rot_mat, glm_rad(180.0f), pre_rot_mat);
+        }
+        else if (ctx.cur_surface_transform & VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR)
+        {
+            glm_rotate_z(pre_rot_mat, glm_rad(270.0f), pre_rot_mat);
+        }
 
-            std::memcpy(frame_data.mapped_global_data->view.data, &cam.view, sizeof(mat4_t));
-            std::memcpy(frame_data.mapped_global_data->projection.data, &cam.projection, sizeof(mat4_t));
-
-            mat4_t pre_rot_mat;
-            if (ctx.cur_surface_transform & VK_SURFACE_TRANSFORM_ROTATE_90_BIT_KHR)
-            {
-                glm_rotate_z(pre_rot_mat, glm_rad(90.0f), pre_rot_mat);
-            }
-            else if (ctx.cur_surface_transform & VK_SURFACE_TRANSFORM_ROTATE_180_BIT_KHR)
-            {
-                glm_rotate_z(pre_rot_mat, glm_rad(180.0f), pre_rot_mat);
-            }
-            else if (ctx.cur_surface_transform & VK_SURFACE_TRANSFORM_ROTATE_270_BIT_KHR)
-            {
-                glm_rotate_z(pre_rot_mat, glm_rad(270.0f), pre_rot_mat);
-            }
+        if (ctx.camera_override.active)
+        {
+            std::memcpy(frame_data.mapped_global_data->view.data, &ctx.camera_override.view, sizeof(mat4_t));
+            std::memcpy(frame_data.mapped_global_data->projection.data, &ctx.camera_override.projection,
+                        sizeof(mat4_t));
 
             mat4_t final_view_proj;
-            glm_mat4_mul(pre_rot_mat, cam.view_proj, final_view_proj);
+            glm_mat4_mul(pre_rot_mat, ctx.camera_override.view_proj, final_view_proj);
             std::memcpy(frame_data.mapped_global_data->view_proj.data, &final_view_proj, sizeof(mat4_t));
 
             vec4 planes[6];
-            glm_frustum_planes(cam.view_proj, planes);
+            glm_frustum_planes(ctx.camera_override.view_proj, planes);
             std::memcpy(frame_data.mapped_global_data->frustum_planes, planes, sizeof(vec4) * 6);
 
-            frame_data.mapped_global_data->camera_pos.data.x = cam_transform.world_mat[3][0];
-            frame_data.mapped_global_data->camera_pos.data.y = cam_transform.world_mat[3][1];
-            frame_data.mapped_global_data->camera_pos.data.z = cam_transform.world_mat[3][2];
+            frame_data.mapped_global_data->camera_pos.data.x = ctx.camera_override.position.x;
+            frame_data.mapped_global_data->camera_pos.data.y = ctx.camera_override.position.y;
+            frame_data.mapped_global_data->camera_pos.data.z = ctx.camera_override.position.z;
+        }
+        else
+        {
+            ecs::entity_t active_cam = camera_system::get_active_camera(reg);
+            if (active_cam != ecs::NULL_ENTITY)
+            {
+                camera_t& cam = reg.get<camera_t>(active_cam);
+                transform_t& cam_transform = reg.get<transform_t>(active_cam);
+
+                std::memcpy(frame_data.mapped_global_data->view.data, &cam.view, sizeof(mat4_t));
+                std::memcpy(frame_data.mapped_global_data->projection.data, &cam.projection, sizeof(mat4_t));
+
+                mat4_t final_view_proj;
+                glm_mat4_mul(pre_rot_mat, cam.view_proj, final_view_proj);
+                std::memcpy(frame_data.mapped_global_data->view_proj.data, &final_view_proj, sizeof(mat4_t));
+
+                vec4 planes[6];
+                glm_frustum_planes(cam.view_proj, planes);
+                std::memcpy(frame_data.mapped_global_data->frustum_planes, planes, sizeof(vec4) * 6);
+
+                frame_data.mapped_global_data->camera_pos.data.x = cam_transform.world_mat[3][0];
+                frame_data.mapped_global_data->camera_pos.data.y = cam_transform.world_mat[3][1];
+                frame_data.mapped_global_data->camera_pos.data.z = cam_transform.world_mat[3][2];
+            }
         }
 
         frame_data.mapped_global_data->time = time::time;
@@ -2038,4 +2059,16 @@ namespace smol::renderer
             ctx.render_extent = ctx.swapchain.extent;
         }
     }
+
+    void set_camera_override(const mat4_t& view, const mat4_t& projection, const mat4_t& view_proj,
+                             const vec3_t& position)
+    {
+        ctx.camera_override.active = true;
+        ctx.camera_override.view = view;
+        ctx.camera_override.projection = projection;
+        ctx.camera_override.view_proj = view_proj;
+        ctx.camera_override.position = position;
+    }
+
+    void clear_camera_override() { ctx.camera_override.active = false; }
 } // namespace smol::renderer

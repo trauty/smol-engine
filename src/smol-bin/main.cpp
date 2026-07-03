@@ -4,8 +4,8 @@
 #include "smol/game.h"
 #include "smol/world.h"
 
-#include <SDL3/SDL_main.h>
 #include <SDL3/SDL_filesystem.h>
+#include <SDL3/SDL_main.h>
 
 #ifdef SMOL_STATIC_LINK
 extern "C" void smol_game_init(smol::world_t* world);

@@ -2,12 +2,11 @@
 
 #include "entt/meta/meta.hpp"
 #include "entt/meta/resolve.hpp"
-#include "smol-editor/systems/camera.h"
 #include "smol/asset.h"
-#include "smol/assets/material.h"
-#include "smol/assets/mesh.h"
 #include "smol/asset_meta.h"
 #include "smol/asset_serde.h"
+#include "smol/assets/material.h"
+#include "smol/assets/mesh.h"
 #include "smol/ecs_fwd.h"
 #include "smol/engine.h"
 #include "smol/hash.h"
@@ -28,8 +27,6 @@ namespace smol::serialization
 
         for (smol::ecs::entity_t entity : world.registry.view<smol::ecs::entity_t>())
         {
-            if (world.registry.all_of<smol::editor::editor_camera_tag>(entity)) { continue; }
-
             nlohmann::json entity_json;
             entity_json["components"] = nlohmann::json::object();
 
@@ -53,16 +50,17 @@ namespace smol::serialization
                             smol::reflection::any_t field_value = data.get(instance);
                             std::string prop_hash_str = std::to_string(data_id);
 
-                            smol::reflection::editor_prop_t* prop = static_cast<smol::reflection::editor_prop_t*>(data.custom());
+                            smol::reflection::editor_prop_t* prop =
+                                static_cast<smol::reflection::editor_prop_t*>(data.custom());
                             if (prop && prop->asset_type_hash != 0)
                             {
                                 asset_handle_t handle = field_value.cast<asset_handle_t>();
                                 std::string path = smol::engine::get_asset_registry().get_path(handle);
                                 std::string_view guid = smol::asset_meta::get_guid(path);
                                 entity_json["components"][type_hash_str][prop_hash_str] = {
-                                    {"t", prop->asset_type_hash},
+                                    {"t", prop->asset_type_hash                },
                                     {"g", guid.empty() ? "" : std::string(guid)},
-                                    {"p", path}
+                                    {"p", path                                 }
                                 };
                                 continue;
                             }
@@ -210,7 +208,7 @@ namespace smol::serialization
 
     void clear_scene(smol::world_t& world)
     {
-        auto view = world.registry.view<smol::ecs::entity_t>(entt::exclude<editor::editor_camera_tag>);
+        auto view = world.registry.view<smol::ecs::entity_t>();
 
         std::vector<smol::ecs::entity_t> to_destroy;
         to_destroy.insert(to_destroy.end(), view.begin(), view.end());

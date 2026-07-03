@@ -5,6 +5,7 @@
 #include "smol/assets/texture.h"
 #include "smol/defines.h"
 #include "smol/log.h"
+#include "smol/math.h"
 #include "smol/memory/linear_allocator.h"
 #include "smol/rendering/renderer_constants.h"
 #include "smol/rendering/shader_instance.h"
@@ -297,6 +298,15 @@ namespace smol::renderer
         VkExtent2D render_extent = {0, 0};
         VkExtent2D logical_extent = {0, 0};
         VkSurfaceTransformFlagBitsKHR cur_surface_transform;
+
+        struct camera_override_t
+        {
+            bool active = false;
+            mat4_t view;
+            mat4_t projection;
+            mat4_t view_proj;
+            vec3_t position;
+        } camera_override;
         u32_t viewport_bindless_id = BINDLESS_NULL_HANDLE;
         bool use_offscreen_viewport = false;
     };

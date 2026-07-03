@@ -68,4 +68,8 @@ namespace smol::renderer
     SMOL_API u32_t get_viewport_texture_id();
 
     SMOL_API void set_use_offscreen_viewport(bool value);
+
+    SMOL_API void set_camera_override(const mat4_t& view, const mat4_t& projection, const mat4_t& view_proj,
+                                      const vec3_t& position);
+    SMOL_API void clear_camera_override();
 } // namespace smol::renderer

@@ -69,13 +69,17 @@ namespace smol::engine
         smol::reflection::register_types();
         smol::jobs::init();
 
-        smol::asset_serde::reg(smol::get_type_id<smol::mesh_t>(),
+        smol::asset_serde::reg(
+            smol::get_type_id<smol::mesh_t>(),
             [](smol::asset_registry_t& r, const std::string& p) { return r.load_sync<smol::mesh_t>(p); }, "Mesh");
-        smol::asset_serde::reg(smol::get_type_id<smol::material_t>(),
-            [](smol::asset_registry_t& r, const std::string& p) { return r.load_sync<smol::material_t>(p); }, "Material");
-        smol::asset_serde::reg(smol::get_type_id<smol::texture_t>(),
+        smol::asset_serde::reg(
+            smol::get_type_id<smol::material_t>(), [](smol::asset_registry_t& r, const std::string& p)
+            { return r.load_sync<smol::material_t>(p); }, "Material");
+        smol::asset_serde::reg(
+            smol::get_type_id<smol::texture_t>(),
             [](smol::asset_registry_t& r, const std::string& p) { return r.load_sync<smol::texture_t>(p); }, "Texture");
-        smol::asset_serde::reg(smol::get_type_id<smol::shader_t>(),
+        smol::asset_serde::reg(
+            smol::get_type_id<smol::shader_t>(),
             [](smol::asset_registry_t& r, const std::string& p) { return r.load_sync<smol::shader_t>(p); }, "Shader");
 
         // SDL_SetHintWithPriority(SDL_HINT_SHUTDOWN_DBUS_ON_QUIT, "1", SDL_HintPriority::SDL_HINT_OVERRIDE);

@@ -1,5 +1,6 @@
 #pragma once
 
+#include "smol-editor/systems/camera.h"
 #include "smol/ecs_fwd.h"
 #include "smol/game.h"
 #include "smol/math.h"
@@ -27,11 +28,7 @@ namespace smol
         editor_mode_e cur_mode = editor_mode_e::EDIT;
         nlohmann::json world_backup;
 
-        smol::ecs::entity_t editor_camera = smol::ecs::NULL_ENTITY;
-        smol::ecs::entity_t game_camera = smol::ecs::NULL_ENTITY;
-
-        smol::vec3_t editor_cam_pos;
-        smol::quat_t editor_cam_rot;
+        smol::editor::editor_camera_t editor_camera;
 
         smol::ecs::entity_t selected_entity = smol::ecs::NULL_ENTITY;
 

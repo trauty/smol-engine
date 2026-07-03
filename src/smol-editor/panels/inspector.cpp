@@ -47,10 +47,7 @@ namespace smol::editor::panels
                     ImGui::Text("%s", label);
                     ImGui::SameLine();
 
-                    if (cur_path.empty())
-                    {
-                        ImGui::TextDisabled("None");
-                    }
+                    if (cur_path.empty()) { ImGui::TextDisabled("None"); }
                     else
                     {
                         ImGui::TextUnformatted(cur_path.c_str());
@@ -75,9 +72,7 @@ namespace smol::editor::panels
                             if (!new_path.empty())
                             {
                                 asset_handle_t new_handle = smol::asset_serde::load(
-                                    prop->asset_type_hash,
-                                    smol::engine::get_asset_registry(),
-                                    new_path);
+                                    prop->asset_type_hash, smol::engine::get_asset_registry(), new_path);
                                 data.set(instance, new_handle);
                             }
                             else

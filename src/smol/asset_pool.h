@@ -25,6 +25,7 @@ namespace smol
         virtual std::string base_get_path(u32_t index, uuid_t uuid) = 0;
         virtual bool base_validate(u32_t index, uuid_t uuid) = 0;
         virtual void base_get_handles(std::vector<asset_handle_t>& out) = 0;
+        virtual void base_unload_all() = 0;
     };
 
     template <typename T>
@@ -75,6 +76,20 @@ namespace smol
                 if (slot.state.load(std::memory_order_acquire) == asset_state_e::READY)
                 {
                     out.push_back({slot.uuid, slot.id});
+                }
+            }
+        }
+
+        void base_unload_all() override
+        {
+            for (auto& slot : slots)
+            {
+                asset_state_e expected = asset_state_e::READY;
+                if (slot.state.compare_exchange_strong(expected, asset_state_e::UNLOADED))
+                {
+                    if constexpr (has_asset_unload<T>) { asset_loader_t<T>::unload(slot.data); }
+                    slot.data = T();
+                    slot.uuid = 0;
                 }
             }
         }

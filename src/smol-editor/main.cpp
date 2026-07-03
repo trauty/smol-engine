@@ -28,6 +28,8 @@
 
 #include "json/json.hpp"
 #include <SDL3/SDL_events.h>
+#include <cglm/clipspace/persp_lh_zo.h>
+#include <cglm/clipspace/view_lh.h>
 #include <chrono>
 #include <exception>
 #include <filesystem>
@@ -143,17 +145,6 @@ bool process_editor_event(const SDL_Event& event, smol::editor_context_t& ctx)
     return ignore_mouse || ignore_keyboard;
 }
 
-static void enforce_only_editor_camera_active(smol::world_t& world, smol::editor_context_t& ctx)
-{
-    if (!world.registry.valid(ctx.editor_camera)) { return; }
-    auto active_view = world.registry.view<smol::active_camera_tag>();
-    for (auto entity : active_view)
-    {
-        if (entity != ctx.editor_camera) { world.registry.remove<smol::active_camera_tag>(entity); }
-    }
-    world.registry.emplace_or_replace<smol::active_camera_tag>(ctx.editor_camera);
-}
-
 void update_editor_ui(smol::world_t& world, smol::editor_context_t& ctx)
 {
     if (ctx.pending_scene_load)
@@ -180,7 +171,6 @@ void update_editor_ui(smol::world_t& world, smol::editor_context_t& ctx)
             SMOL_LOG_ERROR("EDITOR", "Failed to open scene file '{}'", ctx.pending_scene_path);
         }
         ctx.pending_scene_path.clear();
-        enforce_only_editor_camera_active(world, ctx);
     }
 
     if (ctx.pending_scene_save)
@@ -234,7 +224,7 @@ void update_editor_ui(smol::world_t& world, smol::editor_context_t& ctx)
             ImGuiID dock_main = dockspace_id;
 
             ImGuiID dock_toolbar =
-                ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Up, 48.0f / view_h, nullptr, &dock_main);
+                ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Up, 32.0f / view_h, nullptr, &dock_main);
             ImGuiID dock_sidebars = ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Right, 0.15f, nullptr, &dock_main);
 
             ImGuiID dock_hierarchy =
@@ -272,11 +262,28 @@ void update_editor_ui(smol::world_t& world, smol::editor_context_t& ctx)
 
     if (ctx.cur_mode == smol::editor_mode_e::EDIT)
     {
-        smol::editor::camera_system::update(world.registry, ctx.is_viewport_hovered);
+        smol::editor::camera_system::update(ctx.editor_camera, ctx.is_viewport_hovered);
+
+        auto& ecam = ctx.editor_camera;
+        f32 aspect = (f32)smol::renderer::ctx.logical_extent.width / (f32)smol::renderer::ctx.logical_extent.height;
+        smol::mat4_t proj;
+        glm_perspective_lh_zo(glm_rad(ecam.fov_deg), aspect, ecam.near_plane, ecam.far_plane, proj);
+        smol::vec3_t fwd = ecam.rotation.forward();
+        smol::vec3_t center = ecam.position + fwd;
+        smol::vec3_t up = ecam.rotation.up();
+        smol::mat4_t view;
+        glm_lookat_lh(ecam.position, center, up, view);
+        smol::mat4_t view_proj;
+        glm_mat4_mul(proj, view, view_proj);
+        smol::renderer::set_camera_override(view, proj, view_proj, ecam.position);
     }
-    else if (ctx.cur_mode == smol::editor_mode_e::PLAY)
+    else
     {
-        if (ctx.game_update) { ctx.game_update(&smol::engine::get_active_world()); }
+        smol::renderer::clear_camera_override();
+        if (ctx.cur_mode == smol::editor_mode_e::PLAY && ctx.game_update)
+        {
+            ctx.game_update(&smol::engine::get_active_world());
+        }
     }
 }
 
@@ -359,14 +366,6 @@ int main(i32 argc, char** argv)
     smol::engine::set_ui_callback([&]() { update_editor_ui(cur_world, editor_ctx); });
 
     cur_world.init();
-
-    editor_ctx.editor_camera = cur_world.registry.create();
-    smol::transform_t& cam_transform = cur_world.registry.emplace<smol::transform_t>(editor_ctx.editor_camera);
-    cam_transform.local_position = {0.0f, 0.0f, 5.0f};
-    cam_transform.is_dirty = true;
-    cur_world.registry.emplace<smol::camera_t>(editor_ctx.editor_camera);
-    cur_world.registry.emplace<smol::editor::editor_camera_tag>(editor_ctx.editor_camera);
-    cur_world.registry.emplace<smol::active_camera_tag>(editor_ctx.editor_camera);
 
     smol::engine::run();
 

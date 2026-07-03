@@ -33,6 +33,7 @@ namespace smol
 
         void shutdown()
         {
+            for (auto& [id, pool] : pools) { pool->base_unload_all(); }
             pools.clear();
             lookup.clear();
         }
