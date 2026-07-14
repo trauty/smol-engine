@@ -1,7 +1,10 @@
 #include "inspector.h"
 
 #include "imgui.h"
+#include "smol/asset.h"
+#include "smol/asset_serde.h"
 #include "smol/ecs_fwd.h"
+#include "smol/engine.h"
 #include "smol/hash.h"
 #include "smol/reflection.h"
 
@@ -9,6 +12,8 @@ namespace smol::editor::panels
 {
     namespace
     {
+        char asset_path_input[1024] = {0};
+
         i32 string_resize_cb(ImGuiInputTextCallbackData* data)
         {
             if (data->EventFlag == ImGuiInputTextFlags_CallbackResize)
@@ -33,6 +38,55 @@ namespace smol::editor::panels
 
                 smol::reflection::type_t field_type = data.type();
                 smol::reflection::any_t field_value = data.get(instance);
+
+                if (prop && prop->asset_type_hash != 0)
+                {
+                    asset_handle_t handle = field_value.cast<asset_handle_t>();
+                    std::string cur_path = smol::engine::get_asset_registry().get_path(handle);
+
+                    ImGui::Text("%s", label);
+                    ImGui::SameLine();
+
+                    if (cur_path.empty()) { ImGui::TextDisabled("None"); }
+                    else
+                    {
+                        ImGui::TextUnformatted(cur_path.c_str());
+                    }
+
+                    ImGui::SameLine();
+                    std::string popup_id = std::string("##asset_") + std::to_string(id);
+                    if (ImGui::SmallButton(("..." + popup_id).c_str()))
+                    {
+                        std::strncpy(asset_path_input, cur_path.c_str(), sizeof(asset_path_input) - 1);
+                        asset_path_input[sizeof(asset_path_input) - 1] = '\0';
+                        ImGui::OpenPopup(popup_id.c_str());
+                    }
+
+                    if (ImGui::BeginPopup(popup_id.c_str()))
+                    {
+                        ImGui::Text("Asset Path:");
+                        if (ImGui::InputText("##path_input", asset_path_input, sizeof(asset_path_input),
+                                             ImGuiInputTextFlags_EnterReturnsTrue))
+                        {
+                            std::string new_path(asset_path_input);
+                            if (!new_path.empty())
+                            {
+                                asset_handle_t new_handle = smol::asset_serde::load(
+                                    prop->asset_type_hash, smol::engine::get_asset_registry(), new_path);
+                                data.set(instance, new_handle);
+                            }
+                            else
+                            {
+                                data.set(instance, asset_handle_t{});
+                            }
+                            was_modified = true;
+                            ImGui::CloseCurrentPopup();
+                        }
+                        ImGui::EndPopup();
+                    }
+
+                    if (was_modified) { continue; }
+                }
 
                 if (field_type == smol::reflection::resolve<i32>(*world.reflection_ctx))
                 {

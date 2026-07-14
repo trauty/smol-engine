@@ -2,11 +2,13 @@
 
 #include "entt/meta/meta.hpp"
 #include "entt/meta/resolve.hpp"
-#include "smol-editor/systems/camera.h"
 #include "smol/asset.h"
+#include "smol/asset_meta.h"
+#include "smol/asset_serde.h"
 #include "smol/assets/material.h"
 #include "smol/assets/mesh.h"
 #include "smol/ecs_fwd.h"
+#include "smol/engine.h"
 #include "smol/hash.h"
 #include "smol/log.h"
 #include "smol/math.h"
@@ -25,8 +27,6 @@ namespace smol::serialization
 
         for (smol::ecs::entity_t entity : world.registry.view<smol::ecs::entity_t>())
         {
-            if (world.registry.all_of<smol::editor::editor_camera_tag>(entity)) { continue; }
-
             nlohmann::json entity_json;
             entity_json["components"] = nlohmann::json::object();
 
@@ -49,6 +49,21 @@ namespace smol::serialization
                             smol::reflection::type_t field_type = data.type();
                             smol::reflection::any_t field_value = data.get(instance);
                             std::string prop_hash_str = std::to_string(data_id);
+
+                            smol::reflection::editor_prop_t* prop =
+                                static_cast<smol::reflection::editor_prop_t*>(data.custom());
+                            if (prop && prop->asset_type_hash != 0)
+                            {
+                                asset_handle_t handle = field_value.cast<asset_handle_t>();
+                                std::string path = smol::engine::get_asset_registry().get_path(handle);
+                                std::string_view guid = smol::asset_meta::get_guid(path);
+                                entity_json["components"][type_hash_str][prop_hash_str] = {
+                                    {"t", prop->asset_type_hash                },
+                                    {"g", guid.empty() ? "" : std::string(guid)},
+                                    {"p", path                                 }
+                                };
+                                continue;
+                            }
 
                             if (field_type == smol::reflection::resolve<i32>(*world.reflection_ctx))
                             {
@@ -84,20 +99,6 @@ namespace smol::serialization
                                 vec3_t vec = field_value.cast<smol::vec3_t>();
                                 entity_json["components"][type_hash_str][prop_hash_str] = {vec.x, vec.y, vec.z};
                             }
-                            /*
-                            else if (field_type ==
-                                     smol::reflection::resolve<smol::asset_t<smol::mesh_t>>(*world.reflection_ctx))
-                            {
-                                smol::asset_t<smol::mesh_t> handle = field_value.cast<smol::asset_t<smol::mesh_t>>();
-                                entity_json["components"][type_hash_str][prop_hash_str] = handle.slot->path;
-                            }
-                            else if (field_type ==
-                                     smol::reflection::resolve<smol::asset_t<smol::material_t>>(*world.reflection_ctx))
-                            {
-                                smol::asset_t<smol::material_t> handle =
-                                    field_value.cast<smol::asset_t<smol::material_t>>();
-                                entity_json["components"][type_hash_str][prop_hash_str] = handle.slot->path;
-                            }*/
                         }
                     }
                 }
@@ -141,6 +142,22 @@ namespace smol::serialization
                                 if (data)
                                 {
                                     smol::reflection::type_t field_type = data.type();
+                                    smol::reflection::editor_prop_t* prop =
+                                        static_cast<smol::reflection::editor_prop_t*>(data.custom());
+
+                                    if (prop && prop->asset_type_hash != 0)
+                                    {
+                                        u64_t asset_type = prop_val["t"].get<u64_t>();
+                                        std::string path = prop_val["p"].get<std::string>();
+
+                                        if (!path.empty())
+                                        {
+                                            asset_handle_t handle = smol::asset_serde::load(
+                                                asset_type, smol::engine::get_asset_registry(), path);
+                                            data.set(instance, handle);
+                                        }
+                                        continue;
+                                    }
 
                                     if (field_type == smol::reflection::resolve<i32>(*world.reflection_ctx))
                                     {
@@ -175,29 +192,6 @@ namespace smol::serialization
                                     {
                                         data.set(instance, vec3_t(prop_val[0], prop_val[1], prop_val[2]));
                                     }
-                                    /*
-                                    else if (field_type == smol::reflection::resolve<smol::asset_t<smol::mesh_t>>(
-                                                               *world.reflection_ctx))
-                                    {
-                                        std::string asset_path = prop_val.get<std::string>();
-                                        if (!asset_path.empty())
-                                        {
-                                            smol::asset_t<smol::mesh_t> loaded_mesh =
-                                                smol::load_asset_sync<smol::mesh_t>(asset_path);
-                                            data.set(instance, loaded_mesh);
-                                        }
-                                    }
-                                    else if (field_type == smol::reflection::resolve<smol::asset_t<smol::material_t>>(
-                                                               *world.reflection_ctx))
-                                    {
-                                        std::string asset_path = prop_val.get<std::string>();
-                                        if (!asset_path.empty())
-                                        {
-                                            smol::asset_t<smol::material_t> loaded_mat =
-                                                smol::load_asset_sync<>(asset_path);
-                                            data.set(instance, loaded_mat);
-                                        }
-                                    }*/
                                 }
                             }
 
@@ -214,7 +208,7 @@ namespace smol::serialization
 
     void clear_scene(smol::world_t& world)
     {
-        auto view = world.registry.view<smol::ecs::entity_t>(entt::exclude<editor::editor_camera_tag>);
+        auto view = world.registry.view<smol::ecs::entity_t>();
 
         std::vector<smol::ecs::entity_t> to_destroy;
         to_destroy.insert(to_destroy.end(), view.begin(), view.end());

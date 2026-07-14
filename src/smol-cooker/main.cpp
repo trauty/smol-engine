@@ -4,6 +4,7 @@
 #include "smol-cooker/mesh_cooker.h"
 #include "smol-cooker/shader_cooker.h"
 #include "smol-cooker/texture_cooker.h"
+#include "smol/asset_meta.h"
 #include "smol/log.h"
 
 #include <algorithm>
@@ -21,6 +22,12 @@ std::string to_lower(std::string s)
 {
     std::transform(s.begin(), s.end(), s.begin(), [](unsigned char c) { return std::tolower(c); });
     return s;
+}
+
+std::string vfs_prefix_from_output(const std::string& output_dir)
+{
+    std::string name = std::filesystem::path(output_dir).filename().string();
+    return name + "://assets/";
 }
 
 int main(i32 argc, char** argv)
@@ -72,6 +79,9 @@ int main(i32 argc, char** argv)
         }
     }
 
+    std::string vfs_prefix = vfs_prefix_from_output(output_dir);
+    nlohmann::json guid_map_data;
+
     input_dirs.push_back(output_dir);
 
     for (const std::string& dir : input_dirs)
@@ -84,10 +94,16 @@ int main(i32 argc, char** argv)
         {
             if (!entry.is_regular_file()) { continue; }
 
+            if (entry.path().extension() == ".meta") { continue; }
+
             std::string path = entry.path().generic_string();
             std::string ext = entry.path().extension().string();
             std::string rel_path = std::filesystem::relative(entry.path(), dir).generic_string();
             std::filesystem::path out_path = std::filesystem::path(output_dir) / rel_path;
+
+            std::string guid = smol::asset_meta::find_or_create_guid(path);
+            std::string vfs_path = vfs_prefix + rel_path;
+            guid_map_data[vfs_path] = guid;
 
             if (ext == ".slang" && smol::cooker::shader::is_compilable_pipeline(path))
             {
@@ -145,6 +161,10 @@ int main(i32 argc, char** argv)
             }
         }
     }
+
+    std::string parent_out = std::filesystem::path(output_dir).parent_path().generic_string();
+    if (parent_out.empty()) { parent_out = "."; }
+    smol::asset_meta::write_guid_map(parent_out + "/guid_map.json", guid_map_data.dump(4));
 
     cache.save();
 

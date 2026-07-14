@@ -71,6 +71,8 @@ namespace smol
             }
         }
 
+        void set_property_raw(u32_t name_hash, const void* value, u32_t size);
+
         void set_sampler(u32_t name_hash, sampler_type_e sampler)
         { set_property<u32_t>(name_hash, static_cast<u32_t>(sampler)); }
     };
@@ -78,7 +80,7 @@ namespace smol
     template <>
     struct SMOL_API asset_loader_t<material_t>
     {
-        static std::optional<material_t> load(const std::string& path, asset_handle_t target_shader);
+        static std::optional<material_t> load(const std::string& path, asset_handle_t target_shader = {});
         static void unload(material_t& mat);
     };
 } // namespace smol

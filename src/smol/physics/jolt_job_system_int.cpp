@@ -1,7 +1,7 @@
 #include "jolt_job_system_int.h"
+
 #include "Jolt/Core/Core.h"
 #include "Jolt/Core/JobSystem.h"
-
 #include "smol/jobs.h"
 
 namespace smol
@@ -21,7 +21,8 @@ namespace smol
     {
         in_job->AddRef();
         smol::jobs::kick(
-            [in_job]() {
+            [in_job]()
+            {
                 in_job->Execute();
                 in_job->Release();
             },

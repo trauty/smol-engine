@@ -1,5 +1,6 @@
 #pragma once
 
+#include "cglm/clipspace/ortho_lh_zo.h"
 #include "cglm/euler.h"
 #include "cglm/handed/euler_to_quat_lh.h"
 #include "cglm/quat.h"
@@ -322,6 +323,13 @@ namespace smol
             return res;
         }
 
+        static mat4_t ortho(float left, float right, float bottom, float top, float nearVal, float farVal)
+        {
+            mat4_t res;
+            glm_ortho_lh_zo(left, right, bottom, top, nearVal, farVal, res);
+            return res;
+        }
+
         vec3_t right() const { return {m00, m01, m02}; }
         vec3_t up() const { return {m10, m11, m12}; }
         vec3_t forward() const { return {m20, m21, m22}; }
@@ -347,4 +355,12 @@ namespace smol
         float* operator[](int col) { return &m00 + (col * 4); }
         const float* operator[](int col) const { return const_cast<float*>(&m00 + (col * 4)); }
     };
+
+    inline void flip_clip_y(mat4_t& proj)
+    {
+        proj[0][1] = -proj[0][1];
+        proj[1][1] = -proj[1][1];
+        proj[2][1] = -proj[2][1];
+        proj[3][1] = -proj[3][1];
+    }
 } // namespace smol

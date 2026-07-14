@@ -9,6 +9,7 @@
 #include "smol-editor/panels/toolbar.h"
 #include "smol-editor/panels/viewport.h"
 #include "smol-editor/systems/camera.h"
+#include "smol/asset_meta.h"
 #include "smol/components/camera.h"
 #include "smol/components/transform.h"
 #include "smol/ecs.h"
@@ -20,6 +21,8 @@
 #include "smol/rendering/renderer.h"
 #include "smol/rendering/renderer_types.h"
 #include "smol/rendering/vulkan.h"
+#include "smol/serialization.h"
+#include "smol/systems/camera.h"
 #include "smol/vfs.h"
 #include "smol/window.h"
 #include "smol/world.h"
@@ -141,8 +144,47 @@ bool process_editor_event(const SDL_Event& event, smol::editor_context_t& ctx)
     return ignore_mouse || ignore_keyboard;
 }
 
+using smol::operator""_h;
+
 void update_editor_ui(smol::world_t& world, smol::editor_context_t& ctx)
 {
+    if (ctx.pending_scene_load)
+    {
+        ctx.pending_scene_load = false;
+        std::ifstream file(ctx.pending_scene_path);
+        if (file.is_open())
+        {
+            nlohmann::json scene_json = nlohmann::json::parse(file, nullptr, false);
+            if (scene_json.is_discarded())
+            {
+                SMOL_LOG_ERROR("EDITOR", "Failed to parse scene file '{}'", ctx.pending_scene_path);
+            }
+            else
+            {
+                smol::serialization::clear_scene(world);
+                smol::serialization::deserialize_scene(world, scene_json);
+                ctx.current_scene_path = ctx.pending_scene_path;
+                SMOL_LOG_INFO("EDITOR", "Scene loaded from {}", ctx.pending_scene_path);
+            }
+        }
+        else
+        {
+            SMOL_LOG_ERROR("EDITOR", "Failed to open scene file '{}'", ctx.pending_scene_path);
+        }
+        ctx.pending_scene_path.clear();
+    }
+
+    if (ctx.pending_scene_save)
+    {
+        ctx.pending_scene_save = false;
+        nlohmann::json scene_json = smol::serialization::serialize_scene(world);
+        std::ofstream file(ctx.pending_scene_path);
+        file << scene_json.dump(4);
+        ctx.current_scene_path = ctx.pending_scene_path;
+        SMOL_LOG_INFO("EDITOR", "Scene saved to {}", ctx.pending_scene_path);
+        ctx.pending_scene_path.clear();
+    }
+
     static std::chrono::steady_clock::time_point last_check_time = std::chrono::steady_clock::now();
     std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
 
@@ -183,7 +225,7 @@ void update_editor_ui(smol::world_t& world, smol::editor_context_t& ctx)
             ImGuiID dock_main = dockspace_id;
 
             ImGuiID dock_toolbar =
-                ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Up, 48.0f / view_h, nullptr, &dock_main);
+                ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Up, 32.0f / view_h, nullptr, &dock_main);
             ImGuiID dock_sidebars = ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Right, 0.15f, nullptr, &dock_main);
 
             ImGuiID dock_hierarchy =
@@ -219,13 +261,28 @@ void update_editor_ui(smol::world_t& world, smol::editor_context_t& ctx)
     ImGui::Render();
     smol::editor::imgui::submit(ImGui::GetDrawData());
 
+    smol::renderer::submit_output_target("EditorViewport"_h, {ctx.viewport_width, ctx.viewport_height});
+
     if (ctx.cur_mode == smol::editor_mode_e::EDIT)
     {
-        smol::editor::camera_system::update(world.registry, ctx.is_viewport_hovered);
+        smol::editor::camera_system::update(ctx.editor_camera, ctx.is_viewport_hovered);
+
+        auto& ecam = ctx.editor_camera;
+        f32 aspect = (f32)smol::renderer::ctx.logical_extent.width / (f32)smol::renderer::ctx.logical_extent.height;
+        smol::mat4_t view, proj, view_proj;
+        smol::camera_system::build_view_projection(ecam.position, ecam.rotation.forward(), ecam.rotation.up(),
+                                                   ecam.fov_deg, aspect, ecam.near_plane, ecam.far_plane, view, proj,
+                                                   view_proj);
+
+        smol::renderer::submit_color_view("PrimaryView"_h, view, proj, view_proj, ecam.position, "SceneColor"_h,
+                                          "SceneDepth"_h, smol::renderer::ctx.render_extent);
     }
-    else if (ctx.cur_mode == smol::editor_mode_e::PLAY)
+    else
     {
-        if (ctx.game_update) { ctx.game_update(&smol::engine::get_active_world()); }
+        if (ctx.cur_mode == smol::editor_mode_e::PLAY && ctx.game_update)
+        {
+            ctx.game_update(&smol::engine::get_active_world());
+        }
     }
 }
 
@@ -247,14 +304,10 @@ int main(i32 argc, char** argv)
     }
 
     std::ifstream project_file(project_file_path);
-    nlohmann::json project_data;
-    try
+    nlohmann::json project_data = nlohmann::json::parse(project_file, nullptr, false);
+    if (project_data.is_discarded())
     {
-        project_data = nlohmann::json::parse(project_file);
-    }
-    catch (std::exception exc)
-    {
-        SMOL_LOG_FATAL("EDITOR", "Project file not valid: {}", exc.what());
+        SMOL_LOG_FATAL("EDITOR", "Project file not valid");
         return -1;
     }
 
@@ -279,12 +332,13 @@ int main(i32 argc, char** argv)
 
     smol::vfs::mount("engine://assets/", project_file_path.parent_path().generic_string() + "/.smol/engine/");
     smol::vfs::mount("game://assets/", project_file_path.parent_path().generic_string() + "/.smol/game/");
+    smol::vfs::mount("src://", project_file_path.parent_path().generic_string() + "/assets/");
+
+    smol::asset_meta::init(project_file_path.parent_path().generic_string() + "/.smol/guid_map.json");
 
     volkInitialize();
     volkLoadInstance(smol::renderer::ctx.instance);
     volkLoadDevice(smol::renderer::ctx.device);
-
-    smol::renderer::set_use_offscreen_viewport(true);
 
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();
@@ -297,6 +351,7 @@ int main(i32 argc, char** argv)
     smol::world_t& cur_world = smol::engine::get_active_world();
 
     static smol::editor_context_t editor_ctx;
+    editor_ctx.project_dir = project_dir.string();
 
     if (!load_game_dll(false, editor_ctx))
     {
@@ -308,12 +363,6 @@ int main(i32 argc, char** argv)
     smol::engine::set_ui_callback([&]() { update_editor_ui(cur_world, editor_ctx); });
 
     cur_world.init();
-
-    editor_ctx.editor_camera = cur_world.registry.create();
-    cur_world.registry.emplace<smol::transform_t>(editor_ctx.editor_camera);
-    cur_world.registry.emplace<smol::camera_t>(editor_ctx.editor_camera);
-    cur_world.registry.emplace<smol::editor::editor_camera_tag>(editor_ctx.editor_camera);
-    cur_world.registry.emplace<smol::active_camera_tag>(editor_ctx.editor_camera);
 
     smol::engine::run();
 

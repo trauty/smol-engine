@@ -43,7 +43,7 @@ public struct ObjectData
     public uint vertex_count;
     public float bounding_sphere_radius;
     public uint pipeline_index;
-    public uint _pad;
+    public uint flags; // bit0 = shadow caster
     public float4 bounding_sphere_center;
 };
 
@@ -67,6 +67,10 @@ public struct GlobalData
 
     public uint object_count;
     public uint active_pipeline_count;
+    public uint cull_flags;    // bit0 = shadow only view
+    public uint shadow_map_id; // bindless texture id of the dir shadowmap
+
+    public float4x4 light_view_proj; // world to light clip
 };
 
 public struct PushConstants
@@ -132,6 +136,7 @@ public struct ShaderConfigAttribute
     public string blend_mode; // Opaque, Cutout, TransparentAdd, TransparentMult, TransparentAlpha
     public bool depth_write;
     public bool depth_test;
+    public bool casts_shadow;
 };
 
 [__AttributeUsage(_AttributeTargets.Struct)]

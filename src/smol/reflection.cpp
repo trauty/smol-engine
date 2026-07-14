@@ -168,9 +168,6 @@ namespace smol::reflection
             .custom<editor_prop_t>("Radius");
 
         // rendering
-        // factory<smol::asset_t<smol::mesh_t>>{}.type("asset_mesh"_h);
-        // factory<smol::asset_t<smol::material_t>>{}.type("asset_material"_h);
-
         factory<smol::mesh_renderer_t>{}
             .type("mesh_renderer_t"_h)
             .custom<editor_prop_t>("Mesh Renderer")
@@ -178,10 +175,12 @@ namespace smol::reflection
             .func<&add_component<smol::mesh_renderer_t>>("add"_h)
             .func<&remove_component<smol::mesh_renderer_t>>("remove"_h)
             .data<&smol::mesh_renderer_t::mesh>("mesh"_h)
-            .custom<editor_prop_t>("Mesh")
+            .custom<editor_prop_t>(editor_prop_t{"Mesh", smol::get_type_id<smol::mesh_t>()})
             .data<&smol::mesh_renderer_t::material>("material"_h)
-            .custom<editor_prop_t>("Material")
+            .custom<editor_prop_t>(editor_prop_t{"Material", smol::get_type_id<smol::material_t>()})
             .data<&smol::mesh_renderer_t::active>("active"_h)
-            .custom<editor_prop_t>("Active");
+            .custom<editor_prop_t>("Active")
+            .data<&smol::mesh_renderer_t::casts_shadow>("casts_shadow"_h)
+            .custom<editor_prop_t>("Casts Shadow");
     }
 } // namespace smol::reflection

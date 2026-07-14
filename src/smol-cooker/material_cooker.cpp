@@ -33,6 +33,7 @@ namespace smol::cooker::material
         material_header_t header = {
             .shader_path_length = static_cast<u32_t>(shader_path.size()),
             .texture_count = static_cast<u32_t>(mat_json.contains("textures") ? mat_json["textures"].size() : 0),
+            .sampler_count = static_cast<u32_t>(mat_json.contains("samplers") ? mat_json["samplers"].size() : 0),
             .property_count = static_cast<u32_t>(mat_json.contains("properties") ? mat_json["properties"].size() : 0),
         };
 
@@ -51,6 +52,18 @@ namespace smol::cooker::material
 
                 out.write(reinterpret_cast<const char*>(&tex_bind), sizeof(cooked_texture_bind_t));
                 out.write(tex_path.data(), tex_path.size());
+            }
+        }
+
+        if (header.sampler_count > 0)
+        {
+            for (auto& [smp_name, smp_val] : mat_json["samplers"].items())
+            {
+                cooked_sampler_bind_t smp_bind;
+                smp_bind.name_hash = smol::hash_string(smp_name);
+                smp_bind.sampler_value = smp_val.get<u32_t>();
+
+                out.write(reinterpret_cast<const char*>(&smp_bind), sizeof(cooked_sampler_bind_t));
             }
         }
 

@@ -17,18 +17,16 @@ namespace smol::editor::panels
             ImVec2 viewport_size = ImGui::GetContentRegionAvail();
             ImVec2 viewport_pos = ImGui::GetCursorScreenPos();
 
-            static ImVec2 last_size = {0.0f, 0.0f};
-            if (viewport_size.x > 0.0f && viewport_size.y > 0.0f &&
-                (viewport_size.x != last_size.x || viewport_size.y != last_size.y))
+            if (viewport_size.x > 0.0f && viewport_size.y > 0.0f)
             {
-                smol::renderer::set_render_resolution((u32_t)viewport_size.x, (u32_t)viewport_size.y);
-                last_size = viewport_size;
+                ctx.viewport_width = (u32_t)viewport_size.x;
+                ctx.viewport_height = (u32_t)viewport_size.y;
             }
 
             smol::input::set_viewport_offset(viewport_pos.x, viewport_pos.y);
             smol::input::set_viewport_size(viewport_size.x, viewport_size.y);
 
-            u32_t tex_id = smol::renderer::get_viewport_texture_id();
+            u32_t tex_id = smol::renderer::get_target_texture_id("EditorViewport"_h);
             if (tex_id != smol::renderer::BINDLESS_NULL_HANDLE)
             {
                 ImGui::Image((ImTextureID)(intptr_t)(tex_id), viewport_size);

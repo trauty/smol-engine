@@ -1,7 +1,6 @@
 #include "hierarchy.h"
 
 #include "imgui.h"
-#include "smol-editor/systems/camera.h"
 #include "smol/components/tag.h"
 #include "smol/components/transform.h"
 #include "smol/ecs_fwd.h"
@@ -24,7 +23,6 @@ namespace smol::editor::panels
 
             for (smol::ecs::entity_t entity : world.registry.view<smol::tag_t>())
             {
-                if (world.registry.all_of<smol::editor::editor_camera_tag>(entity)) { continue; }
 
                 ImGui::PushID(static_cast<i32>(smol::ecs::get_entity_id(entity)));
 

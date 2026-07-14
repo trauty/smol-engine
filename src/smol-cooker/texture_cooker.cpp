@@ -34,9 +34,11 @@ namespace smol::cooker::texture
         if (std::filesystem::exists(meta_path))
         {
             std::ifstream file(meta_path);
-            file >> meta;
+            meta = nlohmann::json::parse(file, nullptr, false);
+            if (meta.is_discarded()) { meta = nlohmann::json::object(); }
         }
-        else
+
+        if (!meta.contains("type") || !meta.contains("srgb"))
         {
             std::string lower_path = to_lower(input_path);
             bool is_normal =
@@ -44,15 +46,13 @@ namespace smol::cooker::texture
             bool is_data =
                 lower_path.find("_orm") != std::string::npos || lower_path.find("_mask") != std::string::npos ||
                 lower_path.find("_roughness") != std::string::npos || lower_path.find("_metallic") != std::string::npos;
-            bool is_color = !is_normal && !is_data;
 
-            meta["type"] = is_normal ? "normal" : (is_data ? "data" : "color");
-            meta["srgb"] = (!is_normal && !is_data);
+            if (!meta.contains("type")) { meta["type"] = is_normal ? "normal" : (is_data ? "data" : "color"); }
+            if (!meta.contains("srgb")) { meta["srgb"] = (!is_normal && !is_data); }
 
             std::ofstream file(meta_path);
             file << meta.dump(4);
-
-            SMOL_LOG_INFO("TEXTURE_COOKER", "Generated default metadata: {}", meta_path);
+            SMOL_LOG_INFO("TEXTURE_COOKER", "Updated metadata: {}", meta_path);
         }
 
         std::string tex_type = meta.value("type", "color");

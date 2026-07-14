@@ -84,6 +84,7 @@ namespace smol
                 .blend_mode = mod_header.blend_mode,
                 .depth_write = mod_header.depth_write,
                 .depth_test = mod_header.depth_test,
+                .casts_shadow = mod_header.casts_shadow,
             };
 
             for (u32_t j = 0; j < mod_header.member_count; j++)
@@ -306,10 +307,15 @@ namespace smol
                 .layout = shader.pipeline_layout,
             };
 
+            VkPipeline compute_pipeline = VK_NULL_HANDLE;
             if (vkCreateComputePipelines(renderer::ctx.device, VK_NULL_HANDLE, 1, &comp_pipeline_info, nullptr,
-                                         &shader.pipeline) != VK_SUCCESS)
+                                         &compute_pipeline) != VK_SUCCESS)
             {
                 SMOL_LOG_ERROR("SHADER", "Failed to create compute pipeline for shader at path: {}", path);
+            }
+            else
+            {
+                shader.pipelines[static_cast<u32_t>(pipeline_variant_e::FORWARD)] = compute_pipeline;
             }
 
             vkDestroyShaderModule(renderer::ctx.device, comp_module, nullptr);
@@ -350,29 +356,99 @@ namespace smol
                 pipeline_rendering_info.depthAttachmentFormat = renderer::ctx.swapchain.depth_format;
             }
 
-            VkGraphicsPipelineCreateInfo pipeline_info = {
-                .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
-                .pNext = &pipeline_rendering_info,
-                .stageCount = 2,
-                .pStages = shader_stages,
-                .pVertexInputState = &vertex_input_info,
-                .pInputAssemblyState = &input_assembly,
-                .pViewportState = &viewport_state,
-                .pRasterizationState = &rasterizer_info,
-                .pMultisampleState = &multisampling_info,
-                .pDepthStencilState = &depth_stencil_info,
-                .pColorBlendState = &color_blend_info,
-                .pDynamicState = &dynamic_state_info,
-                .layout = shader.pipeline_layout,
-                .renderPass = VK_NULL_HANDLE,
-                .subpass = 0,
-                .basePipelineHandle = VK_NULL_HANDLE,
+            // forward is always built, shadow only when needed
+            struct pipeline_variant_config_t
+            {
+                pipeline_variant_e variant;
+                bool needs_fragment_stage;
+                bool has_color_attachments;
+                VkCullModeFlags cull_mode;
+                bool depth_bias_enabled;
             };
 
-            if (vkCreateGraphicsPipelines(renderer::ctx.device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr,
-                                          &shader.pipeline) != VK_SUCCESS)
+            const pipeline_variant_config_t variant_configs[] = {
+                {pipeline_variant_e::FORWARD, true,  true,  rasterizer_info.cullMode, false},
+                {pipeline_variant_e::SHADOW,  false, false, VK_CULL_MODE_FRONT_BIT,   true },
+            };
+
+            auto wants_variant = [&](pipeline_variant_e variant)
             {
-                SMOL_LOG_ERROR("SHADER", "Failed to create pipeline for shader at path: {}", path);
+                if (variant == pipeline_variant_e::FORWARD) { return true; }
+                if (variant == pipeline_variant_e::SHADOW)
+                {
+                    return shader.has_material_data && shader.module.casts_shadow;
+                }
+                return false;
+            };
+
+            for (const pipeline_variant_config_t& cfg : variant_configs)
+            {
+                if (!wants_variant(cfg.variant)) { continue; }
+
+                VkPipelineRenderingCreateInfo variant_rendering_info = pipeline_rendering_info;
+                if (!cfg.has_color_attachments)
+                {
+                    variant_rendering_info.colorAttachmentCount = 0;
+                    variant_rendering_info.pColorAttachmentFormats = nullptr;
+                }
+                if (cfg.variant == pipeline_variant_e::SHADOW)
+                {
+                    // depth-only variants always render into a depth attachment
+                    variant_rendering_info.depthAttachmentFormat = renderer::ctx.swapchain.depth_format;
+                }
+
+                VkPipelineRasterizationStateCreateInfo variant_rasterizer = rasterizer_info;
+                variant_rasterizer.cullMode = cfg.cull_mode;
+                variant_rasterizer.depthBiasEnable = cfg.depth_bias_enabled ? VK_TRUE : VK_FALSE;
+                if (cfg.depth_bias_enabled)
+                {
+                    variant_rasterizer.depthBiasConstantFactor = 1.25f;
+                    variant_rasterizer.depthBiasSlopeFactor = 1.75f;
+                }
+
+                VkPipelineDepthStencilStateCreateInfo variant_depth_stencil = depth_stencil_info;
+                if (cfg.variant == pipeline_variant_e::SHADOW)
+                {
+                    variant_depth_stencil.depthTestEnable = VK_TRUE;
+                    variant_depth_stencil.depthWriteEnable = VK_TRUE;
+                }
+
+                VkPipelineColorBlendStateCreateInfo variant_color_blend = color_blend_info;
+                if (!cfg.has_color_attachments)
+                {
+                    variant_color_blend.attachmentCount = 0;
+                    variant_color_blend.pAttachments = nullptr;
+                }
+
+                VkGraphicsPipelineCreateInfo pipeline_info = {
+                    .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
+                    .pNext = &variant_rendering_info,
+                    .stageCount = cfg.needs_fragment_stage ? 2u : 1u,
+                    .pStages = shader_stages,
+                    .pVertexInputState = &vertex_input_info,
+                    .pInputAssemblyState = &input_assembly,
+                    .pViewportState = &viewport_state,
+                    .pRasterizationState = &variant_rasterizer,
+                    .pMultisampleState = &multisampling_info,
+                    .pDepthStencilState = &variant_depth_stencil,
+                    .pColorBlendState = &variant_color_blend,
+                    .pDynamicState = &dynamic_state_info,
+                    .layout = shader.pipeline_layout,
+                    .renderPass = VK_NULL_HANDLE,
+                    .subpass = 0,
+                    .basePipelineHandle = VK_NULL_HANDLE,
+                };
+
+                VkPipeline variant_pipeline = VK_NULL_HANDLE;
+                if (vkCreateGraphicsPipelines(renderer::ctx.device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr,
+                                              &variant_pipeline) != VK_SUCCESS)
+                {
+                    SMOL_LOG_ERROR("SHADER", "Failed to create {} pipeline for shader at path: {}",
+                                   cfg.variant == pipeline_variant_e::SHADOW ? "shadow" : "forward", path);
+                    continue;
+                }
+
+                shader.pipelines[static_cast<u32_t>(cfg.variant)] = variant_pipeline;
             }
 
             vkDestroyShaderModule(renderer::ctx.device, vert_mod, nullptr);
@@ -384,16 +460,22 @@ namespace smol
 
     void asset_loader_t<shader_t>::unload(shader_t& shader)
     {
-        if (shader.pipeline == VK_NULL_HANDLE) { return; }
+        if (shader.pipelines.empty()) { return; }
 
         std::scoped_lock lock(renderer::res_system.deletion_mutex);
 
-        renderer::res_system.deletion_queue.push_back({
-            .type = renderer::resource_type_e::PIPELINE,
-            .handle = {.pipeline = {shader.pipeline, shader.pipeline_layout}},
-            .bindless_id = renderer::BINDLESS_NULL_HANDLE,
-            .gpu_timeline_value = renderer::res_system.timeline_value,
-        });
+        // pipeline layout is shared, so only one deletion
+        bool layout_attached = false;
+        for (const auto& [variant, pipeline] : shader.pipelines)
+        {
+            renderer::res_system.deletion_queue.push_back({
+                .type = renderer::resource_type_e::PIPELINE,
+                .handle = {.pipeline = {pipeline, layout_attached ? VK_NULL_HANDLE : shader.pipeline_layout}},
+                .bindless_id = renderer::BINDLESS_NULL_HANDLE,
+                .gpu_timeline_value = renderer::res_system.timeline_value,
+            });
+            layout_attached = true;
+        }
 
         for (const auto& [set, layout] : shader.custom_layouts)
         {
@@ -407,7 +489,7 @@ namespace smol
 
         shader.custom_layouts.clear();
 
-        shader.pipeline = VK_NULL_HANDLE;
+        shader.pipelines.clear();
         shader.pipeline_layout = VK_NULL_HANDLE;
     }
 } // namespace smol

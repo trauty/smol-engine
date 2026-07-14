@@ -49,8 +49,11 @@ namespace smol::reflection
     struct editor_prop_t
     {
         const char* name = "Unknown";
+        u64_t asset_type_hash = 0;
 
+        editor_prop_t() = default;
         editor_prop_t(const char* n) : name(n) {}
+        editor_prop_t(const char* n, u64_t asset_type) : name(n), asset_type_hash(asset_type) {}
     };
 
     void register_types();

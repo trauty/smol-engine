@@ -322,9 +322,9 @@ namespace smol::renderer
 
                 VkViewport vp = {
                     .x = 0.0f,
-                    .y = static_cast<f32>(render_height),
+                    .y = 0.0f,
                     .width = static_cast<f32>(render_width),
-                    .height = -static_cast<f32>(render_height),
+                    .height = static_cast<f32>(render_height),
                     .minDepth = 0.0f,
                     .maxDepth = 1.0f,
                 };

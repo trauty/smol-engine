@@ -23,6 +23,41 @@ public float3 evaluateBlinnPhong(Surface surface, IncidentLight light)
     return diffuse + specular;
 }
 
+public float sampleDirectionalShadow(float3 world_pos)
+{
+    if (globals.shadow_map_id == 0xFFFFFFFFu) { return 1.0f; } // no shadow map bound this frame
+
+    float4 lp = mul(float4(world_pos, 1.0f), globals.light_view_proj);
+    if (lp.w <= 0.0f) { return 1.0f; }
+
+    float3 ndc = lp.xyz / lp.w;
+    float2 uv = ndc.xy * 0.5f + 0.5f; // shadow map is stored upright (Y-flip lives in the light projection)
+    if (any(uv < 0.0f) || any(uv > 1.0f) || ndc.z > 1.0f) { return 1.0f; } // outside the light frustum
+
+    float bias = 0.0015f; // constant depth bias
+
+    Texture2D map = getTexture(globals.shadow_map_id);
+    SamplerState samp = getSampler(1); // linear clamp sampler
+
+    uint w, h;
+    map.GetDimensions(w, h);
+    float2 texel = 1.0f / float2(w, h);
+
+    float sum = 0.0f; // 2x2 pcf
+    [unroll]
+    for (int y = 0; y < 2; y++)
+    {
+        [unroll]
+        for (int x = 0; x < 2; x++)
+        {
+            float closest = map.SampleLevel(samp, uv + float2(x, y) * texel, 0).r;
+            sum += (ndc.z - bias > closest) ? 0.0f : 1.0f;
+        }
+    }
+
+    return sum * 0.25f;
+}
+
 public float3 applyBlinnPhongLighting(Surface surface, float3 world_pos)
 {
     float3 final_color = float3(0.01f);
@@ -31,7 +66,10 @@ public float3 applyBlinnPhongLighting(Surface surface, float3 world_pos)
     {
         DirectionalLight dl =
             getBuffer(globals.dir_light_buffer_id).Load<DirectionalLight>(d * sizeof(DirectionalLight));
-        final_color += evaluateBlinnPhong(surface, dl.evaluate(world_pos));
+
+        // only first dir light owns shadowmap
+        float shadow = (d == 0) ? sampleDirectionalShadow(world_pos) : 1.0f;
+        final_color += evaluateBlinnPhong(surface, dl.evaluate(world_pos)) * shadow;
     }
 
     for (uint p = 0; p < globals.point_light_count; p++)

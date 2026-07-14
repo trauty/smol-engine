@@ -34,6 +34,9 @@ void computeMain(uint3 thread_id: SV_DispatchThreadID)
 
     bool is_visible = frustumCull(obj.bounding_sphere_center, obj.bounding_sphere_radius, globals.frustum_planes);
 
+    // shadow only skips non casters
+    if ((globals.cull_flags & 1u) != 0u && (obj.flags & 1u) == 0u) { is_visible = false; }
+
     uint final_index = 0;
     bool should_write = false;
 

@@ -1,7 +1,9 @@
 #pragma once
 
-#include "smol/asset.h"
+#include "smol/asset_handle.h"
 #include "smol/asset_loader.h"
+#include "smol/asset_meta.h"
+#include "smol/asset_pool.h"
 #include "smol/asset_types.h"
 #include "smol/defines.h"
 #include "smol/hash.h"
@@ -12,48 +14,17 @@
 #include <concepts>
 #include <cstddef>
 #include <cstring>
-#include <deque>
 #include <optional>
 #include <utility>
-#include <vector>
 #ifdef SMOL_ENABLE_PROFILING
     #include <common/TracySystem.hpp>
 #endif
-#include <memory>
 #include <mutex>
 #include <string>
 #include <unordered_map>
 
 namespace smol
 {
-    template <typename T>
-    concept has_asset_unload = requires(T& asset) {
-        { asset_loader_t<T>::unload(asset) } -> std::same_as<void>;
-    };
-
-    struct SMOL_API asset_pool_base_t
-    {
-        virtual ~asset_pool_base_t() = default;
-    };
-
-    template <typename T>
-    struct asset_pool_t : public asset_pool_base_t
-    {
-        struct slot_t
-        {
-            T data;
-            asset_id_t id = 0;
-            uuid_t uuid = 0;
-            std::atomic<asset_state_e> state = asset_state_e::UNLOADED;
-            std::atomic<i32_t> ref_count = 0;
-            std::string path;
-        };
-
-        std::deque<slot_t> slots;
-        std::vector<asset_id_t> free_indices;
-        std::mutex pool_mutex;
-    };
-
     class asset_registry_t
     {
       public:
@@ -62,6 +33,7 @@ namespace smol
 
         void shutdown()
         {
+            for (auto& [id, pool] : pools) { pool->base_unload_all(); }
             pools.clear();
             lookup.clear();
         }
@@ -119,9 +91,36 @@ namespace smol
             }
         }
 
+        std::string get_path(asset_handle_t handle)
+        {
+            if (!handle.is_valid()) { return {}; }
+
+            std::scoped_lock lock(lookup_mutex);
+            auto it = lookup.find(handle.uuid);
+            if (it == lookup.end()) { return {}; }
+
+            asset_pool_base_t* pool = get_pool_base(it->second.type_id);
+            if (!pool || !pool->base_validate(handle.pool_index, handle.uuid)) { return {}; }
+
+            return it->second.path;
+        }
+
+        void get_handles(u64_t type_id, std::vector<asset_handle_t>& out)
+        {
+            auto it = pools.find(type_id);
+            if (it == pools.end()) { return; }
+            it->second->base_get_handles(out);
+        }
+
       private:
         std::unordered_map<u64_t, std::unique_ptr<asset_pool_base_t>> pools;
         std::mutex pools_mutex;
+
+        asset_pool_base_t* get_pool_base(u64_t type_id)
+        {
+            auto it = pools.find(type_id);
+            return (it != pools.end()) ? it->second.get() : nullptr;
+        }
 
         struct lookup_entry_t
         {
@@ -158,7 +157,8 @@ namespace smol
         template <typename T, typename... Args>
         asset_handle_t internal_load(const std::string& path, bool is_sync, Args&&... args)
         {
-            uuid_t uuid = smol::hash_string(path.c_str());
+            uuid_t uuid = smol::asset_meta::resolve_uuid(path);
+            std::string guid_str(smol::asset_meta::get_guid(path));
 
             asset_pool_t<T>& pool = get_pool<T>();
             const size_t type_id = get_asset_type_id<T>();
@@ -194,6 +194,7 @@ namespace smol
 
             slot->path = path;
             slot->uuid = uuid;
+            slot->guid = guid_str;
             slot->state = asset_state_e::QUEUED;
             slot->ref_count = 1;
 
