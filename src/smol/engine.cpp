@@ -17,6 +17,7 @@
 #include "smol/rendering/renderer_types.h"
 #include "smol/systems/camera.h"
 #include "smol/systems/events.h"
+#include "smol/systems/shadows.h"
 #include "smol/systems/transform.h"
 #include "smol/time.h"
 #include "smol/vfs.h"
@@ -191,6 +192,7 @@ namespace smol::engine
 
             smol::transform_system::update(active_scene->registry);
             smol::camera_system::update(active_scene->registry);
+            smol::shadow_system::update(active_scene->registry);
 
             if (!is_suspended) { smol::renderer::render(active_scene->registry); }
 

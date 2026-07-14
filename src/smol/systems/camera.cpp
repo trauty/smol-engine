@@ -43,20 +43,26 @@ namespace smol::camera_system
                 cam.is_dirty = true;
             }
 
-            if (cam.is_dirty)
-            {
-                glm_perspective_lh_zo(glm_rad(cam.fov_deg), cam.aspect, cam.near_plane, cam.far_plane, cam.projection);
-                cam.is_dirty = false;
-            }
-
             vec3_t eye = {transform.world_mat[3][0], transform.world_mat[3][1], transform.world_mat[3][2]};
             vec3_t forward = {transform.world_mat[2][0], transform.world_mat[2][1], transform.world_mat[2][2]};
             vec3_t up = {transform.world_mat[1][0], transform.world_mat[1][1], transform.world_mat[1][2]};
 
-            vec3_t center;
-            glm_vec3_add(eye, forward, center);
-            glm_lookat_lh(eye, center, up, cam.view);
-            glm_mat4_mul(cam.projection, cam.view, cam.view_proj);
+            build_view_projection(eye, forward, up, cam.fov_deg, cam.aspect, cam.near_plane, cam.far_plane, cam.view,
+                                  cam.projection, cam.view_proj);
+            cam.is_dirty = false;
         }
+    }
+
+    void build_view_projection(vec3_t eye, vec3_t forward, vec3_t up, f32 fov_deg, f32 aspect, f32 near_plane,
+                               f32 far_plane, mat4_t& out_view, mat4_t& out_projection, mat4_t& out_view_proj)
+    {
+        glm_perspective_lh_zo(glm_rad(fov_deg), aspect, near_plane, far_plane, out_projection);
+        flip_clip_y(out_projection);
+
+        vec3_t center;
+        glm_vec3_add(eye, forward, center);
+        glm_lookat_lh(eye, center, up, out_view);
+
+        glm_mat4_mul(out_projection, out_view, out_view_proj);
     }
 } // namespace smol::camera_system

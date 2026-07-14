@@ -1,7 +1,7 @@
 module smol_imgui;
 import smol_globals;
 
-[ShaderConfig("ImGuiPass", "TransparentAlpha", false, false)]
+[ShaderConfig("ImGuiPass", "TransparentAlpha", false, false, false)]
 struct ImGuiShader
 {
     float2 scale;

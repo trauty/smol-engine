@@ -2,6 +2,7 @@
 
 #include "smol/asset_registry.h"
 #include "smol/assets/shader_format.h"
+#include "smol/containers/flat_map.h"
 #include "smol/defines.h"
 #include "smol/rendering/vulkan.h"
 
@@ -30,11 +31,18 @@ namespace smol
         std::string blend_mode = "Opaque";
         bool depth_write = true;
         bool depth_test = true;
+        bool casts_shadow = true;
+    };
+
+    enum class pipeline_variant_e : u32_t
+    {
+        FORWARD,
+        SHADOW
     };
 
     struct SMOL_API shader_t
     {
-        VkPipeline pipeline = VK_NULL_HANDLE;
+        flat_map_t<VkPipeline> pipelines; // keyed by static_cast<u32_t>(pipeline_variant_e)
         VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
 
         bool has_material_data = false;
@@ -45,6 +53,12 @@ namespace smol
 
         bool is_compute = false;
         std::vector<VkFormat> target_formats;
+
+        VkPipeline get_pipeline(pipeline_variant_e variant) const
+        {
+            const VkPipeline* p = pipelines.find(static_cast<u32_t>(variant));
+            return p ? *p : VK_NULL_HANDLE;
+        }
 
         bool ready() const { return pipeline_layout != VK_NULL_HANDLE; }
     };

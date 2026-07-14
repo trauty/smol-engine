@@ -44,6 +44,7 @@ namespace smol
         char blend_mode[32];
         bool depth_write;
         bool depth_test;
+        bool casts_shadow;
         u32_t member_count;
     };
 

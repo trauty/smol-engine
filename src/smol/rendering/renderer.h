@@ -64,12 +64,15 @@ namespace smol::renderer
 
     VkSampler create_sampler(VkFilter filter, VkSamplerAddressMode address_mode);
 
-    SMOL_API void set_render_resolution(u32_t width, u32_t height);
-    SMOL_API u32_t get_viewport_texture_id();
+    SMOL_API void submit_output_target(u32_t target_hash, VkExtent2D extent);
 
-    SMOL_API void set_use_offscreen_viewport(bool value);
+    SMOL_API u32_t get_target_texture_id(u32_t name_hash);
 
-    SMOL_API void set_camera_override(const mat4_t& view, const mat4_t& projection, const mat4_t& view_proj,
-                                      const vec3_t& position);
-    SMOL_API void clear_camera_override();
+    SMOL_API void submit_color_view(u32_t name_hash, const mat4_t& view, const mat4_t& projection,
+                                    const mat4_t& view_proj, const vec3_t& position, u32_t color_target_hash,
+                                    u32_t depth_target_hash, VkExtent2D extent);
+    SMOL_API void submit_shadow_view(u32_t name_hash, const mat4_t& view, const mat4_t& projection,
+                                     u32_t depth_target_hash, VkExtent2D extent, const image_desc_t& depth_desc);
+
+    SMOL_API bool get_primary_camera_position(ecs::registry_t& reg, vec3_t& out_pos);
 } // namespace smol::renderer

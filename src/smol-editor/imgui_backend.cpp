@@ -326,7 +326,8 @@ namespace smol::editor::imgui
 
                     shader_t* shader = smol::engine::get_asset_registry().get<shader_t>(mat->shader_handle);
 
-                    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shader->pipeline);
+                    vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS,
+                                      shader->get_pipeline(pipeline_variant_e::FORWARD));
 
                     VkDescriptorSet sets[] = {renderer::res_system.global_set, renderer::res_system.frame_set};
 

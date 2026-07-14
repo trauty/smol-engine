@@ -16,6 +16,8 @@ namespace smol::renderer
 
     constexpr u32_t MAX_FRAMES_IN_FLIGHT = 2;
 
+    constexpr u32_t MAX_VIEWS_PER_FRAME = 8; // 1 color + up to 7 render texture views
+
     constexpr u32_t MAX_LIGHTS = 1024;
     constexpr u32_t MAX_DIR_LIGHTS = 32;
 } // namespace smol::renderer

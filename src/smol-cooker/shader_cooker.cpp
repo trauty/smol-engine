@@ -156,11 +156,13 @@ namespace smol::cooker::shader
                         shader_info.blend_mode = std::string(blend_str, len);
                     }
 
-                    i32 dw = 1, dt = 1;
+                    i32 dw = 1, dt = 1, cs = 1;
                     attr->getArgumentValueInt(2, &dw);
                     shader_info.depth_write = dw != 0;
                     attr->getArgumentValueInt(3, &dt);
                     shader_info.depth_test = dt != 0;
+                    attr->getArgumentValueInt(4, &cs);
+                    shader_info.casts_shadow = cs != 0;
 
                     break;
                 }
@@ -419,6 +421,7 @@ namespace smol::cooker::shader
             mod_header.size = module.size;
             mod_header.depth_write = module.depth_write;
             mod_header.depth_test = module.depth_test;
+            mod_header.casts_shadow = module.casts_shadow;
             mod_header.member_count = static_cast<u32_t>(module.members.size());
             out.write(reinterpret_cast<const char*>(&mod_header), sizeof(shader_module_header_t));
 

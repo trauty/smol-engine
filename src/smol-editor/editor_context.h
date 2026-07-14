@@ -35,6 +35,9 @@ namespace smol
         bool is_viewport_hovered = false;
         bool is_viewport_focused = false;
 
+        u32_t viewport_width = 0;
+        u32_t viewport_height = 0;
+
         game_init_func game_init = nullptr;
         game_update_func game_update = nullptr;
         game_shutdown_func game_shutdown = nullptr;

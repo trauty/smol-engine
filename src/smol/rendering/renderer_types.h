@@ -13,8 +13,10 @@
 #include "vulkan/vulkan_core.h"
 
 #include <deque>
+#include <memory>
 #include <mutex>
 #include <optional>
+#include <unordered_map>
 #include <vector>
 
 #define VK_CHECK(x)                                                                                                    \
@@ -33,9 +35,16 @@ namespace smol::renderer
     struct active_pipeline_t
     {
         VkPipeline pipeline;
+        VkPipeline shadow_pipeline;
         VkPipelineLayout layout;
         u32_t pipeline_index;
         u32_t blend_sort_key;
+    };
+
+    enum class view_kind_e : u32_t
+    {
+        COLOR,
+        DEPTH_ONLY
     };
 
     struct queue_family_indices_t
@@ -142,7 +151,10 @@ namespace smol::renderer
 
         u32_t object_count;
         u32_t active_pipeline_count;
-        u32_t _pad[2];
+        u32_t cull_flags;    // bit0 = shadow only view
+        u32_t shadow_map_id; // bindless id of the dir shadowmap
+
+        gpu_mat4_t light_view_proj = {}; // raw world to light clipspace
     };
 
     struct object_data_t
@@ -156,7 +168,7 @@ namespace smol::renderer
         u32_t vertex_count;
         f32 bounding_sphere_radius;
         u32_t pipeline_index;
-        u32_t _pad;
+        u32_t flags; // bit0 = shadow caster
         gpu_vec4_t bounding_sphere_center;
     };
 
@@ -195,8 +207,52 @@ namespace smol::renderer
         void shutdown();
     };
 
+    struct render_view_t
+    {
+        u32_t name_hash = 0;
+        view_kind_e kind = view_kind_e::COLOR;
+        mat4_t view;
+        mat4_t projection;
+        mat4_t view_proj;
+        vec3_t position;
+        u32_t color_target_hash = 0;
+        u32_t depth_target_hash = 0;
+        bool has_depth_desc = false;
+        image_desc_t depth_desc{}; // used to create the shadowmap image
+        VkExtent2D extent{};
+    };
+
+    struct output_target_t
+    {
+        u32_t target_hash = 0;
+        VkExtent2D extent{};
+    };
+
+    struct view_gpu_resources_t
+    {
+        VkBuffer indirect_buffer = VK_NULL_HANDLE;
+        VmaAllocation indirect_alloc = VK_NULL_HANDLE;
+        VkDeviceSize indirect_size = 0;
+
+        VkBuffer draw_counts_buffer = VK_NULL_HANDLE;
+        VmaAllocation draw_counts_alloc = VK_NULL_HANDLE;
+        VkDeviceSize draw_counts_size = 0;
+
+        shader_instance_t culling_instance;
+        bool culling_ready = false;
+
+        u32_t global_data_offset = 0;
+        view_kind_e kind = view_kind_e::COLOR;
+    };
+
     struct per_frame_t
     {
+        per_frame_t() = default;
+        per_frame_t(const per_frame_t&) = delete;
+        per_frame_t& operator=(const per_frame_t&) = delete;
+        per_frame_t(per_frame_t&&) = default;
+        per_frame_t& operator=(per_frame_t&&) = default;
+
         u64_t target_timeline_value = 0;
         VkCommandPool main_command_pool = VK_NULL_HANDLE;
         VkCommandBuffer main_command_buffer = VK_NULL_HANDLE;
@@ -221,6 +277,7 @@ namespace smol::renderer
         VkDeviceSize draw_counts_size = 0;
 
         std::vector<active_pipeline_t> active_pipelines;
+        std::unordered_map<u32_t, std::unique_ptr<view_gpu_resources_t>> views;
 
         VkBuffer material_buffer = VK_NULL_HANDLE;
         VmaAllocation material_allocation = VK_NULL_HANDLE;
@@ -299,16 +356,7 @@ namespace smol::renderer
         VkExtent2D logical_extent = {0, 0};
         VkSurfaceTransformFlagBitsKHR cur_surface_transform;
 
-        struct camera_override_t
-        {
-            bool active = false;
-            mat4_t view;
-            mat4_t projection;
-            mat4_t view_proj;
-            vec3_t position;
-        } camera_override;
-        u32_t viewport_bindless_id = BINDLESS_NULL_HANDLE;
-        bool use_offscreen_viewport = false;
+        std::unordered_map<u32_t, u32_t> output_texture_ids;
     };
 
     struct context_config_t

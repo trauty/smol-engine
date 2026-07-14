@@ -22,14 +22,13 @@
 #include "smol/rendering/renderer_types.h"
 #include "smol/rendering/vulkan.h"
 #include "smol/serialization.h"
+#include "smol/systems/camera.h"
 #include "smol/vfs.h"
 #include "smol/window.h"
 #include "smol/world.h"
 
 #include "json/json.hpp"
 #include <SDL3/SDL_events.h>
-#include <cglm/clipspace/persp_lh_zo.h>
-#include <cglm/clipspace/view_lh.h>
 #include <chrono>
 #include <exception>
 #include <filesystem>
@@ -144,6 +143,8 @@ bool process_editor_event(const SDL_Event& event, smol::editor_context_t& ctx)
 
     return ignore_mouse || ignore_keyboard;
 }
+
+using smol::operator""_h;
 
 void update_editor_ui(smol::world_t& world, smol::editor_context_t& ctx)
 {
@@ -260,26 +261,24 @@ void update_editor_ui(smol::world_t& world, smol::editor_context_t& ctx)
     ImGui::Render();
     smol::editor::imgui::submit(ImGui::GetDrawData());
 
+    smol::renderer::submit_output_target("EditorViewport"_h, {ctx.viewport_width, ctx.viewport_height});
+
     if (ctx.cur_mode == smol::editor_mode_e::EDIT)
     {
         smol::editor::camera_system::update(ctx.editor_camera, ctx.is_viewport_hovered);
 
         auto& ecam = ctx.editor_camera;
         f32 aspect = (f32)smol::renderer::ctx.logical_extent.width / (f32)smol::renderer::ctx.logical_extent.height;
-        smol::mat4_t proj;
-        glm_perspective_lh_zo(glm_rad(ecam.fov_deg), aspect, ecam.near_plane, ecam.far_plane, proj);
-        smol::vec3_t fwd = ecam.rotation.forward();
-        smol::vec3_t center = ecam.position + fwd;
-        smol::vec3_t up = ecam.rotation.up();
-        smol::mat4_t view;
-        glm_lookat_lh(ecam.position, center, up, view);
-        smol::mat4_t view_proj;
-        glm_mat4_mul(proj, view, view_proj);
-        smol::renderer::set_camera_override(view, proj, view_proj, ecam.position);
+        smol::mat4_t view, proj, view_proj;
+        smol::camera_system::build_view_projection(ecam.position, ecam.rotation.forward(), ecam.rotation.up(),
+                                                   ecam.fov_deg, aspect, ecam.near_plane, ecam.far_plane, view, proj,
+                                                   view_proj);
+
+        smol::renderer::submit_color_view("PrimaryView"_h, view, proj, view_proj, ecam.position, "SceneColor"_h,
+                                          "SceneDepth"_h, smol::renderer::ctx.render_extent);
     }
     else
     {
-        smol::renderer::clear_camera_override();
         if (ctx.cur_mode == smol::editor_mode_e::PLAY && ctx.game_update)
         {
             ctx.game_update(&smol::engine::get_active_world());
@@ -340,8 +339,6 @@ int main(i32 argc, char** argv)
     volkInitialize();
     volkLoadInstance(smol::renderer::ctx.instance);
     volkLoadDevice(smol::renderer::ctx.device);
-
-    smol::renderer::set_use_offscreen_viewport(true);
 
     ImGui::CreateContext();
     ImGuiIO& io = ImGui::GetIO();

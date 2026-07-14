@@ -10,5 +10,6 @@ namespace smol
         asset_handle_t material;
 
         bool active = true;
+        bool casts_shadow = true;
     };
 } // namespace smol

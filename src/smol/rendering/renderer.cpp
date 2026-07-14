@@ -56,6 +56,9 @@ namespace smol::renderer
         rendergraph_t rendergraph;
         std::vector<graph_builder_func_t> custom_renderer_features;
 
+        std::vector<render_view_t> submitted_views;
+        std::vector<output_target_t> submitted_outputs;
+
         void recreate_surface()
         {
             vkDeviceWaitIdle(ctx.device);
@@ -145,6 +148,51 @@ namespace smol::renderer
         return pass;
     }
 
+    static void add_view_pass(rendergraph_t& graph, const render_view_t& view, rg_resource_id color,
+                              rg_resource_id depth, rg_resource_id shadow_read = RG_NULL_ID)
+    {
+        rg_pass_t& pass = graph.add_pass(view.name_hash, "ViewPass");
+        if (view.kind == view_kind_e::COLOR && color != RG_NULL_ID) { pass.color_writes = {color}; }
+        if (view.kind == view_kind_e::COLOR && shadow_read != RG_NULL_ID) { pass.texture_reads = {shadow_read}; }
+        pass.depth_stencil = depth;
+
+        u32_t vh = view.name_hash;
+        view_kind_e kind = view.kind;
+        pass.execute_callback = [vh, kind](VkCommandBuffer cmd, ecs::registry_t& reg)
+        {
+            per_frame_t& fd = ctx.per_frame_objects[ctx.cur_frame];
+            if (fd.object_counter == 0 || fd.active_pipelines.empty()) { return; }
+
+            auto it = fd.views.find(vh);
+            if (it == fd.views.end()) { return; }
+            view_gpu_resources_t& vgr = *it->second;
+            if (vgr.indirect_buffer == VK_NULL_HANDLE || vgr.draw_counts_buffer == VK_NULL_HANDLE) { return; }
+
+            push_constants_t pc_data = {
+                fd.object_bindless_id,
+                res_system.material_heap.bindless_id,
+            };
+            VkDescriptorSet sets[] = {res_system.global_set, res_system.frame_set};
+
+            for (const active_pipeline_t& p : fd.active_pipelines)
+            {
+                VkPipeline pipe = (kind == view_kind_e::DEPTH_ONLY) ? p.shadow_pipeline : p.pipeline;
+                if (pipe == VK_NULL_HANDLE) { continue; } // e.g. non-caster shader in a shadow pass
+
+                vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipe);
+                vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, p.layout, 0, 2, sets, 1,
+                                        &vgr.global_data_offset);
+                vkCmdPushConstants(cmd, p.layout, VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
+                                   sizeof(push_constants_t), &pc_data);
+
+                u32_t indirect_offset = p.pipeline_index * fd.object_counter * 16;
+                u32_t counts_offset = p.pipeline_index * sizeof(u32_t);
+                vkCmdDrawIndirectCount(cmd, vgr.indirect_buffer, indirect_offset, vgr.draw_counts_buffer, counts_offset,
+                                       fd.object_counter, 16);
+            }
+        };
+    }
+
     SMOL_API rg_pass_t& add_fullscreen_pass(rendergraph_t& graph, u32_t name_hash, const char* debug_name,
                                             smol::material_t* material, const std::vector<rg_resource_id>& reads,
                                             const std::vector<rg_resource_id>& writes,
@@ -166,7 +214,7 @@ namespace smol::renderer
 
             per_frame_t& frame_data = ctx.per_frame_objects[ctx.cur_frame];
 
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shader->pipeline);
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shader->get_pipeline(pipeline_variant_e::FORWARD));
 
             VkDescriptorSet sets[] = {res_system.global_set, res_system.frame_set};
 
@@ -213,7 +261,7 @@ namespace smol::renderer
 
             VkDescriptorSet sets[] = {res_system.global_set, res_system.frame_set};
 
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, shader->pipeline);
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, shader->get_pipeline(pipeline_variant_e::FORWARD));
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, shader->pipeline_layout, 0, 2, sets, 1,
                                     &frame_data.global_data_offset);
 
@@ -625,17 +673,18 @@ namespace smol::renderer
         ctx.global_data_aligned_size = (sizeof(global_data_t) + min_alignment - 1) & ~(min_alignment - 1);
 
         void* mapped_global_data;
-        create_mapped_buffer(ctx.global_data_aligned_size * MAX_FRAMES_IN_FLIGHT, VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT,
-                             ctx.global_data_buffer, ctx.global_data_alloc, mapped_global_data);
+        create_mapped_buffer(ctx.global_data_aligned_size * MAX_FRAMES_IN_FLIGHT * MAX_VIEWS_PER_FRAME,
+                             VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT, ctx.global_data_buffer, ctx.global_data_alloc,
+                             mapped_global_data);
 
         ctx.global_data_mapped = static_cast<u8*>(mapped_global_data);
 
         for (u32_t i = 0; i < MAX_FRAMES_IN_FLIGHT; i++)
         {
-            u32_t offset = i * ctx.global_data_aligned_size;
+            u32_t base_offset = i * MAX_VIEWS_PER_FRAME * ctx.global_data_aligned_size;
             ctx.per_frame_objects[i].mapped_global_data =
-                reinterpret_cast<global_data_t*>(ctx.global_data_mapped + offset);
-            ctx.per_frame_objects[i].global_data_offset = offset;
+                reinterpret_cast<global_data_t*>(ctx.global_data_mapped + base_offset);
+            ctx.per_frame_objects[i].global_data_offset = base_offset;
         }
 
         VkDescriptorBufferInfo ubo_info = {
@@ -668,6 +717,13 @@ namespace smol::renderer
     void reset_assets()
     {
         ctx.culling_instance.shutdown();
+
+        // every view has their own culling shader instance
+        for (per_frame_t& frame_data : ctx.per_frame_objects)
+        {
+            for (auto& [name_hash, vgr_ptr] : frame_data.views) { vgr_ptr->culling_instance.shutdown(); }
+        }
+
         smol::engine::get_asset_registry().release<shader_t>(ctx.culling_shader);
         smol::engine::get_asset_registry().release<texture_t>(ctx.default_tex);
         rendergraph.clear();
@@ -746,6 +802,12 @@ namespace smol::renderer
     void render(ecs::registry_t& reg)
     {
         ZoneScoped;
+
+        std::vector<render_view_t> frame_views = std::move(submitted_views);
+        submitted_views.clear();
+
+        std::vector<output_target_t> frame_outputs = std::move(submitted_outputs);
+        submitted_outputs.clear();
 
         bool needs_resize = false;
         u32_t new_width, new_height;
@@ -835,25 +897,16 @@ namespace smol::renderer
             glm_rotate_z(pre_rot_mat, glm_rad(270.0f), pre_rot_mat);
         }
 
-        if (ctx.camera_override.active)
+        bool has_primary = false;
+        for (const render_view_t& v : frame_views)
         {
-            std::memcpy(frame_data.mapped_global_data->view.data, &ctx.camera_override.view, sizeof(mat4_t));
-            std::memcpy(frame_data.mapped_global_data->projection.data, &ctx.camera_override.projection,
-                        sizeof(mat4_t));
-
-            mat4_t final_view_proj;
-            glm_mat4_mul(pre_rot_mat, ctx.camera_override.view_proj, final_view_proj);
-            std::memcpy(frame_data.mapped_global_data->view_proj.data, &final_view_proj, sizeof(mat4_t));
-
-            vec4 planes[6];
-            glm_frustum_planes(ctx.camera_override.view_proj, planes);
-            std::memcpy(frame_data.mapped_global_data->frustum_planes, planes, sizeof(vec4) * 6);
-
-            frame_data.mapped_global_data->camera_pos.data.x = ctx.camera_override.position.x;
-            frame_data.mapped_global_data->camera_pos.data.y = ctx.camera_override.position.y;
-            frame_data.mapped_global_data->camera_pos.data.z = ctx.camera_override.position.z;
+            if (v.name_hash == "PrimaryView"_h)
+            {
+                has_primary = true;
+                break;
+            }
         }
-        else
+        if (!has_primary)
         {
             ecs::entity_t active_cam = camera_system::get_active_camera(reg);
             if (active_cam != ecs::NULL_ENTITY)
@@ -861,24 +914,24 @@ namespace smol::renderer
                 camera_t& cam = reg.get<camera_t>(active_cam);
                 transform_t& cam_transform = reg.get<transform_t>(active_cam);
 
-                std::memcpy(frame_data.mapped_global_data->view.data, &cam.view, sizeof(mat4_t));
-                std::memcpy(frame_data.mapped_global_data->projection.data, &cam.projection, sizeof(mat4_t));
-
-                mat4_t final_view_proj;
-                glm_mat4_mul(pre_rot_mat, cam.view_proj, final_view_proj);
-                std::memcpy(frame_data.mapped_global_data->view_proj.data, &final_view_proj, sizeof(mat4_t));
-
-                vec4 planes[6];
-                glm_frustum_planes(cam.view_proj, planes);
-                std::memcpy(frame_data.mapped_global_data->frustum_planes, planes, sizeof(vec4) * 6);
-
-                frame_data.mapped_global_data->camera_pos.data.x = cam_transform.world_mat[3][0];
-                frame_data.mapped_global_data->camera_pos.data.y = cam_transform.world_mat[3][1];
-                frame_data.mapped_global_data->camera_pos.data.z = cam_transform.world_mat[3][2];
+                render_view_t v{};
+                v.name_hash = "PrimaryView"_h;
+                v.kind = view_kind_e::COLOR;
+                v.view = cam.view;
+                v.projection = cam.projection;
+                v.view_proj = cam.view_proj;
+                v.position = {cam_transform.world_mat[3][0], cam_transform.world_mat[3][1],
+                              cam_transform.world_mat[3][2]};
+                v.color_target_hash = "SceneColor"_h;
+                v.depth_target_hash = "SceneDepth"_h;
+                v.extent = ctx.render_extent;
+                frame_views.push_back(v);
             }
         }
 
-        frame_data.mapped_global_data->time = time::time;
+        global_data_t frame_globals{};
+        frame_globals.time = time::time;
+        frame_globals.shadow_map_id = BINDLESS_NULL_HANDLE;
 
         u32_t dir_count = 0;
         for (auto [entity, light, transform] : reg.view<directional_light_t, transform_t>().each())
@@ -959,14 +1012,14 @@ namespace smol::renderer
             spot_count++;
         }
 
-        frame_data.mapped_global_data->dir_light_count = dir_count;
-        frame_data.mapped_global_data->dir_light_buffer_id = frame_data.dir_light_bindless_id;
+        frame_globals.dir_light_count = dir_count;
+        frame_globals.dir_light_buffer_id = frame_data.dir_light_bindless_id;
 
-        frame_data.mapped_global_data->point_light_count = point_count;
-        frame_data.mapped_global_data->point_light_buffer_id = frame_data.point_light_bindless_id;
+        frame_globals.point_light_count = point_count;
+        frame_globals.point_light_buffer_id = frame_data.point_light_bindless_id;
 
-        frame_data.mapped_global_data->spot_light_count = spot_count;
-        frame_data.mapped_global_data->spot_light_buffer_id = frame_data.spot_light_bindless_id;
+        frame_globals.spot_light_count = spot_count;
+        frame_globals.spot_light_buffer_id = frame_data.spot_light_bindless_id;
 
         auto get_blend_key = [](const std::string& mode) -> u32_t
         {
@@ -998,10 +1051,9 @@ namespace smol::renderer
 
                 if (l_key != r_key) { return l_key < r_key; }
 
-                if (lhs_shader->pipeline != rhs_shader->pipeline)
-                {
-                    return lhs_shader->pipeline < rhs_shader->pipeline;
-                }
+                VkPipeline lhs_pipeline = lhs_shader->get_pipeline(pipeline_variant_e::FORWARD);
+                VkPipeline rhs_pipeline = rhs_shader->get_pipeline(pipeline_variant_e::FORWARD);
+                if (lhs_pipeline != rhs_pipeline) { return lhs_pipeline < rhs_pipeline; }
 
                 return lhs_mat < rhs_mat;
             });
@@ -1023,11 +1075,13 @@ namespace smol::renderer
             shader_t* shader = smol::engine::get_asset_registry().get<shader_t>(mat->shader_handle);
             if (!shader) { continue; }
 
-            if (shader->pipeline != last_pipeline)
+            VkPipeline forward_pipeline = shader->get_pipeline(pipeline_variant_e::FORWARD);
+            if (forward_pipeline != last_pipeline)
             {
-                last_pipeline = shader->pipeline;
+                last_pipeline = forward_pipeline;
                 frame_data.active_pipelines.push_back({
                     last_pipeline,
+                    shader->get_pipeline(pipeline_variant_e::SHADOW),
                     shader->pipeline_layout,
                     static_cast<u32_t>(frame_data.active_pipelines.size()),
                     get_blend_key(shader->module.blend_mode),
@@ -1054,6 +1108,9 @@ namespace smol::renderer
 
             obj_data.pipeline_index = frame_data.active_pipelines.back().pipeline_index;
 
+            bool has_shadow = frame_data.active_pipelines.back().shadow_pipeline != VK_NULL_HANDLE;
+            obj_data.flags = (renderer.casts_shadow && has_shadow) ? 1u : 0u;
+
             vec3_t world_center;
             vec3_t local_c = mesh->local_center;
             glm_mat4_mulv3(transform.world_mat, local_c, 1.0f, world_center);
@@ -1077,56 +1134,103 @@ namespace smol::renderer
         }
 
         frame_data.object_counter = cur_object_id;
-        frame_data.mapped_global_data->object_count = cur_object_id;
-        frame_data.mapped_global_data->active_pipeline_count = frame_data.active_pipelines.size();
+        frame_globals.object_count = cur_object_id;
+        frame_globals.active_pipeline_count = frame_data.active_pipelines.size();
 
-        if (cur_object_id > 0 && !frame_data.active_pipelines.empty())
+        if (frame_views.size() > MAX_VIEWS_PER_FRAME)
         {
+            SMOL_LOG_FATAL("RENDERER", "Submitted {} views exceeds MAX_VIEWS_PER_FRAME ({})", frame_views.size(),
+                           MAX_VIEWS_PER_FRAME);
+            abort();
+        }
+
+        auto create_device_buffer =
+            [](VkDeviceSize size, VkBufferUsageFlags usage, VkBuffer& buffer, VmaAllocation& alloc)
+        {
+            VkBufferCreateInfo buf_info = {
+                .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+                .size = size,
+                .usage = usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
+            };
+            VmaAllocationCreateInfo alloc_info = {
+                .usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
+            };
+
+            VK_CHECK(vmaCreateBuffer(ctx.allocator, &buf_info, &alloc_info, &buffer, &alloc, nullptr));
+        };
+
+        shader_t* culling_shader = smol::engine::get_asset_registry().get<shader_t>(ctx.culling_shader);
+
+        for (u32_t view_idx = 0; view_idx < frame_views.size(); view_idx++)
+        {
+            render_view_t& sub = frame_views[view_idx];
+            u32_t view_offset = frame_data.global_data_offset + view_idx * ctx.global_data_aligned_size;
+
+            auto vit = frame_data.views.find(sub.name_hash);
+            if (vit == frame_data.views.end())
+            {
+                auto vgr_ptr = std::make_unique<view_gpu_resources_t>();
+                vgr_ptr->culling_instance.init(ctx.culling_shader);
+                vit = frame_data.views.emplace(sub.name_hash, std::move(vgr_ptr)).first;
+            }
+            view_gpu_resources_t& vgr = *vit->second;
+            vgr.kind = sub.kind;
+            vgr.global_data_offset = view_offset;
+
+            global_data_t* slot = reinterpret_cast<global_data_t*>(ctx.global_data_mapped + view_offset);
+            *slot = frame_globals;
+
+            std::memcpy(slot->view.data, &sub.view, sizeof(mat4_t));
+            std::memcpy(slot->projection.data, &sub.projection, sizeof(mat4_t));
+
+            mat4_t final_view_proj;
+            if (sub.kind == view_kind_e::COLOR) { glm_mat4_mul(pre_rot_mat, sub.view_proj, final_view_proj); }
+            else
+            {
+                final_view_proj = sub.view_proj;
+            }
+            std::memcpy(slot->view_proj.data, &final_view_proj, sizeof(mat4_t));
+
+            vec4 planes[6];
+            glm_frustum_planes(sub.view_proj, planes);
+            std::memcpy(slot->frustum_planes, planes, sizeof(vec4) * 6);
+
+            slot->camera_pos.data.x = sub.position.x;
+            slot->camera_pos.data.y = sub.position.y;
+            slot->camera_pos.data.z = sub.position.z;
+
+            slot->cull_flags = (sub.kind == view_kind_e::DEPTH_ONLY) ? 1u : 0u;
+
+            if (cur_object_id == 0 || frame_data.active_pipelines.empty()) { continue; }
+
             VkDeviceSize req_counts = frame_data.active_pipelines.size() * sizeof(u32_t);
             VkDeviceSize req_indirect = frame_data.active_pipelines.size() * cur_object_id * 16;
 
-            auto create_device_buffer =
-                [](VkDeviceSize size, VkBufferUsageFlags usage, VkBuffer& buffer, VmaAllocation& alloc)
+            if (vgr.draw_counts_size < req_counts)
             {
-                VkBufferCreateInfo buf_info = {
-                    .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
-                    .size = size,
-                    .usage = usage | VK_BUFFER_USAGE_TRANSFER_DST_BIT,
-                };
-                VmaAllocationCreateInfo alloc_info = {
-                    .usage = VMA_MEMORY_USAGE_AUTO_PREFER_DEVICE,
-                };
-
-                VK_CHECK(vmaCreateBuffer(ctx.allocator, &buf_info, &alloc_info, &buffer, &alloc, nullptr));
-            };
-
-            if (frame_data.draw_counts_size < req_counts)
-            {
-                if (frame_data.draw_counts_buffer != VK_NULL_HANDLE)
+                if (vgr.draw_counts_buffer != VK_NULL_HANDLE)
                 {
-                    vmaDestroyBuffer(ctx.allocator, frame_data.draw_counts_buffer, frame_data.draw_counts_alloc);
+                    vmaDestroyBuffer(ctx.allocator, vgr.draw_counts_buffer, vgr.draw_counts_alloc);
                 }
-
                 create_device_buffer(req_counts,
                                      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
-                                     frame_data.draw_counts_buffer, frame_data.draw_counts_alloc);
-                frame_data.draw_counts_size = req_counts;
+                                     vgr.draw_counts_buffer, vgr.draw_counts_alloc);
+                vgr.draw_counts_size = req_counts;
             }
 
-            if (frame_data.indirect_size < req_indirect)
+            if (vgr.indirect_size < req_indirect)
             {
-                if (frame_data.indirect_buffer != VK_NULL_HANDLE)
+                if (vgr.indirect_buffer != VK_NULL_HANDLE)
                 {
-                    vmaDestroyBuffer(ctx.allocator, frame_data.indirect_buffer, frame_data.indirect_alloc);
+                    vmaDestroyBuffer(ctx.allocator, vgr.indirect_buffer, vgr.indirect_alloc);
                 }
-
                 create_device_buffer(req_indirect,
                                      VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_INDIRECT_BUFFER_BIT,
-                                     frame_data.indirect_buffer, frame_data.indirect_alloc);
-                frame_data.indirect_size = req_indirect;
+                                     vgr.indirect_buffer, vgr.indirect_alloc);
+                vgr.indirect_size = req_indirect;
             }
 
-            vkCmdFillBuffer(cmd, frame_data.draw_counts_buffer, 0, req_counts, 0);
+            vkCmdFillBuffer(cmd, vgr.draw_counts_buffer, 0, req_counts, 0);
 
             VkBufferMemoryBarrier2 fill_barrier = {
                 .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
@@ -1134,40 +1238,35 @@ namespace smol::renderer
                 .srcAccessMask = VK_ACCESS_2_TRANSFER_WRITE_BIT,
                 .dstStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
                 .dstAccessMask = VK_ACCESS_2_SHADER_STORAGE_READ_BIT | VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-                .buffer = frame_data.draw_counts_buffer,
+                .buffer = vgr.draw_counts_buffer,
                 .offset = 0,
                 .size = req_counts,
             };
-
             VkDependencyInfo fill_dep_info = {
                 .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
                 .bufferMemoryBarrierCount = 1,
                 .pBufferMemoryBarriers = &fill_barrier,
             };
-
             vkCmdPipelineBarrier2(cmd, &fill_dep_info);
 
-            ctx.culling_instance.set_buffer("draw_counts"_h, frame_data.draw_counts_buffer);
-            ctx.culling_instance.set_buffer("indirect_commands"_h, frame_data.indirect_buffer);
-            ctx.culling_instance.sync();
+            vgr.culling_instance.set_buffer("draw_counts"_h, vgr.draw_counts_buffer);
+            vgr.culling_instance.set_buffer("indirect_commands"_h, vgr.indirect_buffer);
+            vgr.culling_instance.sync();
 
-            shader_t* culling_shader = smol::engine::get_asset_registry().get<shader_t>(ctx.culling_shader);
-
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, culling_shader->pipeline);
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
+                              culling_shader->get_pipeline(pipeline_variant_e::FORWARD));
 
             VkDescriptorSet sets[] = {res_system.global_set, res_system.frame_set};
-
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, culling_shader->pipeline_layout, 0, 2, sets, 1,
-                                    &frame_data.global_data_offset);
+                                    &view_offset);
 
-            ctx.culling_instance.bind(cmd);
+            vgr.culling_instance.bind(cmd);
 
             push_constants_t pc_data = {
                 frame_data.object_bindless_id,
                 res_system.material_heap.bindless_id,
                 0,
             };
-
             vkCmdPushConstants(cmd, culling_shader->pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
                                sizeof(push_constants_t), &pc_data);
 
@@ -1180,28 +1279,19 @@ namespace smol::renderer
                 .srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
                 .dstStageMask = VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
                 .dstAccessMask = VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT,
-                .buffer = frame_data.indirect_buffer,
+                .buffer = vgr.indirect_buffer,
                 .offset = 0,
                 .size = req_indirect,
             };
-
-            indirect_barriers[1] = {
-                .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER_2,
-                .srcStageMask = VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT,
-                .srcAccessMask = VK_ACCESS_2_SHADER_STORAGE_WRITE_BIT,
-                .dstStageMask = VK_PIPELINE_STAGE_2_DRAW_INDIRECT_BIT,
-                .dstAccessMask = VK_ACCESS_2_INDIRECT_COMMAND_READ_BIT,
-                .buffer = frame_data.draw_counts_buffer,
-                .offset = 0,
-                .size = req_counts,
-            };
+            indirect_barriers[1] = indirect_barriers[0];
+            indirect_barriers[1].buffer = vgr.draw_counts_buffer;
+            indirect_barriers[1].size = req_counts;
 
             VkDependencyInfo indirect_dep_info = {
                 .sType = VK_STRUCTURE_TYPE_DEPENDENCY_INFO,
                 .bufferMemoryBarrierCount = 2,
                 .pBufferMemoryBarriers = indirect_barriers,
             };
-
             vkCmdPipelineBarrier2(cmd, &indirect_dep_info);
         }
 
@@ -1213,7 +1303,14 @@ namespace smol::renderer
             "Swapchain"_h, "Swapchain", ctx.swapchain.images[index], ctx.swapchain.views[index], ctx.swapchain.format,
             ctx.swapchain.extent.width, ctx.swapchain.extent.height);
 
-        if (!ctx.use_offscreen_viewport) { ctx.render_extent = ctx.swapchain.extent; }
+        output_target_t final_output =
+            frame_outputs.empty() ? output_target_t{"Swapchain"_h, ctx.swapchain.extent} : frame_outputs[0];
+        bool output_to_swapchain = (final_output.target_hash == "Swapchain"_h);
+        if (output_to_swapchain || final_output.extent.width == 0 || final_output.extent.height == 0)
+        {
+            final_output.extent = ctx.swapchain.extent;
+        }
+        ctx.render_extent = final_output.extent;
 
         image_desc_t color_desc = {
             .width = ctx.render_extent.width,
@@ -1235,9 +1332,10 @@ namespace smol::renderer
 
         rg_resource_id depth_res = rendergraph.create_image("SceneDepth"_h, "SceneDepth", depth_desc);
 
-        if (ctx.use_offscreen_viewport)
+        if (output_to_swapchain) { rendergraph.add_alias("FinalOutput"_h, "Swapchain"_h); }
+        else
         {
-            image_desc_t viewport_desc = {
+            image_desc_t output_desc = {
                 .width = ctx.render_extent.width,
                 .height = ctx.render_extent.height,
                 .format = ctx.swapchain.format,
@@ -1245,21 +1343,67 @@ namespace smol::renderer
                 .aspect = VK_IMAGE_ASPECT_COLOR_BIT,
             };
 
-            rendergraph.create_image("ViewportColor"_h, "ViewportColor", viewport_desc);
-            rendergraph.add_alias("FinalOutput"_h, "ViewportColor"_h);
+            rendergraph.create_image(final_output.target_hash, "OutputTarget", output_desc);
+            rendergraph.add_alias("FinalOutput"_h, final_output.target_hash);
         }
-        else
+
+        rg_resource_id shadow_map_res = RG_NULL_ID;
+        mat4_t shadow_light_view_proj{};
+        for (const render_view_t& sub : frame_views)
         {
-            rendergraph.add_alias("FinalOutput"_h, "Swapchain"_h);
+            if (!sub.has_depth_desc) { continue; }
+
+            rg_resource_id id = rendergraph.get_resource(sub.depth_target_hash);
+            if (id == RG_NULL_ID) { id = rendergraph.create_image(sub.depth_target_hash, "ShadowMap", sub.depth_desc); }
+
+            if (shadow_map_res == RG_NULL_ID)
+            {
+                shadow_map_res = id;
+                shadow_light_view_proj = sub.view_proj; // raw light space
+            }
+        }
+
+        for (const render_view_t& sub : frame_views)
+        {
+            rg_resource_id depth_id = RG_NULL_ID;
+            if (sub.has_depth_desc || sub.depth_target_hash != 0)
+            {
+                depth_id = rendergraph.get_resource(sub.depth_target_hash);
+            }
+
+            rg_resource_id color_id = RG_NULL_ID;
+            if (sub.kind == view_kind_e::COLOR && sub.color_target_hash != 0)
+            {
+                color_id = rendergraph.get_resource(sub.color_target_hash);
+            }
+
+            rg_resource_id shadow_read = (sub.kind == view_kind_e::COLOR) ? shadow_map_res : RG_NULL_ID;
+            add_view_pass(rendergraph, sub, color_id, depth_id, shadow_read);
         }
 
         for (graph_builder_func_t& feature_builder : custom_renderer_features) { feature_builder(rendergraph, reg); }
 
         rendergraph.compile(frame_data);
 
-        if (ctx.use_offscreen_viewport)
+        if (shadow_map_res != RG_NULL_ID)
         {
-            ctx.viewport_bindless_id = rendergraph.get_bindless_id(rendergraph.get_resource("ViewportColor"_h));
+            u32_t shadow_bindless = rendergraph.get_bindless_id(shadow_map_res);
+            for (u32_t view_idx = 0; view_idx < frame_views.size(); view_idx++)
+            {
+                if (frame_views[view_idx].kind != view_kind_e::COLOR) { continue; }
+
+                u32_t view_offset = frame_data.global_data_offset + view_idx * ctx.global_data_aligned_size;
+                global_data_t* slot = reinterpret_cast<global_data_t*>(ctx.global_data_mapped + view_offset);
+                slot->shadow_map_id = shadow_bindless;
+                std::memcpy(slot->light_view_proj.data, &shadow_light_view_proj, sizeof(mat4_t));
+            }
+        }
+
+        ctx.output_texture_ids.clear();
+        if (!output_to_swapchain)
+        {
+            ctx.output_texture_ids[final_output.target_hash] =
+                rendergraph.get_bindless_id(rendergraph.get_resource(final_output.target_hash));
         }
 
         rendergraph.execute(cmd, reg);
@@ -1449,6 +1593,24 @@ namespace smol::renderer
             barrier.dstStageMask = VK_PIPELINE_STAGE_2_COLOR_ATTACHMENT_OUTPUT_BIT;
             barrier.dstAccessMask = VK_ACCESS_2_COLOR_ATTACHMENT_WRITE_BIT;
         }
+        else if (old_layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL &&
+                 new_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+        {
+            barrier.srcStageMask = VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+            barrier.srcAccessMask = VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT;
+            barrier.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+            barrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
+        }
+        else if (old_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL &&
+                 new_layout == VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL)
+        {
+            barrier.srcStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT;
+            barrier.srcAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
+            barrier.dstStageMask =
+                VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
+            barrier.dstAccessMask =
+                VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+        }
         else
         {
             SMOL_LOG_WARN("VULKAN", "transition_image: using fallback barrier for image transition. From: {}, To: {}",
@@ -1512,11 +1674,8 @@ namespace smol::renderer
         ctx.cur_surface_transform = pre_transform;
         ctx.swapchain.extent = physical_extent;
 
-        if (!ctx.use_offscreen_viewport)
-        {
-            ctx.render_extent = physical_extent;
-            ctx.logical_extent = logical_extent;
-        }
+        ctx.render_extent = physical_extent;
+        ctx.logical_extent = logical_extent;
 
         VkSurfaceFormatKHR surface_format = select_surface_format(ctx.physical_device, ctx.surface);
         VkPresentModeKHR present_mode = VK_PRESENT_MODE_FIFO_KHR;
@@ -1875,6 +2034,20 @@ namespace smol::renderer
             vmaDestroyBuffer(ctx.allocator, frame_data.draw_counts_buffer, frame_data.draw_counts_alloc);
         }
 
+        for (auto& [name_hash, vgr_ptr] : frame_data.views)
+        {
+            view_gpu_resources_t& vgr = *vgr_ptr;
+            if (vgr.indirect_buffer != VK_NULL_HANDLE)
+            {
+                vmaDestroyBuffer(ctx.allocator, vgr.indirect_buffer, vgr.indirect_alloc);
+            }
+            if (vgr.draw_counts_buffer != VK_NULL_HANDLE)
+            {
+                vmaDestroyBuffer(ctx.allocator, vgr.draw_counts_buffer, vgr.draw_counts_alloc);
+            }
+        }
+        frame_data.views.clear();
+
         if (frame_data.material_buffer != VK_NULL_HANDLE)
         {
             vmaDestroyBuffer(ctx.allocator, frame_data.material_buffer, frame_data.material_allocation);
@@ -2034,41 +2207,78 @@ namespace smol::renderer
         return sampler;
     }
 
-    void set_render_resolution(u32_t width, u32_t height)
+    void submit_output_target(u32_t target_hash, VkExtent2D extent)
     {
-        if (width > 0 && height > 0)
-        {
-            ctx.logical_extent.width = width;
-            ctx.logical_extent.height = height;
+        if (extent.width == 0 || extent.height == 0) { extent = ctx.swapchain.extent; }
 
-            if (ctx.use_offscreen_viewport)
+        ctx.render_extent = extent;
+        ctx.logical_extent = extent;
+
+        submitted_outputs.push_back({target_hash, extent});
+    }
+
+    u32_t get_target_texture_id(u32_t name_hash)
+    {
+        auto it = ctx.output_texture_ids.find(name_hash);
+        return (it != ctx.output_texture_ids.end()) ? it->second : BINDLESS_NULL_HANDLE;
+    }
+
+    void submit_color_view(u32_t name_hash, const mat4_t& view, const mat4_t& projection, const mat4_t& view_proj,
+                           const vec3_t& position, u32_t color_target_hash, u32_t depth_target_hash, VkExtent2D extent)
+    {
+        render_view_t v;
+        v.name_hash = name_hash;
+        v.kind = view_kind_e::COLOR;
+        v.view = view;
+        v.projection = projection;
+        v.view_proj = view_proj;
+        v.position = position;
+        v.color_target_hash = color_target_hash;
+        v.depth_target_hash = depth_target_hash;
+        v.extent = extent;
+        submitted_views.push_back(v);
+    }
+
+    void submit_shadow_view(u32_t name_hash, const mat4_t& view, const mat4_t& projection, u32_t depth_target_hash,
+                            VkExtent2D extent, const image_desc_t& depth_desc)
+    {
+        mat4_t proj_copy = projection;
+        mat4_t view_copy = view;
+        mat4_t view_proj;
+        glm_mat4_mul(proj_copy, view_copy, view_proj);
+
+        render_view_t v;
+        v.name_hash = name_hash;
+        v.kind = view_kind_e::DEPTH_ONLY;
+        v.view = view;
+        v.projection = projection;
+        v.view_proj = view_proj;
+        v.depth_target_hash = depth_target_hash;
+        v.has_depth_desc = true;
+        v.depth_desc = depth_desc;
+        v.extent = extent;
+        submitted_views.push_back(v);
+    }
+
+    bool get_primary_camera_position(ecs::registry_t& reg, vec3_t& out_pos)
+    {
+        for (const render_view_t& v : submitted_views)
+        {
+            if (v.name_hash == "PrimaryView"_h)
             {
-                ctx.render_extent.width = width;
-                ctx.render_extent.height = height;
+                out_pos = v.position;
+                return true;
             }
         }
-    }
 
-    u32_t get_viewport_texture_id() { return ctx.viewport_bindless_id; }
-
-    void set_use_offscreen_viewport(bool value)
-    {
-        ctx.use_offscreen_viewport = value;
-        if (value && (ctx.render_extent.width == 0 || ctx.render_extent.height == 0))
+        ecs::entity_t cam_e = camera_system::get_active_camera(reg);
+        if (cam_e != ecs::NULL_ENTITY)
         {
-            ctx.render_extent = ctx.swapchain.extent;
+            transform_t& t = reg.get<transform_t>(cam_e);
+            out_pos = {t.world_mat[3][0], t.world_mat[3][1], t.world_mat[3][2]};
+            return true;
         }
-    }
 
-    void set_camera_override(const mat4_t& view, const mat4_t& projection, const mat4_t& view_proj,
-                             const vec3_t& position)
-    {
-        ctx.camera_override.active = true;
-        ctx.camera_override.view = view;
-        ctx.camera_override.projection = projection;
-        ctx.camera_override.view_proj = view_proj;
-        ctx.camera_override.position = position;
+        return false;
     }
-
-    void clear_camera_override() { ctx.camera_override.active = false; }
 } // namespace smol::renderer
