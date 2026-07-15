@@ -6,15 +6,47 @@ public SamplerState global_samplers[];
 public Texture2D global_textures[];
 [[vk::binding(2, 0)]]
 public RWTexture2D<float4> global_storage_images[];
-[[vk::binding(3, 0)]]
-public ByteAddressBuffer global_buffers[];
 
 [[vk::binding(0, 1)]]
 public ConstantBuffer<GlobalData> globals;
 
 public Texture2D getTexture(uint id) { return global_textures[NonUniformResourceIndex(id)]; }
 public SamplerState getSampler(uint id) { return global_samplers[NonUniformResourceIndex(id)]; }
-public ByteAddressBuffer getBuffer(uint id) { return global_buffers[NonUniformResourceIndex(id)]; }
+
+public struct Buffer<T>
+{
+    public uint64_t address;
+
+    public __subscript(uint i)->T
+    {
+        get {
+            return load_at(i * sizeof(T));
+        }
+    }
+
+    public T load_at(uint byte_offset)
+    {
+        Ptr<T> p = (Ptr<T>)(address + byte_offset);
+        return *p;
+    }
+}
+
+public Buffer<T> getBufferAs<T>(uint64_t address)
+{
+    Buffer<T> b;
+    b.address = address;
+    return b;
+}
+
+public struct Texture
+{
+    public uint tex;
+    public uint sampler;
+
+    public Texture2D tex2d() { return getTexture(tex); }
+    public SamplerState samplerState() { return getSampler(sampler); }
+    public float4 sample(float2 uv) { return getTexture(tex).Sample(getSampler(sampler), uv); }
+}
 
 public struct Vertex
 {
@@ -36,14 +68,15 @@ public struct ObjectData
 {
     public float4x4 model_matrix;
     public float4x4 normal_matrix;
+    public uint64_t vertex_buffer;
+    public uint64_t index_buffer;
     public uint material_offset;
-    public uint vertex_buffer_id;
-    public uint index_buffer_id;
     public uint index_count;
     public uint vertex_count;
     public float bounding_sphere_radius;
     public uint pipeline_index;
     public uint flags; // bit0 = shadow caster
+    public uint2 _pad;
     public float4 bounding_sphere_center;
 };
 
@@ -54,58 +87,44 @@ public struct GlobalData
     public float4x4 view_proj;
     public float4 camera_pos;
     public float4 frustum_planes[6];
+    public float4x4 light_view_proj;
+    public uint64_t dir_light_buffer;
+    public uint64_t point_light_buffer;
+    public uint64_t spot_light_buffer;
+
     public float time;
-
-    public uint dir_light_buffer_id;
     public uint dir_light_count;
-
-    public uint point_light_buffer_id;
     public uint point_light_count;
-
-    public uint spot_light_buffer_id;
     public uint spot_light_count;
-
     public uint object_count;
     public uint active_pipeline_count;
     public uint cull_flags;    // bit0 = shadow only view
     public uint shadow_map_id; // bindless texture id of the dir shadowmap
-
-    public float4x4 light_view_proj; // world to light clip
 };
 
 public struct PushConstants
 {
-    public uint object_buffer_id;
-    public uint material_buffer_id;
+    public uint64_t object_buffer;
+    public uint64_t material_buffer;
     public uint custom_data;
-    public uint _pad;
+    public uint texture_id;
 };
 
 [[vk::push_constant]]
 public ConstantBuffer<PushConstants> pc;
 
-public ObjectData getObjectData(uint object_id)
+public ObjectData getObjectData(uint object_id) { return getBufferAs<ObjectData>(pc.object_buffer)[object_id]; }
+
+public Vertex getVertex(uint64_t vertex_buffer, uint vertex_id)
+{ return getBufferAs<Vertex>(vertex_buffer)[vertex_id]; }
+
+public Vertex getIndexedVertex(uint64_t vertex_buffer, uint64_t index_buffer, uint vertex_id)
 {
-    uint byte_offset = object_id * sizeof(ObjectData);
-    return getBuffer(pc.object_buffer_id).Load<ObjectData>(byte_offset);
+    uint actual_vertex_index = getBufferAs<uint>(index_buffer)[vertex_id];
+    return getBufferAs<Vertex>(vertex_buffer)[actual_vertex_index];
 }
 
-public Vertex getVertex(uint vertex_buffer_id, uint vertex_id)
-{
-    uint byte_offset = vertex_id * sizeof(Vertex);
-    return getBuffer(vertex_buffer_id).Load<Vertex>(byte_offset);
-}
-
-public Vertex getIndexedVertex(uint vertex_buffer_id, uint index_buffer_id, uint vertex_id)
-{
-    uint index_byte_offset = vertex_id * 4;
-    uint actual_vertex_index = getBuffer(index_buffer_id).Load<uint>(index_byte_offset);
-
-    uint vertex_byte_offset = actual_vertex_index * sizeof(Vertex);
-    return getBuffer(vertex_buffer_id).Load<Vertex>(vertex_byte_offset);
-}
-
-public T getMaterial<T>(uint byte_offset) { return getBuffer(pc.material_buffer_id).Load<T>(byte_offset); }
+public T getMaterial<T>(uint byte_offset) { return getBufferAs<T>(pc.material_buffer).load_at(byte_offset); }
 
 public VertexOut defaultVertexTransform(uint vertex_id, uint instance_id, uint base_instance)
 {
@@ -113,7 +132,7 @@ public VertexOut defaultVertexTransform(uint vertex_id, uint instance_id, uint b
 
     ObjectData obj = getObjectData(actual_instance_id);
 
-    Vertex vertex = getIndexedVertex(obj.vertex_buffer_id, obj.index_buffer_id, vertex_id);
+    Vertex vertex = getIndexedVertex(obj.vertex_buffer, obj.index_buffer, vertex_id);
 
     float4 world_pos = mul(float4(vertex.position, 1.0f), obj.model_matrix);
 

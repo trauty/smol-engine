@@ -45,7 +45,7 @@ namespace smol::renderer
         VkBufferCreateInfo buffer_info = {
             .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
             .size = capacity,
-            .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+            .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
         };
 
         VmaAllocationCreateInfo alloc_info = {
@@ -58,34 +58,12 @@ namespace smol::renderer
 
         mapped_mem = mat_alloc_info.pMappedData;
 
-        bindless_id = res_system.buffer_heap.acquire();
-
-        VkDescriptorBufferInfo desc_info = {
-            .buffer = buffer,
-            .offset = 0,
-            .range = VK_WHOLE_SIZE,
-        };
-
-        VkWriteDescriptorSet write_desc = {
-            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = res_system.global_set,
-            .dstBinding = STORAGE_BUFFERS_BINDING_POINT,
-            .dstArrayElement = bindless_id,
-            .descriptorCount = 1,
-            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            .pBufferInfo = &desc_info,
-        };
-
-        vkUpdateDescriptorSets(ctx.device, 1, &write_desc, 0, nullptr);
+        device_address = get_buffer_address(buffer);
     }
 
     void material_heap_t::shutdown()
     {
-        if (buffer != VK_NULL_HANDLE)
-        {
-            vmaDestroyBuffer(ctx.allocator, buffer, allocation);
-            res_system.buffer_heap.release(bindless_id);
-        }
+        if (buffer != VK_NULL_HANDLE) { vmaDestroyBuffer(ctx.allocator, buffer, allocation); }
     }
 
     u32_t material_heap_t::allocate(u32_t size)
@@ -156,15 +134,15 @@ namespace smol::renderer
 
     void init_resources()
     {
-        VkDescriptorSetLayoutBinding bindings[4] = {};
+        VkDescriptorSetLayoutBinding bindings[3] = {};
 
-        bindings[0] = {0, VK_DESCRIPTOR_TYPE_SAMPLER, MAX_SAMPLERS, VK_SHADER_STAGE_ALL, nullptr};
-        bindings[1] = {1, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, MAX_SAMPLED_TEXTURES, VK_SHADER_STAGE_ALL, nullptr};
-        bindings[2] = {2, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, MAX_STORAGE_TEXTURES, VK_SHADER_STAGE_ALL, nullptr};
-        bindings[3] = {3, VK_DESCRIPTOR_TYPE_STORAGE_BUFFER, MAX_SSBOS, VK_SHADER_STAGE_ALL, nullptr};
+        bindings[0] = {0, VK_DESCRIPTOR_TYPE_SAMPLER, res_system.max_samplers, VK_SHADER_STAGE_ALL, nullptr};
+        bindings[1] = {1, VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE, res_system.max_sampled_textures, VK_SHADER_STAGE_ALL,
+                       nullptr};
+        bindings[2] = {2, VK_DESCRIPTOR_TYPE_STORAGE_IMAGE, res_system.max_storage_images, VK_SHADER_STAGE_ALL,
+                       nullptr};
 
-        VkDescriptorBindingFlags flags[4] = {
-            VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT,
+        VkDescriptorBindingFlags flags[3] = {
             VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT,
             VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT,
             VK_DESCRIPTOR_BINDING_PARTIALLY_BOUND_BIT | VK_DESCRIPTOR_BINDING_UPDATE_AFTER_BIND_BIT,
@@ -172,7 +150,7 @@ namespace smol::renderer
 
         VkDescriptorSetLayoutBindingFlagsCreateInfo flags_info = {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_BINDING_FLAGS_CREATE_INFO,
-            .bindingCount = 4,
+            .bindingCount = 3,
             .pBindingFlags = flags,
         };
 
@@ -180,7 +158,7 @@ namespace smol::renderer
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO,
             .pNext = &flags_info,
             .flags = VK_DESCRIPTOR_SET_LAYOUT_CREATE_UPDATE_AFTER_BIND_POOL_BIT,
-            .bindingCount = 4,
+            .bindingCount = 3,
             .pBindings = bindings,
         };
 
@@ -198,19 +176,18 @@ namespace smol::renderer
 
         VK_CHECK(vkCreateDescriptorSetLayout(ctx.device, &frame_layout_info, nullptr, &res_system.frame_layout));
 
-        VkDescriptorPoolSize global_pool_sizes[5] = {
-            {VK_DESCRIPTOR_TYPE_SAMPLER,                MAX_SAMPLERS        },
-            {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,          MAX_SAMPLED_TEXTURES},
-            {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,          MAX_STORAGE_TEXTURES},
-            {VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,         MAX_SSBOS           },
-            {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1                   },
+        VkDescriptorPoolSize global_pool_sizes[4] = {
+            {VK_DESCRIPTOR_TYPE_SAMPLER,                res_system.max_samplers        },
+            {VK_DESCRIPTOR_TYPE_SAMPLED_IMAGE,          res_system.max_sampled_textures},
+            {VK_DESCRIPTOR_TYPE_STORAGE_IMAGE,          res_system.max_storage_images  },
+            {VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER_DYNAMIC, 1                              },
         };
 
         VkDescriptorPoolCreateInfo global_pool_info = {
             .sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO,
             .flags = VK_DESCRIPTOR_POOL_CREATE_UPDATE_AFTER_BIND_BIT,
             .maxSets = 2,
-            .poolSizeCount = 5,
+            .poolSizeCount = 4,
             .pPoolSizes = global_pool_sizes,
         };
 
@@ -246,11 +223,10 @@ namespace smol::renderer
 
         VK_CHECK(vkCreateDescriptorPool(ctx.device, &instance_pool_info, nullptr, &res_system.instance_pool));
 
-        res_system.texture_heap.init(MAX_SAMPLED_TEXTURES);
-        res_system.storage_image_heap.init(MAX_STORAGE_TEXTURES);
-        res_system.buffer_heap.init(MAX_SSBOS);
+        res_system.texture_heap.init(res_system.max_sampled_textures);
+        res_system.storage_image_heap.init(res_system.max_storage_images);
 
-        res_system.material_heap.init(MATERIAL_HEAP_SIZE);
+        res_system.material_heap.init(res_system.material_heap_size);
 
         VkSemaphoreTypeCreateInfo sem_type_info = {
             .sType = VK_STRUCTURE_TYPE_SEMAPHORE_TYPE_CREATE_INFO,
@@ -275,7 +251,6 @@ namespace smol::renderer
 
         res_system.texture_heap.free_indices.clear();
         res_system.storage_image_heap.free_indices.clear();
-        res_system.buffer_heap.free_indices.clear();
 
         res_system.material_heap.shutdown();
 
@@ -303,7 +278,6 @@ namespace smol::renderer
             case smol::renderer::resource_type_e::BUFFER:
             {
                 vmaDestroyBuffer(ctx.allocator, del.handle.buffer.buffer, del.handle.buffer.allocation);
-                if (del.bindless_id != BINDLESS_NULL_HANDLE) { buffer_heap.release(del.bindless_id); }
                 break;
             }
 

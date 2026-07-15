@@ -31,8 +31,8 @@ namespace smol
         VkBuffer index_buffer = VK_NULL_HANDLE;
         VmaAllocation index_allocation = VK_NULL_HANDLE;
 
-        u32_t vertex_bindless_id = 0xffffffff;
-        u32_t index_bindless_id = 0xffffffff;
+        VkDeviceAddress vertex_buffer_address = 0;
+        VkDeviceAddress index_buffer_address = 0;
     };
 
     template <>

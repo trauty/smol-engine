@@ -56,6 +56,7 @@ namespace smol::renderer
 
     void create_buffer(VkDeviceSize size, VkBufferUsageFlags buffer_usage, VmaMemoryUsage mem_usage, VkBuffer& buffer,
                        VmaAllocation& allocation);
+    VkDeviceAddress get_buffer_address(VkBuffer buffer);
     void create_image(u32 width, u32 height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage,
                       VkMemoryPropertyFlags props, VkImage& image, VkDeviceMemory& image_mem);
 

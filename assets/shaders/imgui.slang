@@ -6,7 +6,7 @@ struct ImGuiShader
 {
     float2 scale;
     float2 translate;
-    uint vertex_buffer_id;
+    uint64_t vertex_buffer;
 };
 
 struct ImGuiVertexOut
@@ -22,12 +22,12 @@ ImGuiVertexOut vertexMain(uint vertex_id: SV_VertexID)
     ImGuiShader mat = getMaterial<ImGuiShader>(pc.custom_data);
 
     uint byte_offset = vertex_id * 20;
-    float2 pos = float2(asfloat(getBuffer(mat.vertex_buffer_id).Load(byte_offset)),
-                        asfloat(getBuffer(mat.vertex_buffer_id).Load(byte_offset + 4)));
+    float2 pos = float2(asfloat(getBufferAs<uint>(mat.vertex_buffer).load_at(byte_offset)),
+                        asfloat(getBufferAs<uint>(mat.vertex_buffer).load_at(byte_offset + 4)));
 
-    float2 uv = float2(asfloat(getBuffer(mat.vertex_buffer_id).Load(byte_offset + 8)),
-                       asfloat(getBuffer(mat.vertex_buffer_id).Load(byte_offset + 12)));
-    uint col = getBuffer(mat.vertex_buffer_id).Load(byte_offset + 16);
+    float2 uv = float2(asfloat(getBufferAs<uint>(mat.vertex_buffer).load_at(byte_offset + 8)),
+                       asfloat(getBufferAs<uint>(mat.vertex_buffer).load_at(byte_offset + 12)));
+    uint col = getBufferAs<uint>(mat.vertex_buffer).load_at(byte_offset + 16);
 
     float4 color = float4(float(col & 0xff) / 255.0f, float((col >> 8) & 0xff) / 255.0f,
                           float((col >> 16) & 0xff) / 255.0f, float((col >> 24) & 0xff) / 255.0f);
@@ -50,7 +50,7 @@ struct FragmentOut
 [shader("fragment")]
 FragmentOut fragmentMain(ImGuiVertexOut input)
 {
-    uint texture_id = pc.object_buffer_id;
+    uint texture_id = pc.texture_id;
     uint sampler_id = 0;
 
     FragmentOut out;

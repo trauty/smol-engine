@@ -1,7 +1,6 @@
 #include "imgui_backend.h"
 
 #include "imgui/imgui.h"
-#include "smol/asset.h"
 #include "smol/assets/material.h"
 #include "smol/assets/shader.h"
 #include "smol/defines.h"
@@ -36,7 +35,6 @@ namespace smol::editor::imgui
         VmaAllocation vertex_alloc[renderer::MAX_FRAMES_IN_FLIGHT] = {VK_NULL_HANDLE};
         void* vertex_mapped[renderer::MAX_FRAMES_IN_FLIGHT] = {nullptr};
         size_t vertex_buffer_size[renderer::MAX_FRAMES_IN_FLIGHT] = {0};
-        u32_t vertex_buffer_bindless_id[renderer::MAX_FRAMES_IN_FLIGHT];
 
         VkBuffer index_buffer[renderer::MAX_FRAMES_IN_FLIGHT] = {VK_NULL_HANDLE};
         VmaAllocation index_alloc[renderer::MAX_FRAMES_IN_FLIGHT] = {VK_NULL_HANDLE};
@@ -50,10 +48,6 @@ namespace smol::editor::imgui
 
     void init()
     {
-        for (u32_t i = 0; i < renderer::MAX_FRAMES_IN_FLIGHT; i++)
-        {
-            ctx.vertex_buffer_bindless_id[i] = renderer::BINDLESS_NULL_HANDLE;
-        }
 
         ctx.shader = smol::engine::get_asset_registry().load_sync<shader_t>("engine://assets/shaders/imgui.slang");
         ctx.material = smol::engine::get_asset_registry().load_sync<material_t>("imgui_mat", ctx.shader);
@@ -229,7 +223,7 @@ namespace smol::editor::imgui
                         VkBufferCreateInfo buf_info = {
                             .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
                             .size = vertex_size + 5000,
-                            .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                            .usage = VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
                         };
                         VmaAllocationCreateInfo alloc_info = {
                             .flags = VMA_ALLOCATION_CREATE_MAPPED_BIT |
@@ -243,23 +237,6 @@ namespace smol::editor::imgui
                                                  &vma_alloc_info));
                         ctx.vertex_mapped[cur_frame] = vma_alloc_info.pMappedData;
                         ctx.vertex_buffer_size[cur_frame] = vertex_size + 5000;
-
-                        if (ctx.vertex_buffer_bindless_id[cur_frame] == renderer::BINDLESS_NULL_HANDLE)
-                        {
-                            ctx.vertex_buffer_bindless_id[cur_frame] = renderer::res_system.buffer_heap.acquire();
-                        }
-
-                        VkDescriptorBufferInfo dbi = {ctx.vertex_buffer[cur_frame], 0, VK_WHOLE_SIZE};
-                        VkWriteDescriptorSet write_desc = {
-                            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                            .dstSet = renderer::res_system.global_set,
-                            .dstBinding = renderer::STORAGE_BUFFERS_BINDING_POINT,
-                            .dstArrayElement = ctx.vertex_buffer_bindless_id[cur_frame],
-                            .descriptorCount = 1,
-                            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                            .pBufferInfo = &dbi,
-                        };
-                        vkUpdateDescriptorSets(renderer::ctx.device, 1, &write_desc, 0, nullptr);
                     }
 
                     if (ctx.index_buffer_size[cur_frame] < index_size)
@@ -321,7 +298,7 @@ namespace smol::editor::imgui
 
                     mat->set_property("scale"_h, scale);
                     mat->set_property("translate"_h, translate);
-                    mat->set_property("vertex_buffer_id"_h, ctx.vertex_buffer_bindless_id[cur_frame]);
+                    mat->set_property("vertex_buffer"_h, renderer::get_buffer_address(ctx.vertex_buffer[cur_frame]));
                     mat->sync();
 
                     shader_t* shader = smol::engine::get_asset_registry().get<shader_t>(mat->shader_handle);
@@ -338,7 +315,7 @@ namespace smol::editor::imgui
                     vkCmdBindIndexBuffer(cmd, ctx.index_buffer[cur_frame], 0, VK_INDEX_TYPE_UINT32);
 
                     renderer::push_constants_t pc = {
-                        .material_buffer_id = renderer::res_system.material_heap.bindless_id,
+                        .material_buffer = renderer::res_system.material_heap.device_address,
                         .custom_data = mat->heap_offset[cur_frame],
                     };
 
@@ -375,7 +352,7 @@ namespace smol::editor::imgui
                             };
                             vkCmdSetScissor(cmd, 0, 1, &scissor);
 
-                            pc.object_buffer_id = (u32_t)(intptr_t)cmd_ptr->GetTexID();
+                            pc.texture_id = (u32_t)(intptr_t)cmd_ptr->GetTexID();
                             vkCmdPushConstants(cmd, shader->pipeline_layout,
                                                VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT, 0,
                                                sizeof(renderer::push_constants_t), &pc);
@@ -401,11 +378,6 @@ namespace smol::editor::imgui
             if (ctx.index_buffer[i])
             {
                 vmaDestroyBuffer(renderer::ctx.allocator, ctx.index_buffer[i], ctx.index_alloc[i]);
-            }
-
-            if (ctx.vertex_buffer_bindless_id[i] != renderer::BINDLESS_NULL_HANDLE)
-            {
-                renderer::res_system.buffer_heap.release(ctx.vertex_buffer_bindless_id[i]);
             }
         }
 

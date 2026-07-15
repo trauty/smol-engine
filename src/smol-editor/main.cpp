@@ -10,9 +10,6 @@
 #include "smol-editor/panels/viewport.h"
 #include "smol-editor/systems/camera.h"
 #include "smol/asset_meta.h"
-#include "smol/components/camera.h"
-#include "smol/components/transform.h"
-#include "smol/ecs.h"
 #include "smol/engine.h"
 #include "smol/game.h"
 #include "smol/hash.h"
@@ -30,7 +27,6 @@
 #include "json/json.hpp"
 #include <SDL3/SDL_events.h>
 #include <chrono>
-#include <exception>
 #include <filesystem>
 #include <fstream>
 #include <string>

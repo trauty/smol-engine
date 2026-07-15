@@ -27,7 +27,6 @@ namespace smol::renderer
     constexpr u32_t SAMPLERS_BINDING_POINT = 0;
     constexpr u32_t TEXTURES_BINDING_POINT = 1;
     constexpr u32_t STORAGE_IMAGES_BINDING_POINT = 2;
-    constexpr u32_t STORAGE_BUFFERS_BINDING_POINT = 3;
 
     struct pending_resource_t
     {
@@ -121,7 +120,7 @@ namespace smol::renderer
         VmaAllocation allocation = VK_NULL_HANDLE;
         void* mapped_mem = nullptr;
 
-        u32_t bindless_id = BINDLESS_NULL_HANDLE;
+        VkDeviceAddress device_address = 0;
 
         std::vector<free_block_t> free_blocks;
 
@@ -145,11 +144,15 @@ namespace smol::renderer
 
         VkDescriptorPool instance_pool;
 
-        descriptor_heap_t buffer_heap;
         descriptor_heap_t texture_heap;
         descriptor_heap_t storage_image_heap;
 
         material_heap_t material_heap;
+
+        u32_t max_samplers = MAX_SAMPLERS;
+        u32_t max_sampled_textures = MAX_SAMPLED_TEXTURES;
+        u32_t max_storage_images = MAX_STORAGE_TEXTURES;
+        u32_t material_heap_size = MATERIAL_HEAP_SIZE;
 
         VkSemaphore timeline_semaphore;
         u64_t timeline_value;

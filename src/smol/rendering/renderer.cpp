@@ -122,8 +122,8 @@ namespace smol::renderer
             if (frame_data.object_counter == 0 || frame_data.active_pipelines.empty()) return;
 
             push_constants_t pc_data = {
-                frame_data.object_bindless_id,
-                res_system.material_heap.bindless_id,
+                frame_data.object_buffer_address,
+                res_system.material_heap.device_address,
             };
 
             for (const active_pipeline_t& p : frame_data.active_pipelines)
@@ -169,8 +169,8 @@ namespace smol::renderer
             if (vgr.indirect_buffer == VK_NULL_HANDLE || vgr.draw_counts_buffer == VK_NULL_HANDLE) { return; }
 
             push_constants_t pc_data = {
-                fd.object_bindless_id,
-                res_system.material_heap.bindless_id,
+                fd.object_buffer_address,
+                res_system.material_heap.device_address,
             };
             VkDescriptorSet sets[] = {res_system.global_set, res_system.frame_set};
 
@@ -222,8 +222,8 @@ namespace smol::renderer
                                     &frame_data.global_data_offset);
 
             push_constants_t pc_data = {
-                frame_data.object_bindless_id,
-                res_system.material_heap.bindless_id,
+                frame_data.object_buffer_address,
+                res_system.material_heap.device_address,
                 material->heap_offset[ctx.cur_frame],
             };
 
@@ -266,8 +266,8 @@ namespace smol::renderer
                                     &frame_data.global_data_offset);
 
             push_constants_t pc_data = {
-                frame_data.object_bindless_id,
-                res_system.material_heap.bindless_id,
+                frame_data.object_buffer_address,
+                res_system.material_heap.device_address,
                 material->heap_offset[ctx.cur_frame],
             };
 
@@ -467,13 +467,31 @@ namespace smol::renderer
         VkPhysicalDeviceFeatures2 device_features_check = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2};
         VkPhysicalDeviceDescriptorIndexingFeatures supports_indexing = {
             VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_FEATURES};
+        VkPhysicalDeviceBufferDeviceAddressFeatures supports_bda = {
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_BUFFER_DEVICE_ADDRESS_FEATURES};
+        VkPhysicalDeviceScalarBlockLayoutFeatures supports_scalar = {
+            VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SCALAR_BLOCK_LAYOUT_FEATURES};
         device_features_check.pNext = &supports_indexing;
+        supports_indexing.pNext = &supports_bda;
+        supports_bda.pNext = &supports_scalar;
 
         vkGetPhysicalDeviceFeatures2(ctx.physical_device, &device_features_check);
 
         if (!supports_indexing.runtimeDescriptorArray)
         {
             SMOL_LOG_FATAL("VULKAN", "No GPU with bindless descriptor support found");
+            return false;
+        }
+
+        if (!supports_bda.bufferDeviceAddress)
+        {
+            SMOL_LOG_FATAL("VULKAN", "GPU does not support Buffer Device Address which is required");
+            return false;
+        }
+
+        if (!supports_scalar.scalarBlockLayout)
+        {
+            SMOL_LOG_FATAL("VULKAN", "GPU does not support VK_EXT_scalar_block_layout which is required");
             return false;
         }
 
@@ -516,7 +534,9 @@ namespace smol::renderer
             .descriptorBindingVariableDescriptorCount = VK_TRUE,
 
             .runtimeDescriptorArray = VK_TRUE,
+            .scalarBlockLayout = VK_TRUE,
             .timelineSemaphore = VK_TRUE,
+            .bufferDeviceAddress = VK_TRUE,
         };
 
         VkPhysicalDeviceVulkan13Features vk13_features = {
@@ -549,7 +569,7 @@ namespace smol::renderer
         for (const char* extension : device_exts) { ctx.active_device_exts.push_back(extension); }
 
         VmaAllocatorCreateInfo allocator_info = {};
-        // allocator_info.flags = VMA_ALLOCATOR_CREATE_EXT_MEMORY_BUDGET_BIT;
+        allocator_info.flags = VMA_ALLOCATOR_CREATE_BUFFER_DEVICE_ADDRESS_BIT;
         allocator_info.vulkanApiVersion = VK_API_VERSION_1_3;
         allocator_info.physicalDevice = ctx.physical_device;
         allocator_info.device = ctx.device;
@@ -565,6 +585,37 @@ namespace smol::renderer
         vkGetDeviceQueue(ctx.device, ctx.queue_fam_indices.graphics_family.value(), 0, &ctx.graphics_queue);
         vkGetDeviceQueue(ctx.device, ctx.queue_fam_indices.present_family.value(), 0, &ctx.present_queue);
         vkGetDeviceQueue(ctx.device, ctx.queue_fam_indices.transfer_family.value(), 0, &ctx.transfer_queue);
+
+        {
+            VkPhysicalDeviceDescriptorIndexingProperties idx_props = {
+                VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES};
+            VkPhysicalDeviceProperties2 props2 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &idx_props};
+            vkGetPhysicalDeviceProperties2(ctx.physical_device, &props2);
+
+            auto clamp_cap = [](const char* name, u32_t desired, u32_t set_limit, u32_t stage_limit)
+            {
+                u32_t hw = std::min(set_limit, stage_limit);
+                if (desired > hw)
+                {
+                    SMOL_LOG_WARN("VULKAN", "Bindless capacity '{}' clamped from {} to device limit {}", name, desired,
+                                  hw);
+                    return hw;
+                }
+                return desired;
+            };
+
+            const bindless_limits_t& want = config.bindless_limits;
+            res_system.max_samplers =
+                clamp_cap("samplers", want.max_samplers, idx_props.maxDescriptorSetUpdateAfterBindSamplers,
+                          idx_props.maxPerStageDescriptorUpdateAfterBindSamplers);
+            res_system.max_sampled_textures = clamp_cap("sampled_textures", want.max_sampled_textures,
+                                                        idx_props.maxDescriptorSetUpdateAfterBindSampledImages,
+                                                        idx_props.maxPerStageDescriptorUpdateAfterBindSampledImages);
+            res_system.max_storage_images = clamp_cap("storage_images", want.max_storage_images,
+                                                      idx_props.maxDescriptorSetUpdateAfterBindStorageImages,
+                                                      idx_props.maxPerStageDescriptorUpdateAfterBindStorageImages);
+            res_system.material_heap_size = want.material_heap_size;
+        }
 
         init_resources();
 
@@ -656,7 +707,7 @@ namespace smol::renderer
             VkBufferCreateInfo buf_info = {
                 .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
                 .size = size,
-                .usage = usage,
+                .usage = usage | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
             };
             VmaAllocationCreateInfo alloc_info = {
                 .flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
@@ -1013,13 +1064,13 @@ namespace smol::renderer
         }
 
         frame_globals.dir_light_count = dir_count;
-        frame_globals.dir_light_buffer_id = frame_data.dir_light_bindless_id;
+        frame_globals.dir_light_buffer = frame_data.dir_light_buffer_address;
 
         frame_globals.point_light_count = point_count;
-        frame_globals.point_light_buffer_id = frame_data.point_light_bindless_id;
+        frame_globals.point_light_buffer = frame_data.point_light_buffer_address;
 
         frame_globals.spot_light_count = spot_count;
-        frame_globals.spot_light_buffer_id = frame_data.spot_light_bindless_id;
+        frame_globals.spot_light_buffer = frame_data.spot_light_buffer_address;
 
         auto get_blend_key = [](const std::string& mode) -> u32_t
         {
@@ -1100,8 +1151,8 @@ namespace smol::renderer
             if (!mesh) { continue; }
 
             obj_data.material_offset = mat->heap_offset[ctx.cur_frame];
-            obj_data.vertex_buffer_id = mesh->vertex_bindless_id;
-            obj_data.index_buffer_id = mesh->index_bindless_id;
+            obj_data.vertex_buffer = mesh->vertex_buffer_address;
+            obj_data.index_buffer = mesh->index_buffer_address;
 
             obj_data.vertex_count = mesh->vertex_count;
             obj_data.index_count = mesh->index_count;
@@ -1263,8 +1314,8 @@ namespace smol::renderer
             vgr.culling_instance.bind(cmd);
 
             push_constants_t pc_data = {
-                frame_data.object_bindless_id,
-                res_system.material_heap.bindless_id,
+                frame_data.object_buffer_address,
+                res_system.material_heap.device_address,
                 0,
             };
             vkCmdPushConstants(cmd, culling_shader->pipeline_layout, VK_SHADER_STAGE_COMPUTE_BIT, 0,
@@ -1911,7 +1962,7 @@ namespace smol::renderer
             VkBufferCreateInfo buf_info = {
                 .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
                 .size = size,
-                .usage = usage,
+                .usage = usage | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
             };
             VmaAllocationCreateInfo alloc_info = {
                 .flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
@@ -1922,27 +1973,6 @@ namespace smol::renderer
             VmaAllocationInfo vma_alloc_info;
             VK_CHECK(vmaCreateBuffer(ctx.allocator, &buf_info, &alloc_info, &buffer, &alloc, &vma_alloc_info));
             mapped_mem = vma_alloc_info.pMappedData;
-        };
-
-        auto make_bindless = [](VkBuffer buffer, u32_t& bindless_id)
-        {
-            bindless_id = res_system.buffer_heap.acquire();
-            VkDescriptorBufferInfo desc_info = {
-                .buffer = buffer,
-                .offset = 0,
-                .range = VK_WHOLE_SIZE,
-            };
-            VkWriteDescriptorSet write_desc = {
-                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                .dstSet = res_system.global_set,
-                .dstBinding = STORAGE_BUFFERS_BINDING_POINT,
-                .dstArrayElement = bindless_id,
-                .descriptorCount = 1,
-                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                .pBufferInfo = &desc_info,
-            };
-
-            vkUpdateDescriptorSets(ctx.device, 1, &write_desc, 0, nullptr);
         };
 
         auto create_device_buffer =
@@ -1963,7 +1993,7 @@ namespace smol::renderer
         create_mapped_buffer(sizeof(object_data_t) * ecs::MAX_ENTITIES, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                              frame_data.object_buffer, frame_data.object_allocation,
                              (void*&)frame_data.mapped_object_data);
-        make_bindless(frame_data.object_buffer, frame_data.object_bindless_id);
+        frame_data.object_buffer_address = get_buffer_address(frame_data.object_buffer);
 
         frame_data.indirect_buffer = VK_NULL_HANDLE;
         frame_data.indirect_size = 0;
@@ -1973,7 +2003,6 @@ namespace smol::renderer
 
         create_mapped_buffer(MAX_MATERIAL_BUFFER_SIZE, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT, frame_data.material_buffer,
                              frame_data.material_allocation, (void*&)frame_data.mapped_material_data);
-        make_bindless(frame_data.material_buffer, frame_data.material_bindless_id);
 
         VkSemaphoreCreateInfo sem_info = {VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO};
         VK_CHECK(vkCreateSemaphore(ctx.device, &sem_info, nullptr, &frame_data.swapchain_acquire_semaphore));
@@ -1981,17 +2010,17 @@ namespace smol::renderer
         create_mapped_buffer(sizeof(gpu_directional_light_t) * MAX_DIR_LIGHTS, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                              frame_data.dir_light_buffer, frame_data.dir_light_allocation,
                              (void*&)frame_data.mapped_dir_lights);
-        make_bindless(frame_data.dir_light_buffer, frame_data.dir_light_bindless_id);
+        frame_data.dir_light_buffer_address = get_buffer_address(frame_data.dir_light_buffer);
 
         create_mapped_buffer(sizeof(gpu_point_light_t) * MAX_LIGHTS, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                              frame_data.point_light_buffer, frame_data.point_light_allocation,
                              (void*&)frame_data.mapped_point_lights);
-        make_bindless(frame_data.point_light_buffer, frame_data.point_light_bindless_id);
+        frame_data.point_light_buffer_address = get_buffer_address(frame_data.point_light_buffer);
 
         create_mapped_buffer(sizeof(gpu_spot_light_t) * MAX_LIGHTS, VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
                              frame_data.spot_light_buffer, frame_data.spot_light_allocation,
                              (void*&)frame_data.mapped_spot_lights);
-        make_bindless(frame_data.spot_light_buffer, frame_data.spot_light_bindless_id);
+        frame_data.spot_light_buffer_address = get_buffer_address(frame_data.spot_light_buffer);
 
         frame_data.frame_allocator.init(2048 * 1024);
     }
@@ -2021,7 +2050,6 @@ namespace smol::renderer
         if (frame_data.object_buffer != VK_NULL_HANDLE)
         {
             vmaDestroyBuffer(ctx.allocator, frame_data.object_buffer, frame_data.object_allocation);
-            res_system.buffer_heap.release(frame_data.object_bindless_id);
         }
 
         if (frame_data.indirect_buffer != VK_NULL_HANDLE)
@@ -2051,23 +2079,19 @@ namespace smol::renderer
         if (frame_data.material_buffer != VK_NULL_HANDLE)
         {
             vmaDestroyBuffer(ctx.allocator, frame_data.material_buffer, frame_data.material_allocation);
-            res_system.buffer_heap.release(frame_data.material_bindless_id);
         }
 
         if (frame_data.dir_light_buffer != VK_NULL_HANDLE)
         {
             vmaDestroyBuffer(ctx.allocator, frame_data.dir_light_buffer, frame_data.dir_light_allocation);
-            res_system.buffer_heap.release(frame_data.dir_light_bindless_id);
         }
         if (frame_data.point_light_buffer != VK_NULL_HANDLE)
         {
             vmaDestroyBuffer(ctx.allocator, frame_data.point_light_buffer, frame_data.point_light_allocation);
-            res_system.buffer_heap.release(frame_data.point_light_bindless_id);
         }
         if (frame_data.spot_light_buffer != VK_NULL_HANDLE)
         {
             vmaDestroyBuffer(ctx.allocator, frame_data.spot_light_buffer, frame_data.spot_light_allocation);
-            res_system.buffer_heap.release(frame_data.spot_light_bindless_id);
         }
     }
 
@@ -2077,13 +2101,22 @@ namespace smol::renderer
         VkBufferCreateInfo buffer_info = {
             .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
             .size = size,
-            .usage = buffer_usage,
+            .usage = buffer_usage | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
             .sharingMode = VK_SHARING_MODE_EXCLUSIVE, // should be a parameter
         };
 
         VmaAllocationCreateInfo alloc_info = {.usage = mem_usage};
 
         VK_CHECK(vmaCreateBuffer(ctx.allocator, &buffer_info, &alloc_info, &buffer, &allocation, nullptr));
+    }
+
+    VkDeviceAddress get_buffer_address(VkBuffer buffer)
+    {
+        VkBufferDeviceAddressInfo info = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_DEVICE_ADDRESS_INFO,
+            .buffer = buffer,
+        };
+        return vkGetBufferDeviceAddress(ctx.device, &info);
     }
 
     void create_image(u32 width, u32 height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage,

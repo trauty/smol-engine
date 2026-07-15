@@ -6,7 +6,6 @@ namespace smol::renderer
 {
     constexpr u32_t MAX_SAMPLED_TEXTURES = 100000;
     constexpr u32_t MAX_STORAGE_TEXTURES = 4096;
-    constexpr u32_t MAX_SSBOS = 100000;
     constexpr u32_t MAX_SAMPLERS = 32;
 
     constexpr u32_t MAX_MATERIAL_COUNT = 4096;

@@ -64,8 +64,7 @@ public float3 applyBlinnPhongLighting(Surface surface, float3 world_pos)
 
     for (uint d = 0; d < globals.dir_light_count; d++)
     {
-        DirectionalLight dl =
-            getBuffer(globals.dir_light_buffer_id).Load<DirectionalLight>(d * sizeof(DirectionalLight));
+        DirectionalLight dl = getBufferAs<DirectionalLight>(globals.dir_light_buffer)[d];
 
         // only first dir light owns shadowmap
         float shadow = (d == 0) ? sampleDirectionalShadow(world_pos) : 1.0f;
@@ -74,13 +73,13 @@ public float3 applyBlinnPhongLighting(Surface surface, float3 world_pos)
 
     for (uint p = 0; p < globals.point_light_count; p++)
     {
-        PointLight pl = getBuffer(globals.point_light_buffer_id).Load<PointLight>(p * sizeof(PointLight));
+        PointLight pl = getBufferAs<PointLight>(globals.point_light_buffer)[p];
         final_color += evaluateBlinnPhong(surface, pl.evaluate(world_pos));
     }
 
     for (uint s = 0; s < globals.spot_light_count; s++)
     {
-        SpotLight sl = getBuffer(globals.spot_light_buffer_id).Load<SpotLight>(s * sizeof(SpotLight));
+        SpotLight sl = getBufferAs<SpotLight>(globals.spot_light_buffer)[s];
         final_color += evaluateBlinnPhong(surface, sl.evaluate(world_pos));
     }
 

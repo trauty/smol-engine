@@ -112,6 +112,33 @@ namespace smol::cooker::shader
         }
     }
 
+    void flatten_members(slang::TypeLayoutReflection* type_layout, const std::string& prefix, u32_t base_offset,
+                         std::unordered_map<u32_t, shader_member_t>& members)
+    {
+        u32_t field_count = type_layout->getFieldCount();
+        for (u32_t i = 0; i < field_count; i++)
+        {
+            slang::VariableLayoutReflection* field = type_layout->getFieldByIndex(i);
+            std::string field_name = field->getVariable()->getName();
+            std::string full_name = prefix.empty() ? field_name : prefix + "_" + field_name;
+            u32_t field_offset = base_offset + static_cast<u32_t>(field->getOffset());
+            slang::TypeLayoutReflection* field_type_layout = field->getTypeLayout();
+
+            if (field_type_layout->getType()->getKind() == slang::TypeReflection::Kind::Struct)
+            {
+                flatten_members(field_type_layout, full_name, field_offset, members);
+            }
+            else
+            {
+                shader_member_t member;
+                member.name = full_name;
+                member.offset = field_offset;
+                member.size = static_cast<u32_t>(field_type_layout->getSize());
+                members[smol::hash_string(full_name)] = member;
+            }
+        }
+    }
+
     std::vector<shader_module_info_t> reflect_slang_layout(slang::ProgramLayout* layout)
     {
         std::vector<shader_module_info_t> res;
@@ -173,15 +200,7 @@ namespace smol::cooker::shader
                 slang::TypeLayoutReflection* struct_layout = layout->getTypeLayout(target_type);
                 shader_info.size = struct_layout->getSize();
 
-                for (u32_t field_idx = 0; field_idx < struct_layout->getFieldCount(); field_idx++)
-                {
-                    slang::VariableLayoutReflection* field_layout = struct_layout->getFieldByIndex(field_idx);
-                    shader_member_t member;
-                    member.name = field_layout->getVariable()->getName();
-                    member.offset = static_cast<u32_t>(field_layout->getOffset());
-                    member.size = static_cast<u32_t>(field_layout->getTypeLayout()->getSize());
-                    shader_info.members[smol::hash_string(member.name)] = member;
-                }
+                flatten_members(struct_layout, "", 0, shader_info.members);
 
                 SMOL_LOG_INFO("SHADER_COOKER", "Discovered shader module: {} (size: {} bytes)", shader_info.name,
                               shader_info.size);

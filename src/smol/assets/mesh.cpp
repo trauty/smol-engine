@@ -75,7 +75,7 @@ namespace smol
             .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
             .size = vertex_size,
             .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
-                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT,
+                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
         };
         VmaAllocationCreateInfo mesh_alloc_info = {
             .usage = VMA_MEMORY_USAGE_AUTO,
@@ -88,7 +88,7 @@ namespace smol
         {
             mesh_info.size = index_size;
             mesh_info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
-                              VK_BUFFER_USAGE_STORAGE_BUFFER_BIT;
+                              VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
             VK_CHECK(vmaCreateBuffer(renderer::ctx.allocator, &mesh_info, &mesh_alloc_info, &asset.index_buffer,
                                      &asset.index_allocation, nullptr));
         }
@@ -159,34 +159,9 @@ namespace smol
             }
         }
 
-        asset.vertex_bindless_id = renderer::res_system.buffer_heap.acquire();
-        VkDescriptorBufferInfo vertex_info = {.buffer = asset.vertex_buffer, .offset = 0, .range = VK_WHOLE_SIZE};
-        VkWriteDescriptorSet vertex_write = {
-            .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-            .dstSet = renderer::res_system.global_set,
-            .dstBinding = renderer::STORAGE_BUFFERS_BINDING_POINT,
-            .dstArrayElement = asset.vertex_bindless_id,
-            .descriptorCount = 1,
-            .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-            .pBufferInfo = &vertex_info,
-        };
-        vkUpdateDescriptorSets(renderer::ctx.device, 1, &vertex_write, 0, nullptr);
+        asset.vertex_buffer_address = renderer::get_buffer_address(asset.vertex_buffer);
 
-        if (index_size > 0)
-        {
-            asset.index_bindless_id = renderer::res_system.buffer_heap.acquire();
-            VkDescriptorBufferInfo index_info = {.buffer = asset.index_buffer, .offset = 0, .range = VK_WHOLE_SIZE};
-            VkWriteDescriptorSet index_write = {
-                .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,
-                .dstSet = renderer::res_system.global_set,
-                .dstBinding = renderer::STORAGE_BUFFERS_BINDING_POINT,
-                .dstArrayElement = asset.index_bindless_id,
-                .descriptorCount = 1,
-                .descriptorType = VK_DESCRIPTOR_TYPE_STORAGE_BUFFER,
-                .pBufferInfo = &index_info,
-            };
-            vkUpdateDescriptorSets(renderer::ctx.device, 1, &index_write, 0, nullptr);
-        }
+        if (index_size > 0) { asset.index_buffer_address = renderer::get_buffer_address(asset.index_buffer); }
 
         {
             std::scoped_lock lock(renderer::res_system.deletion_mutex);
@@ -210,7 +185,6 @@ namespace smol
             renderer::res_system.deletion_queue.push_back({
                 .type = renderer::resource_type_e::BUFFER,
                 .handle = {.buffer = {mesh.vertex_buffer, mesh.vertex_allocation}},
-                .bindless_id = mesh.vertex_bindless_id,
                 .gpu_timeline_value = renderer::res_system.timeline_value,
             });
         }
@@ -220,7 +194,6 @@ namespace smol
             renderer::res_system.deletion_queue.push_back({
                 .type = renderer::resource_type_e::BUFFER,
                 .handle = {.buffer = {mesh.index_buffer, mesh.index_allocation}},
-                .bindless_id = mesh.index_bindless_id,
                 .gpu_timeline_value = renderer::res_system.timeline_value,
             });
         }

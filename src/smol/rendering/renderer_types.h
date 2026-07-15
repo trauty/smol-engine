@@ -76,10 +76,10 @@ namespace smol::renderer
 
     struct push_constants_t
     {
-        u32_t object_buffer_id = 0;
-        u32_t material_buffer_id = 0;
+        VkDeviceAddress object_buffer = 0;
+        VkDeviceAddress material_buffer = 0;
         u32_t custom_data = 0;
-        u32_t _pad = 0;
+        u32_t texture_id = 0;
     };
 
     struct alignas(16) gpu_mat4_t
@@ -138,32 +138,29 @@ namespace smol::renderer
         gpu_mat4_t view_proj;
         gpu_vec4_t camera_pos;
         gpu_vec4_t frustum_planes[6];
+        gpu_mat4_t light_view_proj = {};
+
+        VkDeviceAddress dir_light_buffer = 0;
+        VkDeviceAddress point_light_buffer = 0;
+        VkDeviceAddress spot_light_buffer = 0;
+
         f32 time;
-
-        u32_t dir_light_buffer_id;
         u32_t dir_light_count;
-
-        u32_t point_light_buffer_id;
         u32_t point_light_count;
-
-        u32_t spot_light_buffer_id;
         u32_t spot_light_count;
-
         u32_t object_count;
         u32_t active_pipeline_count;
         u32_t cull_flags;    // bit0 = shadow only view
         u32_t shadow_map_id; // bindless id of the dir shadowmap
-
-        gpu_mat4_t light_view_proj = {}; // raw world to light clipspace
     };
 
     struct object_data_t
     {
         gpu_mat4_t model_matrix;
         gpu_mat4_t normal_matrix;
+        VkDeviceAddress vertex_buffer;
+        VkDeviceAddress index_buffer;
         u32_t material_offset;
-        u32_t vertex_buffer_id;
-        u32_t index_buffer_id;
         u32_t index_count;
         u32_t vertex_count;
         f32 bounding_sphere_radius;
@@ -171,6 +168,25 @@ namespace smol::renderer
         u32_t flags; // bit0 = shadow caster
         gpu_vec4_t bounding_sphere_center;
     };
+
+    static_assert(sizeof(object_data_t) == 192);
+    static_assert(offsetof(object_data_t, vertex_buffer) == 128);
+    static_assert(offsetof(object_data_t, index_buffer) == 136);
+    static_assert(offsetof(object_data_t, material_offset) == 144);
+    static_assert(offsetof(object_data_t, bounding_sphere_center) == 176);
+
+    static_assert(sizeof(push_constants_t) == 24);
+    static_assert(offsetof(push_constants_t, object_buffer) == 0);
+    static_assert(offsetof(push_constants_t, material_buffer) == 8);
+    static_assert(offsetof(push_constants_t, custom_data) == 16);
+    static_assert(offsetof(push_constants_t, texture_id) == 20);
+
+    static_assert(offsetof(global_data_t, light_view_proj) == 304);
+    static_assert(offsetof(global_data_t, dir_light_buffer) == 368);
+    static_assert(offsetof(global_data_t, point_light_buffer) == 376);
+    static_assert(offsetof(global_data_t, spot_light_buffer) == 384);
+    static_assert(offsetof(global_data_t, time) == 392);
+    static_assert(offsetof(global_data_t, shadow_map_id) == 420);
 
     struct image_desc_t
     {
@@ -264,7 +280,7 @@ namespace smol::renderer
         VkBuffer object_buffer = VK_NULL_HANDLE;
         VmaAllocation object_allocation = VK_NULL_HANDLE;
         object_data_t* mapped_object_data = nullptr;
-        u32_t object_bindless_id = BINDLESS_NULL_HANDLE;
+        VkDeviceAddress object_buffer_address = 0;
 
         u32_t object_counter = 0;
 
@@ -282,24 +298,23 @@ namespace smol::renderer
         VkBuffer material_buffer = VK_NULL_HANDLE;
         VmaAllocation material_allocation = VK_NULL_HANDLE;
         u8* mapped_material_data = nullptr;
-        u32_t material_bindless_id = BINDLESS_NULL_HANDLE;
 
         transient_pool_t transient_pool;
 
         VkBuffer dir_light_buffer = VK_NULL_HANDLE;
         VmaAllocation dir_light_allocation = VK_NULL_HANDLE;
         gpu_directional_light_t* mapped_dir_lights = nullptr;
-        u32_t dir_light_bindless_id = BINDLESS_NULL_HANDLE;
+        VkDeviceAddress dir_light_buffer_address = 0;
 
         VkBuffer point_light_buffer = VK_NULL_HANDLE;
         VmaAllocation point_light_allocation = VK_NULL_HANDLE;
         gpu_point_light_t* mapped_point_lights = nullptr;
-        u32_t point_light_bindless_id = BINDLESS_NULL_HANDLE;
+        VkDeviceAddress point_light_buffer_address = 0;
 
         VkBuffer spot_light_buffer = VK_NULL_HANDLE;
         VmaAllocation spot_light_allocation = VK_NULL_HANDLE;
         gpu_spot_light_t* mapped_spot_lights = nullptr;
-        u32_t spot_light_bindless_id = BINDLESS_NULL_HANDLE;
+        VkDeviceAddress spot_light_buffer_address = 0;
 
         smol::linear_allocator_t frame_allocator;
     };
@@ -359,11 +374,20 @@ namespace smol::renderer
         std::unordered_map<u32_t, u32_t> output_texture_ids;
     };
 
+    struct bindless_limits_t
+    {
+        u32_t max_samplers = MAX_SAMPLERS;
+        u32_t max_sampled_textures = MAX_SAMPLED_TEXTURES;
+        u32_t max_storage_images = MAX_STORAGE_TEXTURES;
+        u32_t material_heap_size = 24u * 1024u * 1024u;
+    };
+
     struct context_config_t
     {
         std::string app_name = "smol-engine";
         bool enable_validation = true;
         std::vector<const char*> required_instance_exts;
         std::vector<const char*> required_device_exts;
+        bindless_limits_t bindless_limits = {};
     };
 } // namespace smol::renderer
