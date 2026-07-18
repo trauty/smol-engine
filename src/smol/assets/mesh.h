@@ -10,14 +10,14 @@
 
 namespace smol
 {
-    struct SMOL_API vertex_t
+    struct SMOL_ENGINE_API vertex_t
     {
         f32 position[3];
         f32 normal[3];
         f32 uv[2];
     };
 
-    struct SMOL_API mesh_t
+    struct SMOL_ENGINE_API mesh_t
     {
         u32_t vertex_count = 0;
         u32_t index_count = 0;
@@ -36,7 +36,7 @@ namespace smol
     };
 
     template <>
-    struct SMOL_API asset_loader_t<mesh_t>
+    struct SMOL_ENGINE_API asset_loader_t<mesh_t>
     {
         static std::optional<mesh_t> load(const std::string& path);
         static void unload(mesh_t& mesh);

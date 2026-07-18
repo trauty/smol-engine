@@ -12,12 +12,14 @@ struct DrawIndirectCommand
 RWStructuredBuffer<uint> draw_counts;
 [[vk::binding(1, 2)]]
 RWStructuredBuffer<DrawIndirectCommand> indirect_commands;
+[[vk::binding(2, 2)]]
+StructuredBuffer<ObjectData> objects; // adreno drivers = garbage
 
-bool frustumCull(float4 sphere_center, float radius, float4[6] frustum_planes)
+bool frustumCull(float4 sphere_center, float radius)
 {
     for (int i = 0; i < 6; ++i)
     {
-        float dist = dot(frustum_planes[i].xyz, sphere_center.xyz) + frustum_planes[i].w;
+        float dist = dot(globals.frustum_planes[i].xyz, sphere_center.xyz) + globals.frustum_planes[i].w;
         if (dist < -radius) { return false; }
     }
 
@@ -30,9 +32,9 @@ void computeMain(uint3 thread_id: SV_DispatchThreadID)
 {
     if (thread_id.x >= globals.object_count) { return; }
 
-    ObjectData obj = getObjectData(thread_id.x);
+    ObjectData obj = objects[thread_id.x];
 
-    bool is_visible = frustumCull(obj.bounding_sphere_center, obj.bounding_sphere_radius, globals.frustum_planes);
+    bool is_visible = frustumCull(obj.bounding_sphere_center, obj.bounding_sphere_radius);
 
     // shadow only skips non casters
     if ((globals.cull_flags & 1u) != 0u && (obj.flags & 1u) == 0u) { is_visible = false; }

@@ -5,6 +5,7 @@ namespace smol
 {
     // SMSH
     constexpr u32_t SMOL_SHADER_MAGIC = 0x48534d53;
+    constexpr u32_t SMOL_SHADER_VERSION = 1;
 
     enum class descriptor_type_e : u32_t
     {
@@ -26,7 +27,8 @@ namespace smol
 
     struct shader_header_t
     {
-        u32_t magic;
+        u32_t magic = SMOL_SHADER_MAGIC;
+        u32_t version = SMOL_SHADER_VERSION;
         bool is_compute;
         bool has_material_data;
         u32_t vert_spirv_size;

@@ -19,7 +19,7 @@ namespace smol
         inline f32 rad_to_deg(f32 rad) { return glm_deg(rad); }
     } // namespace math
 
-    struct SMOL_API vec2_t
+    struct SMOL_ENGINE_API vec2_t
     {
         float x, y;
 
@@ -71,7 +71,7 @@ namespace smol
 
     inline vec2_t operator*(float scalar, vec2_t v) { return v * scalar; }
 
-    struct SMOL_API vec3_t
+    struct SMOL_ENGINE_API vec3_t
     {
         float x, y, z;
 
@@ -137,7 +137,7 @@ namespace smol
 
     inline vec3_t operator*(float scalar, vec3_t v) { return v * scalar; }
 
-    struct alignas(16) SMOL_API vec4_t
+    struct alignas(16) SMOL_ENGINE_API vec4_t
     {
         float x, y, z, w;
 
@@ -153,7 +153,7 @@ namespace smol
         vec4_t operator*(float scalar) const { return {x * scalar, y * scalar, z * scalar, w * scalar}; }
     };
 
-    struct alignas(16) SMOL_API quat_t
+    struct alignas(16) SMOL_ENGINE_API quat_t
     {
         float x, y, z, w;
 
@@ -232,7 +232,7 @@ namespace smol
         operator float*() const { return const_cast<float*>(&x); }
     };
 
-    struct SMOL_API mat3_t
+    struct SMOL_ENGINE_API mat3_t
     {
         float m00, m01, m02;
         float m10, m11, m12;
@@ -254,7 +254,7 @@ namespace smol
         const float* operator[](int col) const { return const_cast<float*>(&m00 + (col * 3)); }
     };
 
-    struct alignas(32) SMOL_API mat4_t
+    struct alignas(32) SMOL_ENGINE_API mat4_t
     {
         float m00, m01, m02, m03;
         float m10, m11, m12, m13;

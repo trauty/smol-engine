@@ -11,6 +11,8 @@
 
 namespace smol::cooker
 {
+    inline constexpr int COOKER_VERSION = 1;
+
     inline u64_t hash_file(const std::filesystem::path& path)
     {
         std::ifstream file(path, std::ios::binary);
@@ -47,5 +49,8 @@ namespace smol::cooker
 
         bool needs_cooking(const std::string& out_path, const std::vector<std::filesystem::path>& deps);
         void update_cache(const std::string& out_path, const std::vector<std::filesystem::path>& deps);
+
+      private:
+        static std::string combined_dep_hash(const std::vector<std::filesystem::path>& deps);
     };
 } // namespace smol::cooker

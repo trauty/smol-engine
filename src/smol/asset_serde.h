@@ -14,7 +14,7 @@ namespace smol::asset_serde
 {
     using load_fn_t = asset_handle_t (*)(asset_registry_t&, const std::string&);
 
-    SMOL_API void reg(u64_t type_id, load_fn_t load_fn, std::string_view display_name);
-    SMOL_API asset_handle_t load(u64_t type_id, asset_registry_t& reg, const std::string& path);
-    SMOL_API std::string_view display_name(u64_t type_id);
+    SMOL_ENGINE_API void reg(u64_t type_id, load_fn_t load_fn, std::string_view display_name);
+    SMOL_ENGINE_API asset_handle_t load(u64_t type_id, asset_registry_t& reg, const std::string& path);
+    SMOL_ENGINE_API std::string_view display_name(u64_t type_id);
 } // namespace smol::asset_serde

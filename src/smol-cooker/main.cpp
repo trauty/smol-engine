@@ -1,7 +1,7 @@
-
 #include "smol-cooker/cache_manager.h"
 #include "smol-cooker/material_cooker.h"
 #include "smol-cooker/mesh_cooker.h"
+#include "smol-cooker/scene_cooker.h"
 #include "smol-cooker/shader_cooker.h"
 #include "smol-cooker/texture_cooker.h"
 #include "smol/asset_meta.h"
@@ -82,8 +82,6 @@ int main(i32 argc, char** argv)
     std::string vfs_prefix = vfs_prefix_from_output(output_dir);
     nlohmann::json guid_map_data;
 
-    input_dirs.push_back(output_dir);
-
     for (const std::string& dir : input_dirs)
     {
         if (!std::filesystem::exists(dir)) { continue; }
@@ -156,6 +154,16 @@ int main(i32 argc, char** argv)
                 if (cache.needs_cooking(out_path.generic_string(), {path}))
                 {
                     smol::cooker::material::cook_material(path, out_path.generic_string());
+                    cache.update_cache(out_path.generic_string(), {path});
+                }
+            }
+            else if (ext == ".scene")
+            {
+                out_path.replace_extension(".smolscene");
+
+                if (cache.needs_cooking(out_path.generic_string(), {path}))
+                {
+                    smol::cooker::scene::cook_scene(path, out_path.generic_string());
                     cache.update_cache(out_path.generic_string(), {path});
                 }
             }

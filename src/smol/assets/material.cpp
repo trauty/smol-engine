@@ -111,6 +111,13 @@ namespace smol
             return std::nullopt;
         }
 
+        if (header->version != SMOL_MATERIAL_VERSION)
+        {
+            SMOL_LOG_ERROR("MATERIAL", "Unsupported material version {} (engine expects {}), recook: {}",
+                           header->version, SMOL_MATERIAL_VERSION, cooked_path);
+            return std::nullopt;
+        }
+
         u32_t offset = sizeof(material_header_t);
 
         if (offset + header->shader_path_length > bytes.size())

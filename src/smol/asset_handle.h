@@ -10,7 +10,7 @@ namespace smol
 {
     using uuid_t = u64_t;
 
-    struct SMOL_API asset_handle_t
+    struct SMOL_ENGINE_API asset_handle_t
     {
         uuid_t uuid = 0;
         u32_t pool_index = UINT32_MAX;

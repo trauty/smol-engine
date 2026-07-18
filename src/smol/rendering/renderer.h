@@ -14,22 +14,23 @@ namespace smol::renderer
 {
     using graph_builder_func_t = void (*)(rendergraph_t&, ecs::registry_t&);
 
-    SMOL_API void register_renderer_feature(graph_builder_func_t builder);
+    SMOL_ENGINE_API void register_renderer_feature(graph_builder_func_t builder);
 
-    SMOL_API rg_pass_t& add_mesh_pass(rendergraph_t& graph, u32_t name_hash, const char* debug_name,
-                                      const std::string& target_pass_tag, const std::vector<rg_resource_id>& reads,
-                                      const std::vector<rg_resource_id>& writes, rg_resource_id depth);
+    SMOL_ENGINE_API rg_pass_t& add_mesh_pass(rendergraph_t& graph, u32_t name_hash, const char* debug_name,
+                                             const std::string& target_pass_tag,
+                                             const std::vector<rg_resource_id>& reads,
+                                             const std::vector<rg_resource_id>& writes, rg_resource_id depth);
 
-    SMOL_API rg_pass_t&
+    SMOL_ENGINE_API rg_pass_t&
     add_fullscreen_pass(rendergraph_t& graph, u32_t name_hash, const char* debug_name, smol::material_t* material,
                         const std::vector<rg_resource_id>& reads, const std::vector<rg_resource_id>& writes,
                         std::function<void(rendergraph_t&, smol::material_t&)> on_execute = nullptr);
 
-    SMOL_API rg_pass_t& add_compute_pass(rendergraph_t& graph, u32_t name_hash, const char* debug_name,
-                                         smol::material_t* material, u32_t dispatch_x, u32_t dispatch_y,
-                                         u32_t dispatch_z, const std::vector<rg_resource_id>& reads,
-                                         const std::vector<rg_resource_id>& writes,
-                                         std::function<void(rendergraph_t&, smol::material_t&)> on_execute = nullptr);
+    SMOL_ENGINE_API rg_pass_t&
+    add_compute_pass(rendergraph_t& graph, u32_t name_hash, const char* debug_name, smol::material_t* material,
+                     u32_t dispatch_x, u32_t dispatch_y, u32_t dispatch_z, const std::vector<rg_resource_id>& reads,
+                     const std::vector<rg_resource_id>& writes,
+                     std::function<void(rendergraph_t&, smol::material_t&)> on_execute = nullptr);
 
     bool init(const context_config_t& config, SDL_Window* window);
     void reset_assets();
@@ -65,15 +66,15 @@ namespace smol::renderer
 
     VkSampler create_sampler(VkFilter filter, VkSamplerAddressMode address_mode);
 
-    SMOL_API void submit_output_target(u32_t target_hash, VkExtent2D extent);
+    SMOL_ENGINE_API void submit_output_target(u32_t target_hash, VkExtent2D extent);
 
-    SMOL_API u32_t get_target_texture_id(u32_t name_hash);
+    SMOL_ENGINE_API u32_t get_target_texture_id(u32_t name_hash);
 
-    SMOL_API void submit_color_view(u32_t name_hash, const mat4_t& view, const mat4_t& projection,
-                                    const mat4_t& view_proj, const vec3_t& position, u32_t color_target_hash,
-                                    u32_t depth_target_hash, VkExtent2D extent);
-    SMOL_API void submit_shadow_view(u32_t name_hash, const mat4_t& view, const mat4_t& projection,
-                                     u32_t depth_target_hash, VkExtent2D extent, const image_desc_t& depth_desc);
+    SMOL_ENGINE_API void submit_color_view(u32_t name_hash, const mat4_t& view, const mat4_t& projection,
+                                           const mat4_t& view_proj, const vec3_t& position, u32_t color_target_hash,
+                                           u32_t depth_target_hash, VkExtent2D extent);
+    SMOL_ENGINE_API void submit_shadow_view(u32_t name_hash, const mat4_t& view, const mat4_t& projection,
+                                            u32_t depth_target_hash, VkExtent2D extent, const image_desc_t& depth_desc);
 
-    SMOL_API bool get_primary_camera_position(ecs::registry_t& reg, vec3_t& out_pos);
+    SMOL_ENGINE_API bool get_primary_camera_position(ecs::registry_t& reg, vec3_t& out_pos);
 } // namespace smol::renderer

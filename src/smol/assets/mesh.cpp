@@ -34,7 +34,16 @@ namespace smol
 
         if (header.magic != SMOL_MESH_MAGIC)
         {
-            SMOL_LOG_ERROR("MESH", "Invalid .smolmesh file");
+            SMOL_LOG_ERROR("MESH", "Invalid .smolmesh file: {}", cooked_path);
+            SDL_CloseIO(stream);
+            return std::nullopt;
+        }
+
+        if (header.version != SMOL_MESH_VERSION)
+        {
+            SMOL_LOG_ERROR("MESH", "Unsupported .smolmesh version {} (engine expects {}), recook: {}", header.version,
+                           SMOL_MESH_VERSION, cooked_path);
+            SDL_CloseIO(stream);
             return std::nullopt;
         }
 

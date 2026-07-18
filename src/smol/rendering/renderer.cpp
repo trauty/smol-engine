@@ -106,9 +106,10 @@ namespace smol::renderer
 
     void register_renderer_feature(graph_builder_func_t builder) { custom_renderer_features.push_back(builder); }
 
-    SMOL_API rg_pass_t& add_mesh_pass(rendergraph_t& graph, u32_t name_hash, const char* debug_name,
-                                      const std::string& target_pass_tag, const std::vector<rg_resource_id>& reads,
-                                      const std::vector<rg_resource_id>& writes, rg_resource_id depth)
+    SMOL_ENGINE_API rg_pass_t& add_mesh_pass(rendergraph_t& graph, u32_t name_hash, const char* debug_name,
+                                             const std::string& target_pass_tag,
+                                             const std::vector<rg_resource_id>& reads,
+                                             const std::vector<rg_resource_id>& writes, rg_resource_id depth)
     {
         rg_pass_t& pass = graph.add_pass(name_hash, debug_name);
         pass.texture_reads = reads;
@@ -193,10 +194,10 @@ namespace smol::renderer
         };
     }
 
-    SMOL_API rg_pass_t& add_fullscreen_pass(rendergraph_t& graph, u32_t name_hash, const char* debug_name,
-                                            smol::material_t* material, const std::vector<rg_resource_id>& reads,
-                                            const std::vector<rg_resource_id>& writes,
-                                            std::function<void(rendergraph_t&, smol::material_t&)> on_execute)
+    SMOL_ENGINE_API rg_pass_t& add_fullscreen_pass(rendergraph_t& graph, u32_t name_hash, const char* debug_name,
+                                                   smol::material_t* material, const std::vector<rg_resource_id>& reads,
+                                                   const std::vector<rg_resource_id>& writes,
+                                                   std::function<void(rendergraph_t&, smol::material_t&)> on_execute)
     {
         rg_pass_t& pass = graph.add_pass(name_hash, debug_name);
         pass.texture_reads = reads;
@@ -212,9 +213,12 @@ namespace smol::renderer
 
             shader_t* shader = smol::engine::get_asset_registry().get<shader_t>(material->shader_handle);
 
+            VkPipeline pipeline = shader ? shader->get_pipeline(pipeline_variant_e::FORWARD) : VK_NULL_HANDLE;
+            if (pipeline == VK_NULL_HANDLE) { return; }
+
             per_frame_t& frame_data = ctx.per_frame_objects[ctx.cur_frame];
 
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, shader->get_pipeline(pipeline_variant_e::FORWARD));
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_GRAPHICS, pipeline);
 
             VkDescriptorSet sets[] = {res_system.global_set, res_system.frame_set};
 
@@ -236,11 +240,11 @@ namespace smol::renderer
         return pass;
     }
 
-    SMOL_API rg_pass_t& add_compute_pass(rendergraph_t& graph, u32_t name_hash, const char* debug_name,
-                                         smol::material_t* material, u32_t dispatch_x, u32_t dispatch_y,
-                                         u32_t dispatch_z, const std::vector<rg_resource_id>& reads,
-                                         const std::vector<rg_resource_id>& writes,
-                                         std::function<void(rendergraph_t&, smol::material_t&)> on_execute)
+    SMOL_ENGINE_API rg_pass_t& add_compute_pass(rendergraph_t& graph, u32_t name_hash, const char* debug_name,
+                                                smol::material_t* material, u32_t dispatch_x, u32_t dispatch_y,
+                                                u32_t dispatch_z, const std::vector<rg_resource_id>& reads,
+                                                const std::vector<rg_resource_id>& writes,
+                                                std::function<void(rendergraph_t&, smol::material_t&)> on_execute)
     {
         rg_pass_t& pass = graph.add_pass(name_hash, debug_name);
         pass.texture_reads = reads;
@@ -257,11 +261,14 @@ namespace smol::renderer
 
             shader_t* shader = smol::engine::get_asset_registry().get<shader_t>(material->shader_handle);
 
+            VkPipeline pipeline = shader ? shader->get_pipeline(pipeline_variant_e::FORWARD) : VK_NULL_HANDLE;
+            if (pipeline == VK_NULL_HANDLE) { return; }
+
             per_frame_t& frame_data = ctx.per_frame_objects[ctx.cur_frame];
 
             VkDescriptorSet sets[] = {res_system.global_set, res_system.frame_set};
 
-            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, shader->get_pipeline(pipeline_variant_e::FORWARD));
+            vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, pipeline);
             vkCmdBindDescriptorSets(cmd, VK_PIPELINE_BIND_POINT_COMPUTE, shader->pipeline_layout, 0, 2, sets, 1,
                                     &frame_data.global_data_offset);
 
@@ -587,6 +594,20 @@ namespace smol::renderer
         vkGetDeviceQueue(ctx.device, ctx.queue_fam_indices.transfer_family.value(), 0, &ctx.transfer_queue);
 
         {
+            VkPhysicalDeviceSubgroupProperties sg_props = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_SUBGROUP_PROPERTIES};
+            VkPhysicalDeviceProperties2 sg_props2 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &sg_props};
+            vkGetPhysicalDeviceProperties2(ctx.physical_device, &sg_props2);
+
+            auto has_op = [&](VkSubgroupFeatureFlagBits bit) { return (sg_props.supportedOperations & bit) != 0; };
+            SMOL_LOG_INFO("VULKAN",
+                          "Subgroup: size={} compute_stage={} basic={} vote={} ballot={} arithmetic={} shuffle={}",
+                          sg_props.subgroupSize, (sg_props.supportedStages & VK_SHADER_STAGE_COMPUTE_BIT) != 0,
+                          has_op(VK_SUBGROUP_FEATURE_BASIC_BIT), has_op(VK_SUBGROUP_FEATURE_VOTE_BIT),
+                          has_op(VK_SUBGROUP_FEATURE_BALLOT_BIT), has_op(VK_SUBGROUP_FEATURE_ARITHMETIC_BIT),
+                          has_op(VK_SUBGROUP_FEATURE_SHUFFLE_BIT));
+        }
+
+        {
             VkPhysicalDeviceDescriptorIndexingProperties idx_props = {
                 VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_DESCRIPTOR_INDEXING_PROPERTIES};
             VkPhysicalDeviceProperties2 props2 = {VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_PROPERTIES_2, &idx_props};
@@ -697,6 +718,7 @@ namespace smol::renderer
         vkAllocateCommandBuffers(ctx.device, &tracy_alloc_info, &tracy_cmd);
 
         tracy_vk_ctx = TracyVkContext(ctx.physical_device, ctx.device, ctx.graphics_queue, tracy_cmd);
+        rendergraph.profiling_vk_ctx = tracy_vk_ctx;
 
         vkDestroyCommandPool(ctx.device, tracy_pool, nullptr);
 #endif
@@ -758,6 +780,11 @@ namespace smol::renderer
         ctx.culling_shader =
             smol::engine::get_asset_registry().load_sync<shader_t>("engine://assets/shaders/culling.slang");
         ctx.culling_instance.init(ctx.culling_shader);
+
+        ctx.tonemap_shader =
+            smol::engine::get_asset_registry().load_sync<shader_t>("engine://assets/shaders/tonemap.slang");
+        ctx.tonemap_material =
+            smol::engine::get_asset_registry().load_sync<material_t>("engine_tonemap", ctx.tonemap_shader);
 
         ctx.default_tex =
             smol::engine::get_asset_registry().load_sync<texture_t>("engine://assets/textures/default_white.png");
@@ -1302,6 +1329,7 @@ namespace smol::renderer
 
             vgr.culling_instance.set_buffer("draw_counts"_h, vgr.draw_counts_buffer);
             vgr.culling_instance.set_buffer("indirect_commands"_h, vgr.indirect_buffer);
+            vgr.culling_instance.set_buffer("objects"_h, frame_data.object_buffer);
             vgr.culling_instance.sync();
 
             vkCmdBindPipeline(cmd, VK_PIPELINE_BIND_POINT_COMPUTE,
@@ -1433,6 +1461,19 @@ namespace smol::renderer
         }
 
         for (graph_builder_func_t& feature_builder : custom_renderer_features) { feature_builder(rendergraph, reg); }
+
+        material_t* tonemap_mat = smol::engine::get_asset_registry().get<material_t>(ctx.tonemap_material);
+        if (tonemap_mat && tonemap_mat->shader_handle.is_valid())
+        {
+            rg_resource_id scene_color = rendergraph.get_resource("SceneColor"_h);
+            rg_resource_id final_target = rendergraph.get_resource("FinalOutput"_h);
+            add_fullscreen_pass(rendergraph, "Tonemap"_h, "Tonemap", tonemap_mat, {scene_color}, {final_target},
+                                [](rendergraph_t& g, material_t& mat)
+                                {
+                                    u32_t color_id = g.get_bindless_id(g.get_resource("SceneColor"_h));
+                                    mat.set_property("scene_color_tex"_h, color_id);
+                                });
+        }
 
         rendergraph.compile(frame_data);
 
@@ -1661,6 +1702,13 @@ namespace smol::renderer
                 VK_PIPELINE_STAGE_2_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_2_LATE_FRAGMENT_TESTS_BIT;
             barrier.dstAccessMask =
                 VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_WRITE_BIT | VK_ACCESS_2_DEPTH_STENCIL_ATTACHMENT_READ_BIT;
+        }
+        else if (old_layout == VK_IMAGE_LAYOUT_UNDEFINED && new_layout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+        {
+            barrier.srcStageMask = VK_PIPELINE_STAGE_2_ALL_COMMANDS_BIT;
+            barrier.srcAccessMask = 0;
+            barrier.dstStageMask = VK_PIPELINE_STAGE_2_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_2_COMPUTE_SHADER_BIT;
+            barrier.dstAccessMask = VK_ACCESS_2_SHADER_READ_BIT;
         }
         else
         {

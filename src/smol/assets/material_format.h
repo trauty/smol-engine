@@ -5,11 +5,12 @@
 namespace smol
 {
     constexpr u32_t SMOL_MATERIAL_MAGIC = 0x54414d53;
+    constexpr u32_t SMOL_MATERIAL_VERSION = 1;
 
     struct material_header_t
     {
         u32_t magic = SMOL_MATERIAL_MAGIC;
-        u32_t version = 1;
+        u32_t version = SMOL_MATERIAL_VERSION;
         u32_t shader_path_length;
         u32_t texture_count;
         u32_t sampler_count;

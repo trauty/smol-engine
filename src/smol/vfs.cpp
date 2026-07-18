@@ -5,6 +5,7 @@
 #include "smol/engine.h"
 
 #include <SDL3/SDL_filesystem.h>
+#include <filesystem>
 #include <string>
 #include <unordered_map>
 #include <vector>
@@ -29,10 +30,22 @@ namespace smol::vfs
         const char* base_path = SDL_GetBasePath();
         if (base_path)
         {
-            std::string bin_path = base_path;
+            namespace fs = std::filesystem;
 
-            mount("engine://assets/", bin_path + "assets/engine/");
-            mount("game://assets/", bin_path + "assets/game/");
+            std::string bp = base_path;
+            while (bp.size() > 1 && (bp.back() == '/' || bp.back() == '\\')) { bp.pop_back(); }
+            const fs::path exe_dir = bp;
+
+            if (fs::exists(exe_dir / "assets" / "engine"))
+            {
+                mount("engine://assets/", (exe_dir / "assets" / "engine").generic_string() + "/");
+                mount("game://assets/", (exe_dir / "assets" / "game").generic_string() + "/");
+            }
+            else
+            {
+                const fs::path engine_assets = exe_dir.parent_path() / "share" / "smol" / "engine-assets" / "engine";
+                mount("engine://assets/", engine_assets.generic_string() + "/");
+            }
         }
 #endif
     }

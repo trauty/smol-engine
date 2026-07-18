@@ -1,0 +1,23 @@
+#!/bin/sh
+
+set -eu
+
+self=$0
+while [ -h "$self" ]; do
+    link=$(readlink "$self")
+    case $link in
+        /*) self=$link ;;
+        *)  self=$(dirname "$self")/$link ;;
+    esac
+done
+bindir=$(cd "$(dirname "$self")" && pwd)
+sdk_dir=$(cd "$bindir/.." && pwd)
+
+export SMOL_ENGINE_DIR="$sdk_dir"
+
+if ! command -v xmake >/dev/null 2>&1; then
+    echo "smol: xmake was not found on PATH -- install it from https://xmake.io" >&2
+    exit 1
+fi
+
+exec xmake "$@"

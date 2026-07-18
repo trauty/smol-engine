@@ -6,7 +6,7 @@
 
 namespace smol
 {
-    struct SMOL_API tag_t
+    struct SMOL_ENGINE_API tag_t
     {
         std::string name = "Entity";
     };

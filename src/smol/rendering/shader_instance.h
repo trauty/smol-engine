@@ -10,7 +10,7 @@
 
 namespace smol
 {
-    struct SMOL_API bound_resource_t
+    struct SMOL_ENGINE_API bound_resource_t
     {
         VkDescriptorType type;
 
@@ -23,7 +23,7 @@ namespace smol
         VkImageLayout layout = VK_IMAGE_LAYOUT_UNDEFINED;
     };
 
-    struct SMOL_API shader_instance_t
+    struct SMOL_ENGINE_API shader_instance_t
     {
         asset_handle_t shader_handle;
 

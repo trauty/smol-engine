@@ -8,6 +8,7 @@
 #include "smol-editor/panels/main_menu_bar.h"
 #include "smol-editor/panels/toolbar.h"
 #include "smol-editor/panels/viewport.h"
+#include "smol-editor/project_manager.h"
 #include "smol-editor/systems/camera.h"
 #include "smol/asset_meta.h"
 #include "smol/engine.h"
@@ -15,6 +16,7 @@
 #include "smol/hash.h"
 #include "smol/log.h"
 #include "smol/os.h"
+#include "smol/project.h"
 #include "smol/rendering/renderer.h"
 #include "smol/rendering/renderer_types.h"
 #include "smol/rendering/vulkan.h"
@@ -34,12 +36,8 @@
 
 #if SMOL_PLATFORM_WIN
     #include <windows.h>
-const std::string LIB_PREFIX = "";
-const std::string LIB_EXT = ".dll";
 #elif SMOL_PLATFORM_LINUX || SMOL_PLATFORM_ANDROID
     #include <dlfcn.h>
-const std::string LIB_PREFIX = "lib";
-const std::string LIB_EXT = ".so";
 #endif
 
 std::filesystem::path source_lib_path;
@@ -141,6 +139,8 @@ bool process_editor_event(const SDL_Event& event, smol::editor_context_t& ctx)
 }
 
 using smol::operator""_h;
+
+bool open_project(const std::filesystem::path& project_file, smol::editor_context_t& ctx);
 
 void update_editor_ui(smol::world_t& world, smol::editor_context_t& ctx)
 {
@@ -254,6 +254,13 @@ void update_editor_ui(smol::world_t& world, smol::editor_context_t& ctx)
 
     for (smol::panel_draw_func custom_panel : ctx.custom_panels) { custom_panel(world, ctx); }
 
+    std::string chosen_project;
+    bool commit_project = false;
+    if (ctx.show_project_manager)
+    {
+        commit_project = smol::editor::project_manager::draw(ctx, chosen_project, &ctx.show_project_manager);
+    }
+
     ImGui::Render();
     smol::editor::imgui::submit(ImGui::GetDrawData());
 
@@ -280,43 +287,32 @@ void update_editor_ui(smol::world_t& world, smol::editor_context_t& ctx)
             ctx.game_update(&smol::engine::get_active_world());
         }
     }
+
+    if (commit_project)
+    {
+        ctx.show_project_manager = false;
+        if (!open_project(chosen_project, ctx)) { ctx.show_project_manager = true; }
+    }
 }
 
-int main(i32 argc, char** argv)
+bool open_project(const std::filesystem::path& project_file, smol::editor_context_t& ctx)
 {
-    smol::log::init();
-
-    if (argc < 2)
+    if (!std::filesystem::exists(project_file))
     {
-        SMOL_LOG_INFO("EDITOR", "Usage: smol-editor <path-to-project-file>");
-        return -1;
+        SMOL_LOG_ERROR("EDITOR", "Project file not found: {}", project_file.string());
+        return false;
     }
 
-    std::filesystem::path project_file_path = argv[1];
-    if (!std::filesystem::exists(project_file_path))
+    smol::project_t project;
+    if (!smol::project_t::load(project_file, project))
     {
-        SMOL_LOG_FATAL("EDITOR", "Project file not found: {}", project_file_path.string());
-        return -1;
+        SMOL_LOG_ERROR("EDITOR", "Failed to load project file: {}", project_file.string());
+        return false;
     }
 
-    std::ifstream project_file(project_file_path);
-    nlohmann::json project_data = nlohmann::json::parse(project_file, nullptr, false);
-    if (project_data.is_discarded())
-    {
-        SMOL_LOG_FATAL("EDITOR", "Project file not valid");
-        return -1;
-    }
-
-    std::string lib_base_name = project_data.value("game_lib_name", "smol-game-logic");
-    std::string bin_dir = project_data["paths"].value("bin_dir", "bin");
-
-    std::string full_lib_name = LIB_PREFIX + lib_base_name + LIB_EXT;
-
-    std::filesystem::path project_dir = std::filesystem::absolute(project_file_path).parent_path();
-    source_lib_path = project_dir / bin_dir / full_lib_name;
-
-    trigger_path = source_lib_path.string() + ".trigger";
-    source_lib_name = source_lib_path.string();
+    source_lib_path = project.lib_path;
+    trigger_path = project.trigger_path;
+    source_lib_name = project.lib_path.string();
 
     std::error_code ec;
     for (const auto& entry : std::filesystem::directory_iterator(source_lib_path.parent_path(), ec))
@@ -324,13 +320,95 @@ int main(i32 argc, char** argv)
         if (entry.path().string().find("-loaded-") != std::string::npos) { std::filesystem::remove(entry.path(), ec); }
     }
 
+    const std::filesystem::path proj_root = project_file.parent_path();
+    const std::filesystem::path staged_engine = proj_root / ".smol" / "engine";
+
+    smol::vfs::mount("game://assets/", (proj_root / ".smol" / "game").generic_string() + "/");
+    smol::vfs::mount("src://", (proj_root / "assets").generic_string() + "/");
+
+    if (std::filesystem::exists(staged_engine))
+    {
+        smol::vfs::mount("engine://assets/", staged_engine.generic_string() + "/");
+        smol::asset_meta::init((proj_root / ".smol" / "guid_map.json").generic_string());
+    }
+    else
+    {
+        std::string em = smol::vfs::resolve("engine://assets/");
+        while (em.size() > 1 && (em.back() == '/' || em.back() == '\\')) { em.pop_back(); }
+        smol::asset_meta::init((std::filesystem::path(em).parent_path() / "guid_map.json").generic_string());
+        smol::asset_meta::init((proj_root / ".smol" / "guid_map.json").generic_string());
+    }
+
+    smol::engine::create_scene();
+    ctx.project_dir = project.project_dir.string();
+
+    if (!load_game_dll(false, ctx))
+    {
+        smol::engine::get_active_world().init();
+        SMOL_LOG_ERROR("EDITOR", "Could not load the game lib -- has the project been built? Staying on the manager.");
+        return false;
+    }
+
+    smol::engine::get_active_world().init();
+
+    if (!project.startup_scene.empty())
+    {
+        std::string vfs = project.startup_scene;
+        if (vfs.find("://") == std::string::npos)
+        {
+            std::string_view guid_path = smol::asset_meta::get_path_for_guid(project.startup_scene);
+            vfs = !guid_path.empty() ? std::string(guid_path) : ("game://assets/" + project.startup_scene);
+        }
+
+        std::string rel = vfs;
+        const std::string prefix = "game://assets/";
+        if (rel.rfind(prefix, 0) == 0) { rel = rel.substr(prefix.size()); }
+
+        if (rel.size() > 10 && rel.compare(rel.size() - 10, 10, ".smolscene") == 0)
+        {
+            rel.replace(rel.size() - 10, 10, ".scene");
+        }
+        std::filesystem::path scene_src = project.assets_dir / rel;
+
+        std::ifstream file(scene_src);
+        if (file.is_open())
+        {
+            nlohmann::json scene_json = nlohmann::json::parse(file, nullptr, false);
+            if (!scene_json.is_discarded())
+            {
+                smol::serialization::deserialize_scene(smol::engine::get_active_world(), scene_json);
+                ctx.current_scene_path = scene_src.string();
+                SMOL_LOG_INFO("EDITOR", "Opened startup scene: {}", scene_src.string());
+            }
+            else
+            {
+                SMOL_LOG_ERROR("EDITOR", "Startup scene is not valid: {}", scene_src.string());
+            }
+        }
+        else
+        {
+            SMOL_LOG_WARN("EDITOR", "Startup scene not found: {}", scene_src.string());
+        }
+    }
+
+    smol::editor::project_manager::add_recent(project_file.string());
+    SMOL_LOG_INFO("EDITOR", "Opened project: {}", project_file.string());
+    return true;
+}
+
+int main(i32 argc, char** argv)
+{
+    smol::log::init();
+
+    std::filesystem::path startup_project;
+    bool have_startup_project = false;
+    if (argc >= 2)
+    {
+        startup_project = argv[1];
+        have_startup_project = true;
+    }
+
     if (!smol::engine::init("smol-editor", 1280, 720)) { return -1; }
-
-    smol::vfs::mount("engine://assets/", project_file_path.parent_path().generic_string() + "/.smol/engine/");
-    smol::vfs::mount("game://assets/", project_file_path.parent_path().generic_string() + "/.smol/game/");
-    smol::vfs::mount("src://", project_file_path.parent_path().generic_string() + "/assets/");
-
-    smol::asset_meta::init(project_file_path.parent_path().generic_string() + "/.smol/guid_map.json");
 
     volkInitialize();
     volkLoadInstance(smol::renderer::ctx.instance);
@@ -344,21 +422,17 @@ int main(i32 argc, char** argv)
     smol::editor::imgui::init();
 
     smol::engine::create_scene();
-    smol::world_t& cur_world = smol::engine::get_active_world();
+    smol::engine::get_active_world().init();
 
     static smol::editor_context_t editor_ctx;
-    editor_ctx.project_dir = project_dir.string();
 
-    if (!load_game_dll(false, editor_ctx))
-    {
-        SMOL_LOG_ERROR("EDITOR", "Initial load of game lib failed. Exiting...");
-        return -1;
-    }
+    bool startup_opened = false;
+    if (have_startup_project) { startup_opened = open_project(startup_project, editor_ctx); }
+    editor_ctx.show_project_manager = !startup_opened;
 
     smol::engine::set_event_callback([&](const SDL_Event& event) { return process_editor_event(event, editor_ctx); });
-    smol::engine::set_ui_callback([&]() { update_editor_ui(cur_world, editor_ctx); });
 
-    cur_world.init();
+    smol::engine::set_ui_callback([&]() { update_editor_ui(smol::engine::get_active_world(), editor_ctx); });
 
     smol::engine::run();
 

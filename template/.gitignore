@@ -1,0 +1,11 @@
+build/
+**/.DS_Store
+.cache/
+.vscode/
+.xmake/
+compile_commands.json
+.smol/
+bin/
+imgui.ini
+debug.keystore
+dist/

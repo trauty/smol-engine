@@ -56,7 +56,16 @@ namespace smol
 
         if (header.magic != SMOL_SHADER_MAGIC)
         {
-            SMOL_LOG_ERROR("SHADER", "Invalid .smolshader file: {}", path);
+            SMOL_LOG_ERROR("SHADER", "Invalid .smolshader file: {}", cooked_path);
+            SDL_CloseIO(stream);
+            return std::nullopt;
+        }
+
+        if (header.version != SMOL_SHADER_VERSION)
+        {
+            SMOL_LOG_ERROR("SHADER", "Unsupported .smolshader version {} (engine expects {}), recook: {}",
+                           header.version, SMOL_SHADER_VERSION, cooked_path);
+            SDL_CloseIO(stream);
             return std::nullopt;
         }
 
@@ -308,10 +317,12 @@ namespace smol
             };
 
             VkPipeline compute_pipeline = VK_NULL_HANDLE;
-            if (vkCreateComputePipelines(renderer::ctx.device, VK_NULL_HANDLE, 1, &comp_pipeline_info, nullptr,
-                                         &compute_pipeline) != VK_SUCCESS)
+            VkResult comp_result = vkCreateComputePipelines(renderer::ctx.device, VK_NULL_HANDLE, 1,
+                                                            &comp_pipeline_info, nullptr, &compute_pipeline);
+            if (comp_result != VK_SUCCESS)
             {
-                SMOL_LOG_ERROR("SHADER", "Failed to create compute pipeline for shader at path: {}", path);
+                SMOL_LOG_ERROR("SHADER", "Failed to create compute pipeline for shader at path: {} (VkResult {})", path,
+                               (int)comp_result);
             }
             else
             {
@@ -440,11 +451,13 @@ namespace smol
                 };
 
                 VkPipeline variant_pipeline = VK_NULL_HANDLE;
-                if (vkCreateGraphicsPipelines(renderer::ctx.device, VK_NULL_HANDLE, 1, &pipeline_info, nullptr,
-                                              &variant_pipeline) != VK_SUCCESS)
+                VkResult gfx_result = vkCreateGraphicsPipelines(renderer::ctx.device, VK_NULL_HANDLE, 1, &pipeline_info,
+                                                                nullptr, &variant_pipeline);
+                if (gfx_result != VK_SUCCESS)
                 {
-                    SMOL_LOG_ERROR("SHADER", "Failed to create {} pipeline for shader at path: {}",
-                                   cfg.variant == pipeline_variant_e::SHADOW ? "shadow" : "forward", path);
+                    SMOL_LOG_ERROR("SHADER", "Failed to create {} pipeline for shader at path: {} (VkResult {})",
+                                   cfg.variant == pipeline_variant_e::SHADOW ? "shadow" : "forward", path,
+                                   (int)gfx_result);
                     continue;
                 }
 

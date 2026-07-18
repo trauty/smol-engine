@@ -207,7 +207,8 @@ namespace smol::renderer
         {
             const rg_pass_t& pass = passes[pass_idx];
 #ifdef SMOL_ENABLE_PROFILING
-            TracyVkZone(tracy_vk_ctx, cmd, pass.name.c_str());
+            const char* rg_zone_name = pass.debug_name ? pass.debug_name : "rg_pass";
+            TracyVkZoneTransient(static_cast<TracyVkCtx>(profiling_vk_ctx), rg_vk_zone, cmd, rg_zone_name, true);
 #endif
             bool is_compute = pass.color_writes.empty() && pass.depth_stencil == RG_NULL_ID;
 

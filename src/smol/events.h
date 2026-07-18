@@ -6,12 +6,12 @@
 
 namespace smol::events
 {
-    struct SMOL_API frame_event_tag
+    struct SMOL_ENGINE_API frame_event_tag
     {
     };
 
     template <typename T, typename... Args>
-    SMOL_API void emit(ecs::registry_t& reg, Args&&... args)
+    SMOL_ENGINE_API void emit(ecs::registry_t& reg, Args&&... args)
     {
         ecs::entity_t entity = reg.create();
         reg.emplace<T>(entity, std::forward<Args>(args)...);

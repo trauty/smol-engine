@@ -1,6 +1,7 @@
 #include "asset_meta.h"
 
 #include "smol/log.h"
+#include "smol/vfs.h"
 
 #include "json/json.hpp"
 #include <filesystem>
@@ -27,14 +28,14 @@ namespace smol::asset_meta
 
     void init(const std::string& guid_map_path)
     {
-        if (!std::filesystem::exists(guid_map_path))
+        std::string text = smol::vfs::read_text(guid_map_path);
+        if (text.empty())
         {
             SMOL_LOG_INFO("ASSET_META", "No guid map found at {}", guid_map_path);
             return;
         }
 
-        std::ifstream file(guid_map_path);
-        auto data = nlohmann::json::parse(file, nullptr, false);
+        auto data = nlohmann::json::parse(text, nullptr, false);
         if (data.is_discarded())
         {
             SMOL_LOG_ERROR("ASSET_META", "Failed to parse guid map {}", guid_map_path);
@@ -69,6 +70,13 @@ namespace smol::asset_meta
             if (it != guid_map.end()) { return it->second; }
         }
 
+        return {};
+    }
+
+    std::string_view get_path_for_guid(const std::string& guid)
+    {
+        auto it = reverse_guid_map.find(guid);
+        if (it != reverse_guid_map.end()) { return it->second; }
         return {};
     }
 
@@ -140,8 +148,24 @@ namespace smol::asset_meta
         std::filesystem::path out(output_path);
         std::filesystem::create_directories(out.parent_path());
 
+        nlohmann::json merged;
+        if (std::filesystem::exists(output_path))
+        {
+            std::ifstream existing(output_path);
+            nlohmann::json prev = nlohmann::json::parse(existing, nullptr, false);
+            if (prev.is_object()) { merged = std::move(prev); }
+        }
+
+        nlohmann::json incoming = nlohmann::json::parse(map_data_json, nullptr, false);
+        if (incoming.is_object())
+        {
+            for (auto it = incoming.begin(); it != incoming.end(); ++it) { merged[it.key()] = it.value(); }
+        }
+
+        std::string out_json = merged.dump(4);
         std::ofstream file(output_path);
-        file << map_data_json;
-        SMOL_LOG_INFO("ASSET_META", "Wrote guid map: {} ({} bytes)", output_path, map_data_json.size());
+        file << out_json;
+        SMOL_LOG_INFO("ASSET_META", "Wrote guid map: {} ({} entries, {} bytes)", output_path, merged.size(),
+                      out_json.size());
     }
 } // namespace smol::asset_meta

@@ -12,7 +12,7 @@ namespace smol::renderer
     using rg_resource_id = u32_t;
     constexpr rg_resource_id RG_NULL_ID = 0xffffffff;
 
-    struct SMOL_API rg_resource_t
+    struct SMOL_ENGINE_API rg_resource_t
     {
         u32_t name_hash;
         const char* debug_name = nullptr;
@@ -29,7 +29,7 @@ namespace smol::renderer
 
     using pass_callback_t = smol::arena_function<void(VkCommandBuffer, ecs::registry_t&)>;
 
-    struct SMOL_API rg_pass_t
+    struct SMOL_ENGINE_API rg_pass_t
     {
         u32_t name_hash;
         const char* debug_name = nullptr;
@@ -48,7 +48,7 @@ namespace smol::renderer
         u32_t target_hash;
     };
 
-    class SMOL_API rendergraph_t
+    class SMOL_ENGINE_API rendergraph_t
     {
       public:
         void clear();
@@ -67,6 +67,8 @@ namespace smol::renderer
         u32_t get_bindless_id(rg_resource_id id) const;
 
         void add_alias(u32_t name_hash, u32_t alias_name);
+
+        void* profiling_vk_ctx = nullptr;
 
       private:
         u32_t active_resource_count = 0;

@@ -360,6 +360,9 @@ namespace smol::renderer
         asset_handle_t culling_shader;
         shader_instance_t culling_instance;
 
+        asset_handle_t tonemap_shader;
+        asset_handle_t tonemap_material;
+
         asset_handle_t default_tex;
 
         VkDeviceSize global_data_aligned_size = 0;

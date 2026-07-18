@@ -108,7 +108,7 @@ namespace smol::jobs
     void init();
     void shutdown();
 
-    SMOL_API void wait(counter_t* counter);
+    SMOL_ENGINE_API void wait(counter_t* counter);
 
-    SMOL_API u32_t get_worker_count();
+    SMOL_ENGINE_API u32_t get_worker_count();
 } // namespace smol::jobs

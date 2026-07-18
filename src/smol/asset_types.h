@@ -10,7 +10,6 @@ namespace smol
     {
         UNLOADED,
         QUEUED,
-        LOADING,
         READY,
         FAILED
     };

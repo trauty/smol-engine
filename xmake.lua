@@ -1,30 +1,19 @@
-local is_standalone = (os.scriptdir() == os.projectdir())
+local engine_is_root = (os.scriptdir() == os.projectdir())
 
 local game_name = get_config("game_name") or "smol-engine"
-local game_lib_name = get_config("game_lib_name") or "smol-game"
 
 includes("xmake/rules/*.lua")
+includes("xmake/tasks/*.lua")
+add_moduledirs("xmake/modules")
 
-if is_standalone then 
+if engine_is_root then
     set_project("smol-engine")
-    set_version("0.0.1")
-    set_languages("cxx20")
-    set_policy("build.c++.rtti", false)
-    add_rules("mode.debug", "mode.release", "mode.releasedbg")
-
-    if is_plat("linux") then
-        set_toolchains("clang")
-        add_cxflags("-fno-rtti", {force = true})
-    elseif is_plat("windows") then
-        set_toolchains("clang-cl")
-        set_toolset("ld", "lld-link") 
-        set_toolset("sh", "lld-link")
-        set_toolset("ar", "llvm-ar")
-
-        add_cxflags("/GR-", {force = true})
-        set_runtimes("MD")
-    end
+    set_version("0.1.0")
 end
+
+set_languages("cxx20")
+add_rules("mode.debug", "mode.release", "mode.releasedbg")
+
 
 option("profiling")
     set_default(false)
@@ -40,74 +29,38 @@ option("standalone")
     set_description("Build static standalone game (no editor)")
 option_end()
 
-local is_standalone = has_config("standalone")
+local standalone = has_config("standalone") or is_plat("android")
 
-if not is_plat("android") then
-package("slang")
-    set_homepage("https://github.com/shader-slang/slang")
-    set_description("Slang Shader Language Compiler")
+local VENDOR = os.scriptdir()
 
-    add_links("slang-compiler")
-
-    local slang_version = "2026.4.2"
-
-    if is_plat("windows") then
-        set_urls("https://github.com/shader-slang/slang/releases/download/v$(version)/slang-$(version)-windows-x86_64.zip")
-        add_versions(slang_version, "99ac35f3f3843650a8e912f759ee0e0cd691d560b003022beef2620a35af55d4") 
-    elseif is_plat("linux") then
-        set_urls("https://github.com/shader-slang/slang/releases/download/v$(version)/slang-$(version)-linux-x86_64.tar.gz")
-        add_versions(slang_version, "c5346e743cd96a496e24d990a3f62146dccdcec48f4c3f042c097125c59b3ddd")
+local function vendor_platdir()
+    if is_plat("android") then
+        return "android"
+    elseif is_plat("windows") then
+        return "windows"
+    else
+        return "linux"
     end
-
-    on_install(function (package)
-        os.cp("include/*", package:installdir("include"))
-        os.cp("bin/*", package:installdir("bin"))
-        os.cp("lib/*", package:installdir("lib"))
-    end)
-package_end()
-
-add_requires("slang " .. slang_version)
 end
-
-add_requires("vulkan-headers")
-add_requires("volk 1.4.*")
-add_requires("libsdl3 3.4.2", {system = false, configs = {shared = is_plat("android")}})
-
-add_requires("joltphysics 5.5.0", 
-    {
-        system = false, 
-        configs = {
-            shared = false,
-            cxflags = is_arch("x86_64", "x64") and "-march=x86-64-v3" or nil,
-            rtti = is_plat("android")
-        }
-    }
-)
-
-add_requires("cglm 0.9.6", {system = false, configs = {shared = false}})
-add_requires("fmt 12.1.0", {system = false, configs = {shared = false}})
-add_requires("entt 3.16.0", {system = false, configs = {shared = false}})
-
-if has_config("profiling") then 
-    add_requires("tracy 0.13.1", {system = false, configs = {shared = false}})
-end
-
-add_requires("meshoptimizer 1.0.1", {system = false, configs = {shared = false}})
-add_requires("ktx 4.4.2", {system = false, configs = {shared = false}})
 
 target("smol-interface")
     set_kind("headeronly")
-    
+
     add_includedirs("include", {public = true})
     add_includedirs("src", {public = true})
-    
+
     add_defines("CGLM_FORCE_LEFT_HANDED", "VK_NO_PROTOTYPES", "CGLM_FORCE_DEPTH_ZERO_TO_ONE", {public = true})
-    
-    add_packages("vulkan-headers", "volk", "libsdl3", "cglm", "fmt", "entt", {public = true})
+
+    add_includedirs("lib/JoltPhysics", {public = true})
+    add_defines("JPH_OBJECT_LAYER_BITS=16", "JPH_PROFILE_ENABLED",
+                "JPH_DEBUG_RENDERER", "JPH_OBJECT_STREAM", {public = true})
+    if not is_mode("debug") then
+        add_defines("JPH_NO_DEBUG", {public = true})
+    end
 target_end()
 
 target("smol-engine")
-    if is_standalone then 
+    if standalone then
         set_kind("static")
         set_optimize("fastest")
         set_strip("all")
@@ -119,39 +72,32 @@ target("smol-engine")
         if is_plat("android") then
             add_cxflags("-fPIC", {force = true})
         end
-    else 
+
+        on_load(function (target)
+            os.tryrm(path.join(target:targetdir(), "libsmol-engine.so"))
+            os.tryrm(path.join(target:targetdir(), "smol-engine.dll"))
+        end)
+    else
         set_kind("shared")
-        if is_plat("linux") then 
+        if is_plat("linux") then
             add_shflags("-Wl,-Bsymbolic")
-        end 
+            add_rpathdirs("$ORIGIN")
+        end
     end
 
-    if is_arch("x86_64", "x64") then
-        add_cxflags("-march=x86-64-v3")
-    end
+    add_rules("smol.common")
 
     add_options("profiling", {public = true})
 
-    if is_mode("debug") then
-        if not is_plat("android") then
-            set_policy("build.sanitizer.address", true)
-        end
-
-        if is_plat("windows") then
-            add_defines("_DISABLE_STRING_ANNOTATION", "_DISABLE_VECTOR_ANNOTATION", {public = true})
-        end
-    end
-
-    add_defines("SMOL_EXPORT", "CGLM_FORCE_LEFT_HANDED")
+    add_defines("SMOL_ENGINE_EXPORT", "CGLM_FORCE_LEFT_HANDED")
 
     add_deps("smol-interface")
 
-    add_packages("joltphysics", {public = true})
     add_undefines("JPH_FLOATING_POINT_EXCEPTIONS_ENABLED")
-    add_packages("ktx", {public = true})
 
     if has_config("profiling") then
-        add_packages("tracy", {public = true})
+        add_includedirs("lib/tracy", {public = true})   -- <tracy/...>, <common/...>
+        add_files("lib/tracy/TracyClient.cpp", {warnings = "none"})
     end
 
     if not is_plat("windows") then
@@ -162,52 +108,118 @@ target("smol-engine")
     add_files("lib/vma/vk_mem_alloc.cpp", {warnings = "none"})
     add_files("lib/imgui/**.cpp", {warnings = "none"})
 
+    add_files("lib/volk/volk.c", {warnings = "none"})            -- Vulkan meta-loader
+    add_files("lib/fmt/format.cc", "lib/fmt/os.cc", {warnings = "none"})
+    add_files("lib/JoltPhysics/Jolt/**.cpp", {warnings = "none"}) -- physics (source, ABI-safe)
+
+    add_linkdirs(path.join("lib", "SDL3", vendor_platdir()), {public = true})
+    add_linkdirs(path.join("lib", "ktx", vendor_platdir()), {public = true})
+    add_links("SDL3", "ktx", {public = true})
+    if is_plat("linux") then
+        add_syslinks("pthread", "m", {public = true})   -- SDL3 static needs these
+    end
+
     add_includedirs("include", {public = true})
     add_includedirs("include/imgui", {public = true})
     add_includedirs("src", {public = true})
+
+    add_headerfiles("src/(smol/**.h)")
+    add_headerfiles("include/(**)")
+
+    add_headerfiles("lib/JoltPhysics/(Jolt/**.h)")
+    add_headerfiles("lib/JoltPhysics/(Jolt/**.inl)")
+
+    add_installfiles("xmake/rules/*.lua", {prefixdir = "share/smol/rules"})
+    add_installfiles("xmake/modules/*.lua", {prefixdir = "share/smol/modules"})
+    add_installfiles("xmake/tasks/*.lua", {prefixdir = "share/smol/tasks"})
+    add_installfiles("template/(**)", {prefixdir = "share/smol/template"})
+    add_installfiles("VERSION", {prefixdir = "share/smol"})
+
+    if is_plat("linux") then
+        add_installfiles("scripts/smol", {prefixdir = "bin"})
+    end
+
+    add_installfiles("assets/(**)", {prefixdir = "share/smol/engine-assets-src"})
+
+    after_install(function (target)
+        import("smol_project")
+
+        if target:is_plat("linux") then
+            local launcher = path.join(target:installdir(), "bin", "smol")
+            if os.isfile(launcher) then os.vrunv("chmod", {"+x", launcher}) end
+        end
+
+        local proj = smol_project.load(os.projectdir())
+        local cooked = proj and proj.cooked_assets_dir or path.join(os.projectdir(), ".smol")
+        local dest = path.join(target:installdir(), "share", "smol", "engine-assets")
+
+        if os.isdir(path.join(cooked, "engine")) then
+            os.mkdir(dest)
+            os.cp(path.join(cooked, "engine"), dest)
+            os.trycp(path.join(cooked, "guid_map.json"), dest)
+            os.tryrm(path.join(dest, "engine", "cooker_cache.json"))
+        end
+    end)
 target_end()
 
-target("smol-bin")
+target("smol-runtime")
     if is_plat("android") then
         set_kind("shared")
-        add_packages("libsdl3")
+
         add_rules("smol.android.apk")
         set_basename("main")
-    else
+    elseif standalone then
         set_kind("binary")
         set_basename(game_name)
-    end
-    
-    if is_arch("x86_64", "x64") then
-        add_cxflags("-march=x86-64-v3")
-    end
-
-    if is_mode("debug") then
-        if not is_plat("android") then
-            set_policy("build.sanitizer.address", true)
-        end
-
-        if is_plat("windows") then
-            add_defines("_DISABLE_STRING_ANNOTATION", "_DISABLE_VECTOR_ANNOTATION", {public = true})
-        end
+    else
+        set_kind("binary")
+        set_basename("smol-runtime")
     end
 
-    add_defines(format('SMOL_GAME_NAME="%s"', game_name))
+    add_rules("smol.common")
 
     add_deps("smol-engine")
 
-    if is_standalone then
-        add_deps("smol-game") 
+    on_load(function (target)
+        import("core.base.option")
+        import("core.project.config")
+        import("smol_project")
+
+        if target:is_plat("android") and not option.get("ndk") then
+            local home = os.getenv("HOME") or os.getenv("USERPROFILE")
+            local ndks = home and os.dirs(path.join(home, ".smol", "android", "sdk", "ndk", "*"))
+            if ndks and #ndks > 0 then
+                table.sort(ndks)
+                config.set("ndk", ndks[#ndks], {force = true})
+            end
+        end
+
+        if not (config.get("standalone") or target:is_plat("android")) then return end
+
+        local proj = smol_project.load(os.projectdir())
+        if proj and proj.startup_scene and proj.startup_scene ~= "" then
+            target:add("defines", "SMOL_STARTUP_SCENE=\"" .. proj.startup_scene .. "\"")
+        end
+    end)
+
+    if not is_plat("android") then
+        add_deps("smol-assets", {inherit = false})
     end
 
-    add_files("src/smol-bin/**.cpp")
+    if standalone and not engine_is_root then
+        add_deps(game_name)
+    end
+
+    add_files("src/smol-runtime/main.cpp")
+    if standalone and engine_is_root then
+        add_files("src/smol-runtime/empty_game.cpp")
+    end
 
     if is_plat("windows") then
         if is_mode("release") then
             add_ldflags("/subsystem:windows", "/entry:mainCRTStartup", {force = true})
         end
-    elseif is_plat("linux") then 
-        add_rpathdirs("@loader_path")
+    elseif is_plat("linux") then
         add_ldflags("-rdynamic", {force = true})
     end
 
@@ -240,82 +252,69 @@ target("smol-bin")
         end)
     end
 
-    on_config(function (target)
-        import("core.project.project")
-
-        local game_target = project.target("smol-game")
-        local game_lib_path = path.absolute(game_target:targetfile())
-
-        game_lib_path = game_lib_path:gsub("\\", "/")
-
-        target:add("defines", "SMOL_LIB_PATH=\"" .. game_lib_path .. "\"")
-    end)
 target_end()
 
 if not is_plat("android") then
 target("smol-cooker")
     set_kind("binary")
 
-    if is_plat("linux") then 
-        add_rpathdirs("@loader_path")
-    end
-
-    if is_mode("debug") then
-        set_policy("build.sanitizer.address", true)
-
-        if is_plat("windows") then
-            add_defines("_DISABLE_STRING_ANNOTATION", "_DISABLE_VECTOR_ANNOTATION", {public = true})
-        end
-    end
+    add_rules("smol.common", {march = false})
 
     add_deps("smol-engine")
-
-    add_packages("slang", {public = true})
-    add_packages("meshoptimizer", {public = true})
 
     add_files("src/smol-cooker/**.cpp")
     add_files("lib/tinygltf/tiny_gltf.cpp", {warnings = "none"})
     add_files("lib/stb/*.cpp", {warnings = "none"})
 
+    add_files("lib/meshoptimizer/*.cpp", {warnings = "none"})
+
     add_includedirs("include", {public = true})
+    add_includedirs("include/slang", {public = true})   -- <slang.h>, <slang-com-ptr.h>
     add_includedirs("src", {public = true})
+
+    local slang_libdir = path.join(VENDOR, "lib", "slang", vendor_platdir())
+    add_linkdirs(slang_libdir)
+    if is_plat("windows") then
+        add_links("slang-compiler")
+    else
+        local so = os.files(path.join(slang_libdir, "libslang-compiler.so*"))[1]
+        if so then add_links(":" .. path.filename(so)) end
+    end
+
+    add_linkdirs(path.join(VENDOR, "lib", "spirv-tools", vendor_platdir()))
+    add_links("SPIRV-Tools-opt", "SPIRV-Tools")
 
     after_build(function (target)
         local dest_dir = target:targetdir()
-        local slang_dir = target:pkg("slang")
-
-        if slang_dir then
-            if is_plat("linux") then 
-                os.trycp(path.join(slang_dir:installdir(), "lib", "libslang-compiler.so.0.*"), dest_dir)
-            elseif is_plat("windows") then 
-                os.trycp(path.join(slang_dir:installdir(), "bin", "slang-compiler.dll"), dest_dir)
-            end
-        end  
+        if target:is_plat("linux") then
+            os.trycp(path.join(slang_libdir, "libslang-compiler.so*"), dest_dir)
+        elseif target:is_plat("windows") then
+            os.trycp(path.join(slang_libdir, "slang-compiler.dll"), dest_dir)
+        end
     end)
+
+    after_install(function (target)
+        local bindir = path.join(target:installdir(), "bin")
+        if target:is_plat("linux") then
+            os.trycp(path.join(slang_libdir, "libslang-compiler.so*"), bindir)
+        elseif target:is_plat("windows") then
+            os.trycp(path.join(slang_libdir, "slang-compiler.dll"), bindir)
+        end
+    end)
+target_end()
+
+target("smol-assets")
+    set_kind("phony")
+    add_rules("smol.assets")
+    add_deps("smol-cooker", {inherit = false})
 target_end()
 end
 
-if not is_standalone then
+if not standalone then
 target("smol-editor")
     set_kind("binary")
 
-    if is_arch("x86_64", "x64") then
-        add_cxflags("-march=x86-64-v3")
-    end
-
-    if is_plat("linux") then 
-        add_rpathdirs("@loader_path")
-    end
-
-    add_defines(format('SMOL_GAME_NAME="%s"', game_name))
-
-    if is_mode("debug") then
-        set_policy("build.sanitizer.address", true)
-
-        if is_plat("windows") then
-            add_defines("_DISABLE_STRING_ANNOTATION", "_DISABLE_VECTOR_ANNOTATION", {public = true})
-        end
-    end
+    add_rules("smol.common")
 
     if is_plat("windows") then
         if is_mode("release") then
@@ -324,20 +323,18 @@ target("smol-editor")
     end
 
     add_deps("smol-engine")
-    add_deps("smol-game", {inherit = false})
+
+    if not is_plat("android") then
+        add_deps("smol-assets", {inherit = false})
+    end
+
+    if not engine_is_root then
+        add_deps(game_name, {inherit = false})
+    end
 
     add_files("src/smol-editor/**.cpp")
     add_includedirs("src")
 
-    on_config(function (target)
-        import("core.project.project")
-
-        local game_target = project.target("smol-game")
-        local game_lib_path = path.absolute(game_target:targetfile())
-
-        game_lib_path = game_lib_path:gsub("\\", "/")
-
-        target:add("defines", "SMOL_LIB_PATH=\"" .. game_lib_path .. "\"")
-    end)
+    add_files("lib/volk/volk.c", {warnings = "none"})
 target_end()
 end

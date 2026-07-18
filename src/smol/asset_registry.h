@@ -158,7 +158,6 @@ namespace smol
         asset_handle_t internal_load(const std::string& path, bool is_sync, Args&&... args)
         {
             uuid_t uuid = smol::asset_meta::resolve_uuid(path);
-            std::string guid_str(smol::asset_meta::get_guid(path));
 
             asset_pool_t<T>& pool = get_pool<T>();
             const size_t type_id = get_asset_type_id<T>();
@@ -194,7 +193,6 @@ namespace smol
 
             slot->path = path;
             slot->uuid = uuid;
-            slot->guid = guid_str;
             slot->state = asset_state_e::QUEUED;
             slot->ref_count = 1;
 

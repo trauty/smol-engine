@@ -5,6 +5,7 @@
 #include "smol/asset_serde.h"
 #include "smol/assets/material.h"
 #include "smol/assets/mesh.h"
+#include "smol/assets/scene.h"
 #include "smol/assets/shader.h"
 #include "smol/assets/texture.h"
 #include "smol/defines.h"
@@ -82,6 +83,9 @@ namespace smol::engine
         smol::asset_serde::reg(
             smol::get_type_id<smol::shader_t>(),
             [](smol::asset_registry_t& r, const std::string& p) { return r.load_sync<smol::shader_t>(p); }, "Shader");
+        smol::asset_serde::reg(
+            smol::get_type_id<smol::scene_t>(),
+            [](smol::asset_registry_t& r, const std::string& p) { return r.load_sync<smol::scene_t>(p); }, "Scene");
 
         // SDL_SetHintWithPriority(SDL_HINT_SHUTDOWN_DBUS_ON_QUIT, "1", SDL_HintPriority::SDL_HINT_OVERRIDE);
         SDL_Init(SDL_INIT_VIDEO);

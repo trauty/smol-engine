@@ -14,19 +14,19 @@ namespace smol::engine
     using event_callback_t = std::function<bool(const SDL_Event&)>;
     using ui_callback_t = std::function<void()>;
 
-    SMOL_API bool init(const std::string& game_name, i32 init_window_width, i32 init_window_height);
-    SMOL_API void run();
-    SMOL_API bool shutdown();
+    SMOL_ENGINE_API bool init(const std::string& game_name, i32 init_window_width, i32 init_window_height);
+    SMOL_ENGINE_API void run();
+    SMOL_ENGINE_API bool shutdown();
 
-    SMOL_API void exit();
+    SMOL_ENGINE_API void exit();
 
-    SMOL_API std::string get_game_name();
+    SMOL_ENGINE_API std::string get_game_name();
 
-    SMOL_API void create_scene();
-    SMOL_API void set_scene(std::unique_ptr<smol::world_t> scene);
-    SMOL_API world_t& get_active_world();
-    SMOL_API asset_registry_t& get_asset_registry();
+    SMOL_ENGINE_API void create_scene();
+    SMOL_ENGINE_API void set_scene(std::unique_ptr<smol::world_t> scene);
+    SMOL_ENGINE_API world_t& get_active_world();
+    SMOL_ENGINE_API asset_registry_t& get_asset_registry();
 
-    SMOL_API void set_event_callback(event_callback_t cb);
-    SMOL_API void set_ui_callback(ui_callback_t cb);
+    SMOL_ENGINE_API void set_event_callback(event_callback_t cb);
+    SMOL_ENGINE_API void set_ui_callback(ui_callback_t cb);
 } // namespace smol::engine

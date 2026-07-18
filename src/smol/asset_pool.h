@@ -17,12 +17,9 @@ namespace smol
         { asset_loader_t<T>::unload(asset) } -> std::same_as<void>;
     };
 
-    struct SMOL_API asset_pool_base_t
+    struct SMOL_ENGINE_API asset_pool_base_t
     {
         virtual ~asset_pool_base_t() = default;
-        virtual void base_add_ref(u32_t index, uuid_t uuid) = 0;
-        virtual bool base_release(u32_t index, uuid_t uuid) = 0;
-        virtual std::string base_get_path(u32_t index, uuid_t uuid) = 0;
         virtual bool base_validate(u32_t index, uuid_t uuid) = 0;
         virtual void base_get_handles(std::vector<asset_handle_t>& out) = 0;
         virtual void base_unload_all() = 0;
@@ -38,30 +35,8 @@ namespace smol
             uuid_t uuid = 0;
             std::atomic<asset_state_e> state = asset_state_e::UNLOADED;
             std::atomic<i32_t> ref_count = 0;
-            std::string guid;
             std::string path;
         };
-
-        void base_add_ref(u32_t index, uuid_t uuid) override
-        {
-            if (index >= slots.size()) { return; }
-            if (slots[index].uuid != uuid) { return; }
-            slots[index].ref_count.fetch_add(1);
-        }
-
-        bool base_release(u32_t index, uuid_t uuid) override
-        {
-            if (index >= slots.size()) { return false; }
-            if (slots[index].uuid != uuid) { return false; }
-            return slots[index].ref_count.fetch_sub(1) == 1;
-        }
-
-        std::string base_get_path(u32_t index, uuid_t uuid) override
-        {
-            if (index >= slots.size()) { return {}; }
-            if (slots[index].uuid != uuid) { return {}; }
-            return slots[index].path;
-        }
 
         bool base_validate(u32_t index, uuid_t uuid) override
         {

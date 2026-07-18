@@ -49,5 +49,7 @@ namespace smol
         std::string current_scene_path;
         bool pending_scene_load = false;
         bool pending_scene_save = false;
+
+        bool show_project_manager = false;
     };
 } // namespace smol

@@ -14,14 +14,14 @@
 
 namespace smol
 {
-    struct SMOL_API shader_member_t
+    struct SMOL_ENGINE_API shader_member_t
     {
         std::string name;
         u32_t offset = 0;
         u32_t size = 0;
     };
 
-    struct SMOL_API shader_module_info_t
+    struct SMOL_ENGINE_API shader_module_info_t
     {
         std::string name;
         u32_t size;
@@ -40,9 +40,9 @@ namespace smol
         SHADOW
     };
 
-    struct SMOL_API shader_t
+    struct SMOL_ENGINE_API shader_t
     {
-        flat_map_t<VkPipeline> pipelines; // keyed by static_cast<u32_t>(pipeline_variant_e)
+        flat_map_t<VkPipeline> pipelines;
         VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
 
         bool has_material_data = false;
@@ -64,7 +64,7 @@ namespace smol
     };
 
     template <>
-    struct SMOL_API asset_loader_t<shader_t>
+    struct SMOL_ENGINE_API asset_loader_t<shader_t>
     {
         static std::optional<shader_t> load(const std::string& path);
         static void unload(shader_t& shader);

@@ -104,7 +104,7 @@ namespace smol::input
         HOLDING
     };
 
-    struct SMOL_API input_context_t
+    struct SMOL_ENGINE_API input_context_t
     {
         action_id_t action_id;
         input_state_t state;
@@ -113,43 +113,43 @@ namespace smol::input
 
     using input_callback_t = std::function<void(const input_context_t&)>;
 
-    SMOL_API bool get_key(key_e key);
+    SMOL_ENGINE_API bool get_key(key_e key);
 
-    SMOL_API bool get_key_down(key_e key);
+    SMOL_ENGINE_API bool get_key_down(key_e key);
 
-    SMOL_API bool get_key_up(key_e key);
+    SMOL_ENGINE_API bool get_key_up(key_e key);
 
-    SMOL_API bool get_mouse_button(mouse_button_e button);
+    SMOL_ENGINE_API bool get_mouse_button(mouse_button_e button);
 
-    SMOL_API bool get_mouse_button_down(mouse_button_e button);
+    SMOL_ENGINE_API bool get_mouse_button_down(mouse_button_e button);
 
-    SMOL_API bool get_mouse_button_up(mouse_button_e button);
+    SMOL_ENGINE_API bool get_mouse_button_up(mouse_button_e button);
 
-    SMOL_API void get_mouse_position(float* x, float* y);
+    SMOL_ENGINE_API void get_mouse_position(float* x, float* y);
 
-    SMOL_API float get_mouse_x();
+    SMOL_ENGINE_API float get_mouse_x();
 
-    SMOL_API float get_mouse_y();
+    SMOL_ENGINE_API float get_mouse_y();
 
-    SMOL_API vec2_t get_mouse_delta();
+    SMOL_ENGINE_API vec2_t get_mouse_delta();
 
-    SMOL_API void set_mouse_relative_mode(bool is_relative);
+    SMOL_ENGINE_API void set_mouse_relative_mode(bool is_relative);
 
-    SMOL_API float get_scroll_delta();
+    SMOL_ENGINE_API float get_scroll_delta();
 
-    SMOL_API void bind_button(const std::string& action_name, key_e key);
+    SMOL_ENGINE_API void bind_button(const std::string& action_name, key_e key);
 
-    SMOL_API listener_id_t on_action(const std::string& action_name, input_state_t state, input_callback_t callback);
+    SMOL_ENGINE_API listener_id_t on_action(const std::string& action_name, input_state_t state, input_callback_t callback);
 
-    SMOL_API void remove_listener(listener_id_t id);
+    SMOL_ENGINE_API void remove_listener(listener_id_t id);
 
-    SMOL_API void unbind_button(const std::string& action_name, key_e key);
+    SMOL_ENGINE_API void unbind_button(const std::string& action_name, key_e key);
 
-    SMOL_API void unbind_all_buttons(const std::string& action_name);
+    SMOL_ENGINE_API void unbind_all_buttons(const std::string& action_name);
 
-    SMOL_API void set_viewport_offset(float x, float y);
-    SMOL_API void set_viewport_size(float width, float height);
-    SMOL_API bool is_mouse_in_viewport();
+    SMOL_ENGINE_API void set_viewport_offset(float x, float y);
+    SMOL_ENGINE_API void set_viewport_size(float width, float height);
+    SMOL_ENGINE_API bool is_mouse_in_viewport();
 
     namespace detail
     {

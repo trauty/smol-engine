@@ -13,7 +13,7 @@ namespace smol
 
     using system_func_t = void (*)(ecs::registry_t&);
 
-    struct SMOL_API world_t
+    struct SMOL_ENGINE_API world_t
     {
         std::string name;
         ecs::registry_t registry;

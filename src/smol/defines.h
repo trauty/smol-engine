@@ -66,15 +66,22 @@ enum smol_result_e
 #endif
 
 #if defined(SMOL_PLATFORM_WIN)
-    #if defined(SMOL_EXPORT)
-        #define SMOL_API __declspec(dllexport)
+    #if defined(SMOL_ENGINE_EXPORT)
+        #define SMOL_ENGINE_API __declspec(dllexport)
     #else
-        #define SMOL_API __declspec(dllimport)
+        #define SMOL_ENGINE_API __declspec(dllimport)
+    #endif
+    #if defined(SMOL_GAME_EXPORT)
+        #define SMOL_GAME_API __declspec(dllexport)
+    #else
+        #define SMOL_GAME_API __declspec(dllimport)
     #endif
 #elif defined(__GNUC__) || defined(__clang__)
-    #define SMOL_API __attribute__((visibility("default")))
+    #define SMOL_ENGINE_API __attribute__((visibility("default")))
+    #define SMOL_GAME_API __attribute__((visibility("default")))
 #else
-    #define SMOL_API
+    #define SMOL_ENGINE_API
+    #define SMOL_GAME_API
 #endif
 
 #ifndef WIN32_LEAN_AND_MEAN

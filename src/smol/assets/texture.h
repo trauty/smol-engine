@@ -16,7 +16,7 @@ namespace smol
         LINEAR
     };
 
-    struct SMOL_API texture_t
+    struct SMOL_ENGINE_API texture_t
     {
         i32 width = 0;
         i32 height = 0;
@@ -29,7 +29,7 @@ namespace smol
     };
 
     template <>
-    struct SMOL_API asset_loader_t<texture_t>
+    struct SMOL_ENGINE_API asset_loader_t<texture_t>
     {
         static std::optional<texture_t> load(const std::string& path, texture_format_e type = texture_format_e::SRGB);
         static void unload(texture_t& tex);

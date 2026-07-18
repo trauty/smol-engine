@@ -7,7 +7,7 @@
 
 namespace smol
 {
-    struct SMOL_API linear_allocator_t
+    struct SMOL_ENGINE_API linear_allocator_t
     {
         std::vector<u8_t> buffer;
         size_t cur_offset = 0;

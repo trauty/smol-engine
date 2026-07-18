@@ -145,6 +145,7 @@ namespace smol::cooker::mesh
 
         mesh_header_t header = {
             .magic = SMOL_MESH_MAGIC,
+            .version = SMOL_MESH_VERSION,
             .vertex_count = static_cast<u32_t>(optimized_vertices.size()),
             .index_count = static_cast<u32_t>(optimized_indices.size()),
             .local_center = center,

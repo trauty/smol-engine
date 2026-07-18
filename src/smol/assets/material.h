@@ -17,7 +17,7 @@ namespace smol
 {
     constexpr u32_t NULL_SHADER_MODULE = UINT_MAX;
 
-    struct SMOL_API material_t
+    struct SMOL_ENGINE_API material_t
     {
         asset_handle_t shader_handle;
         std::vector<u8> data;
@@ -78,7 +78,7 @@ namespace smol
     };
 
     template <>
-    struct SMOL_API asset_loader_t<material_t>
+    struct SMOL_ENGINE_API asset_loader_t<material_t>
     {
         static std::optional<material_t> load(const std::string& path, asset_handle_t target_shader = {});
         static void unload(material_t& mat);

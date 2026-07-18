@@ -37,6 +37,10 @@ namespace smol::editor::panels
         {
             if (ImGui::BeginMenu("File"))
             {
+                if (ImGui::MenuItem("Open Project Manager")) { ctx.show_project_manager = true; }
+
+                ImGui::Separator();
+
                 if (ImGui::MenuItem("New Scene"))
                 {
                     smol::serialization::clear_scene(world);
@@ -47,7 +51,7 @@ namespace smol::editor::panels
                 if (ImGui::MenuItem("Open Scene..."))
                 {
                     SDL_DialogFileFilter filters[] = {
-                        {"Smol Scene", "smolscene"}
+                        {"Smol Scene", "scene"}
                     };
                     SDL_ShowOpenFileDialog(open_scene_callback, &ctx, smol::window::get_window(), filters, 1,
                                            ctx.project_dir.empty() ? nullptr : ctx.project_dir.c_str(), false);
@@ -66,7 +70,7 @@ namespace smol::editor::panels
                 if (ImGui::MenuItem("Save As..."))
                 {
                     SDL_DialogFileFilter filters[] = {
-                        {"Smol Scene", "smolscene"}
+                        {"Smol Scene", "scene"}
                     };
                     SDL_ShowSaveFileDialog(save_scene_callback, &ctx, smol::window::get_window(), filters, 1,
                                            ctx.project_dir.empty() ? nullptr : ctx.project_dir.c_str());

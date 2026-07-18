@@ -15,6 +15,7 @@
 #include <iterator>
 #include <slang-com-ptr.h>
 #include <slang.h>
+#include <spirv-tools/optimizer.hpp>
 #include <string>
 #include <system_error>
 #include <vector>
@@ -22,6 +23,23 @@
 namespace smol::cooker::shader
 {
     namespace { Slang::ComPtr<slang::IGlobalSession> global_session; }
+
+    // run spirv-opt over emitted spriv
+    void optimize_spirv(std::vector<u32>& spirv, const std::string& debug_name)
+    {
+        if (spirv.empty()) { return; }
+
+        spvtools::Optimizer opt(SPV_ENV_VULKAN_1_3);
+        opt.SetMessageConsumer(
+            [&](spv_message_level_t level, const char*, const spv_position_t&, const char* msg)
+            {
+                if (level <= SPV_MSG_WARNING) { SMOL_LOG_WARN("SHADER_COOKER", "spirv-opt ({}): {}", debug_name, msg); }
+            });
+        opt.RegisterPerformancePasses();
+
+        std::vector<u32> optimized;
+        if (opt.Run(spirv.data(), spirv.size(), &optimized) && !optimized.empty()) { spirv = std::move(optimized); }
+    }
 
     void init()
     {
@@ -374,6 +392,7 @@ namespace smol::cooker::shader
             {
                 res.compute_spirv.assign((u32*)kernel_blob->getBufferPointer(),
                                          (u32*)kernel_blob->getBufferPointer() + kernel_blob->getBufferSize() / 4);
+                optimize_spirv(res.compute_spirv, file_path + ":compute");
             }
 
             res.success = !res.compute_spirv.empty();
@@ -386,6 +405,7 @@ namespace smol::cooker::shader
             {
                 res.vert_spirv.assign((u32*)kernel_blob->getBufferPointer(),
                                       (u32*)kernel_blob->getBufferPointer() + kernel_blob->getBufferSize() / 4);
+                optimize_spirv(res.vert_spirv, file_path + ":vertex");
             }
 
             kernel_blob = nullptr;
@@ -395,6 +415,7 @@ namespace smol::cooker::shader
             {
                 res.frag_spirv.assign((u32*)kernel_blob->getBufferPointer(),
                                       (u32*)kernel_blob->getBufferPointer() + kernel_blob->getBufferSize() / 4);
+                optimize_spirv(res.frag_spirv, file_path + ":fragment");
             }
 
             res.success = !res.vert_spirv.empty() && !res.frag_spirv.empty();
@@ -416,6 +437,7 @@ namespace smol::cooker::shader
 
         shader_header_t header = {
             .magic = SMOL_SHADER_MAGIC,
+            .version = SMOL_SHADER_VERSION,
             .is_compute = res.is_compute,
             .has_material_data = !res.shader_types.empty(),
             .vert_spirv_size = static_cast<u32_t>(res.vert_spirv.size()),
