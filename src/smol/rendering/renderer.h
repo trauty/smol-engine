@@ -7,12 +7,15 @@
 #include "smol/rendering/rendergraph.h"
 #include "smol/window.h"
 
-#include <functional>
 #include <vector>
 
 namespace smol::renderer
 {
     using graph_builder_func_t = void (*)(rendergraph_t&, ecs::registry_t&);
+
+    // A plain function pointer, not std::function: pass callbacks live in the frame arena,
+    // which never destroys what it holds, so a capture owning memory would leak per frame.
+    using pass_execute_func_t = void (*)(rendergraph_t&, smol::material_t&);
 
     SMOL_ENGINE_API void register_renderer_feature(graph_builder_func_t builder);
 
@@ -24,19 +27,19 @@ namespace smol::renderer
     SMOL_ENGINE_API rg_pass_t&
     add_fullscreen_pass(rendergraph_t& graph, u32_t name_hash, const char* debug_name, smol::material_t* material,
                         const std::vector<rg_resource_id>& reads, const std::vector<rg_resource_id>& writes,
-                        std::function<void(rendergraph_t&, smol::material_t&)> on_execute = nullptr);
+                        pass_execute_func_t on_execute = nullptr);
 
     SMOL_ENGINE_API rg_pass_t&
     add_compute_pass(rendergraph_t& graph, u32_t name_hash, const char* debug_name, smol::material_t* material,
                      u32_t dispatch_x, u32_t dispatch_y, u32_t dispatch_z, const std::vector<rg_resource_id>& reads,
                      const std::vector<rg_resource_id>& writes,
-                     std::function<void(rendergraph_t&, smol::material_t&)> on_execute = nullptr);
+                     pass_execute_func_t on_execute = nullptr);
 
     bool init(const context_config_t& config, SDL_Window* window);
     void reset_assets();
     void shutdown();
 
-    extern render_context_t ctx;
+    SMOL_ENGINE_API extern render_context_t ctx;
 
     void render(ecs::registry_t& reg);
 
@@ -57,12 +60,12 @@ namespace smol::renderer
 
     void create_buffer(VkDeviceSize size, VkBufferUsageFlags buffer_usage, VmaMemoryUsage mem_usage, VkBuffer& buffer,
                        VmaAllocation& allocation);
-    VkDeviceAddress get_buffer_address(VkBuffer buffer);
+    SMOL_ENGINE_API VkDeviceAddress get_buffer_address(VkBuffer buffer);
     void create_image(u32 width, u32 height, VkFormat format, VkImageTiling tiling, VkImageUsageFlags usage,
                       VkMemoryPropertyFlags props, VkImage& image, VkDeviceMemory& image_mem);
 
-    VkCommandBuffer begin_transfer_commands();
-    u64_t submit_transfer_commands(VkCommandBuffer cmd);
+    SMOL_ENGINE_API VkCommandBuffer begin_transfer_commands();
+    SMOL_ENGINE_API u64_t submit_transfer_commands(VkCommandBuffer cmd);
 
     VkSampler create_sampler(VkFilter filter, VkSamplerAddressMode address_mode);
 

@@ -1,6 +1,7 @@
 #include "toolbar.h"
 
 #include "imgui.h"
+#include "imgui_internal.h"
 #include "smol/ecs_fwd.h"
 
 namespace smol::editor::panels
@@ -10,7 +11,8 @@ namespace smol::editor::panels
         ImGui::SetNextWindowSizeConstraints(ImVec2(0.0f, 32.0f), ImVec2(FLT_MAX, 32.0f));
 
         ImGuiWindowClass window_class;
-        window_class.DockNodeFlagsOverrideSet = ImGuiDockNodeFlags_NoResize;
+        window_class.DockNodeFlagsOverrideSet =
+            ImGuiDockNodeFlags_NoResize | (ImGuiDockNodeFlags)ImGuiDockNodeFlags_NoTabBar;
         ImGui::SetNextWindowClass(&window_class);
 
         ImGuiWindowFlags flags = ImGuiWindowFlags_NoTitleBar | ImGuiWindowFlags_NoScrollbar;

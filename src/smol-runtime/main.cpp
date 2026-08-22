@@ -10,7 +10,6 @@
 #include "smol/vfs.h"
 #include "smol/world.h"
 
-#include <SDL3/SDL_filesystem.h>
 #include <SDL3/SDL_main.h>
 #include <filesystem>
 
@@ -22,7 +21,7 @@ extern "C" void smol_game_shutdown(smol::world_t* world);
     #include "smol/os.h"
     #if SMOL_PLATFORM_WIN
         #include <windows.h>
-    #elif SMOL_PLATFORM_LINUX || SMOL_PLATFORM_ANDROID
+    #elif SMOL_PLATFORM_LINUX
         #include <dlfcn.h>
     #endif
 
@@ -48,32 +47,17 @@ int main(int argc, char* argv[])
     const char* window_name = have_project ? project.project_name.c_str() : "smol";
     if (!smol::engine::init(window_name, 1280, 720)) { return -1; }
 
-#if SMOL_PLATFORM_ANDROID
-    smol::asset_meta::init("guid_map.json");
-#else
-    namespace fs = std::filesystem;
-    const char* base_path = SDL_GetBasePath();
-    std::string bp = base_path ? base_path : ".";
-    while (bp.size() > 1 && (bp.back() == '/' || bp.back() == '\\')) { bp.pop_back(); }
-    const fs::path exe_dir = bp;
-
-    if (fs::exists(exe_dir / "assets" / "engine"))
+    // engine::init() already mounted the cooked tree beside the binary and loaded its guid
+    // map. A project keeps its own copy of the engine assets, so its root supersedes that
+    // one; the guid map merges, and the engine GUIDs are identical in both.
+    if (have_project)
     {
-        smol::asset_meta::init((exe_dir / "assets" / "guid_map.json").generic_string());
+        namespace fs = std::filesystem;
+        const fs::path cooked = project.cooked_assets_dir;
+        smol::vfs::mount("engine://assets/", (cooked / "engine").generic_string() + "/");
+        smol::vfs::mount("game://assets/", (cooked / "game").generic_string() + "/");
+        smol::asset_meta::load_guid_map((cooked / "guid_map.json").generic_string());
     }
-    else
-    {
-        const fs::path engine_assets = exe_dir.parent_path() / "share" / "smol" / "engine-assets";
-        smol::asset_meta::init((engine_assets / "guid_map.json").generic_string());
-
-        if (have_project)
-        {
-            const fs::path game_cook = project.cooked_assets_dir / "game";
-            smol::vfs::mount("game://assets/", game_cook.generic_string() + "/");
-            smol::asset_meta::init((project.cooked_assets_dir / "guid_map.json").generic_string());
-        }
-    }
-#endif
 
     smol::engine::create_scene();
     smol::world_t& cur_world = smol::engine::get_active_world();
@@ -91,7 +75,7 @@ int main(int argc, char* argv[])
         {
     #if SMOL_PLATFORM_WIN
             SMOL_LOG_FATAL("ENGINE", "Failed to load library with name: {}; Error: {}", lib_name, GetLastError());
-    #elif SMOL_PLATFORM_LINUX || SMOL_PLATFORM_ANDROID
+    #elif SMOL_PLATFORM_LINUX
             SMOL_LOG_FATAL("ENGINE", "Failed to load library with name: {}; Error: {}", lib_name, dlerror());
     #endif
             return -1;

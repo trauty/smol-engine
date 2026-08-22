@@ -12,7 +12,7 @@ namespace
 #if SMOL_PLATFORM_WIN
     constexpr const char* LIB_PREFIX = "";
     constexpr const char* LIB_EXT = ".dll";
-#elif SMOL_PLATFORM_LINUX || SMOL_PLATFORM_ANDROID
+#elif SMOL_PLATFORM_LINUX
     constexpr const char* LIB_PREFIX = "lib";
     constexpr const char* LIB_EXT = ".so";
 #endif

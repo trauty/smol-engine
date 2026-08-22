@@ -1,19 +1,22 @@
 set_project("${NAME}")
 set_version("0.0.1")
 
-set_config("game_name", "${NAME}")
-
 add_rules("plugin.compile_commands.autoupdate", {outputdir = "."})
 
-local function smol_engine_dir()
+local function find_smol_engine()
     local env = os.getenv("SMOL_ENGINE_DIR")
-    if env and os.isdir(env) then return env end
+    if env and env ~= "" and os.isdir(env) then
+        return env
+    end
 
-    local sub = path.join(os.scriptdir(), "smol-engine")
-    if os.isdir(sub) then return sub end
-
-    local sibling = path.join(os.scriptdir(), "..", "smol-engine")
-    if os.isdir(sibling) then return sibling end
+    for _, cand in ipairs({
+        path.join(os.scriptdir(), "smol-engine"),
+        path.join(os.scriptdir(), "..", "smol-engine"),
+    }) do
+        if os.isdir(cand) then
+            return path.absolute(cand)
+        end
+    end
 
     local home = os.getenv("HOME") or os.getenv("USERPROFILE")
     if home then
@@ -24,18 +27,16 @@ local function smol_engine_dir()
         end
     end
 
-    return path.join(os.scriptdir(), "NO_SMOL_ENGINE__set_SMOL_ENGINE_DIR_or_vendor_smol-engine")
+    print("")
+    print("  Could not find smol-engine")
+    print("")
+    print("  Point at it with SMOL_ENGINE_DIR, vendor it at ./smol-engine, place it")
+    print("  beside this project as ../smol-engine, or install it under ~/.smol/engines/ on Linux")
+    print("")
+    smol_engine_was_not_found()
 end
 
-local SMOL_ENGINE = smol_engine_dir()
-set_config("smol_engine_dir", SMOL_ENGINE)
-if os.isfile(path.join(SMOL_ENGINE, "xmake.lua")) then
-    includes(SMOL_ENGINE)
-else
-    includes(path.join(SMOL_ENGINE, "share", "smol", "rules", "*.lua"))
-    includes(path.join(SMOL_ENGINE, "share", "smol", "tasks", "*.lua"))
-    add_moduledirs(path.join(SMOL_ENGINE, "share", "smol", "modules"))
-end
+includes(path.join(find_smol_engine(), "xmake", "smol.lua"))
 
 target("${NAME}")
     add_rules("smol.game", "smol.hotreload")

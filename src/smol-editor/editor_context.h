@@ -38,6 +38,7 @@ namespace smol
         u32_t viewport_width = 0;
         u32_t viewport_height = 0;
 
+        game_register_types_func game_register_types = nullptr;
         game_init_func game_init = nullptr;
         game_update_func game_update = nullptr;
         game_shutdown_func game_shutdown = nullptr;
@@ -45,10 +46,16 @@ namespace smol
         std::vector<panel_draw_func> custom_panels;
 
         std::string project_dir;
+        std::string project_file;
         std::string pending_scene_path;
         std::string current_scene_path;
         bool pending_scene_load = false;
         bool pending_scene_save = false;
+
+        bool project_loaded = false;
+
+        bool recompile_requested = false;
+        bool recompiling = false;
 
         bool show_project_manager = false;
     };

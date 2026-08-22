@@ -14,7 +14,7 @@ namespace smol::os
 
     void free_lib(lib_handle_t lib) { FreeLibrary((HMODULE)lib); }
 } // namespace smol::os
-#elif SMOL_PLATFORM_LINUX || SMOL_PLATFORM_ANDROID
+#elif SMOL_PLATFORM_LINUX
     #include <dlfcn.h>
 namespace smol::os
 {

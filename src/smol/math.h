@@ -163,8 +163,10 @@ namespace smol
 
         static quat_t from_euler(vec3_t euler_angles)
         {
+            mat4 rot_mat;
+            glm_euler_xyz(euler_angles, rot_mat);
             quat_t dest;
-            glm_euler_zyx_quat(euler_angles, dest);
+            glm_mat4_quat(rot_mat, dest);
             return dest;
         }
 

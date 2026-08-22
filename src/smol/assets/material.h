@@ -73,6 +73,10 @@ namespace smol
 
         void set_property_raw(u32_t name_hash, const void* value, u32_t size);
 
+        // Gives back the material heap allocations. Does not touch shader_handle or
+        // bound_textures -- who owns those depends on how the material was made.
+        void release_heap();
+
         void set_sampler(u32_t name_hash, sampler_type_e sampler)
         { set_property<u32_t>(name_hash, static_cast<u32_t>(sampler)); }
     };
@@ -80,7 +84,7 @@ namespace smol
     template <>
     struct SMOL_ENGINE_API asset_loader_t<material_t>
     {
-        static std::optional<material_t> load(const std::string& path, asset_handle_t target_shader = {});
+        static std::optional<material_t> load(const std::string& path);
         static void unload(material_t& mat);
     };
 } // namespace smol

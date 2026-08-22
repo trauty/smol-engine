@@ -51,10 +51,6 @@ namespace smol
             ktxHashList_FindValue(&k_tex->kvDataHead, "smol_tex_channels", &chan_len, (void**)&channels);
             i32 num_channels = channels ? std::stoi(channels) : 4;
 
-#ifdef SMOL_PLATFORM_ANDROID
-            ktx_transcode_fmt_e target_format = KTX_TTF_ASTC_4x4_RGBA;
-#else
-
             ktx_transcode_fmt_e target_format = KTX_TTF_BC7_RGBA;
 
             if (type_str == "normal") { target_format = KTX_TTF_BC5_RG; }
@@ -62,7 +58,6 @@ namespace smol
             {
                 if (num_channels == 1) { target_format = KTX_TTF_BC4_R; }
             }
-#endif
 
             if (ktxTexture2_TranscodeBasis(k_tex, target_format, 0) != KTX_SUCCESS)
             {

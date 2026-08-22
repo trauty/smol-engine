@@ -23,7 +23,6 @@ namespace smol::editor::panels
 
             for (smol::ecs::entity_t entity : world.registry.view<smol::tag_t>())
             {
-
                 ImGui::PushID(static_cast<i32>(smol::ecs::get_entity_id(entity)));
 
                 std::string entity_name = world.registry.get<smol::tag_t>(entity).name;

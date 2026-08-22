@@ -11,13 +11,5 @@
         "bin_dir": "bin",
         "assets_dir": "assets",
         "cooked_assets_dir": ".smol"
-    },
-    "android": {
-        "package_id": "com.smol.${NAME}",
-        "icon": "assets/icon.png",
-        "version_code": 1,
-        "version_name": "1.0",
-        "min_sdk": 24,
-        "target_sdk": 34
     }
 }

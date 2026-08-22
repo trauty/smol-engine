@@ -21,6 +21,7 @@
 #include "smol/systems/shadows.h"
 #include "smol/systems/transform.h"
 #include "smol/time.h"
+#include "smol/tween.h"
 #include "smol/vfs.h"
 #include "smol/window.h"
 #include "smol/world.h"
@@ -56,6 +57,7 @@ namespace smol::engine
 
         event_callback_t user_event_cb;
         ui_callback_t user_ui_cb;
+        post_render_callback_t user_post_render_cb;
     } // namespace
 
     bool init(const std::string& name, i32 init_window_width, i32 init_window_height)
@@ -67,6 +69,12 @@ namespace smol::engine
         smol::log::set_level(smol::log::level_e::LOG_DEBUG);
 
         SMOL_LOG_INFO("ENGINE", "Starting engine...");
+
+        // The renderer and the editor UI load engine:// assets during init, long before a
+        // project is opened. Without the map those get cached under their path instead of
+        // their GUID, so opening a project later would load a second copy of each.
+        const std::string& cooked_root = smol::vfs::cooked_root();
+        if (!cooked_root.empty()) { smol::asset_meta::load_guid_map(cooked_root + "/guid_map.json"); }
 
         smol::reflection::register_types();
         smol::jobs::init();
@@ -99,10 +107,6 @@ namespace smol::engine
         }
 
         SDL_WindowFlags window_flags = (SDL_WindowFlags)(SDL_WINDOW_VULKAN | SDL_WINDOW_RESIZABLE);
-
-#if SMOL_PLATFORM_ANDROID
-        window_flags = (SDL_WindowFlags)(window_flags | SDL_WINDOW_FULLSCREEN);
-#endif
 
         SDL_Window* window = SDL_CreateWindow(game_name.c_str(), init_window_width, init_window_height, window_flags);
         SDL_SetWindowPosition(window, SDL_WINDOWPOS_CENTERED, SDL_WINDOWPOS_CENTERED);
@@ -191,6 +195,8 @@ namespace smol::engine
 
             if (user_ui_cb) { user_ui_cb(); }
 
+            smol::tween::update(static_cast<f32>(smol::time::get_dt()));
+
             // smol::physics::interpolation_alpha = static_cast<f32>(accumulator / fixed_timestep);
             active_scene->update();
 
@@ -199,6 +205,8 @@ namespace smol::engine
             smol::shadow_system::update(active_scene->registry);
 
             if (!is_suspended) { smol::renderer::render(active_scene->registry); }
+
+            if (user_post_render_cb) { user_post_render_cb(); }
 
             smol::event_system::clear_frame_events(active_scene->registry);
 
@@ -209,6 +217,8 @@ namespace smol::engine
     bool shutdown()
     {
         SMOL_LOG_INFO("ENGINE", "Stopping engine.");
+
+        smol::reflection::shutdown();
 
         vkDeviceWaitIdle(renderer::ctx.device);
 
@@ -265,4 +275,5 @@ namespace smol::engine
 
     void set_event_callback(event_callback_t cb) { user_event_cb = cb; }
     void set_ui_callback(ui_callback_t cb) { user_ui_cb = cb; }
+    void set_post_render_callback(post_render_callback_t cb) { user_post_render_cb = cb; }
 } // namespace smol::engine

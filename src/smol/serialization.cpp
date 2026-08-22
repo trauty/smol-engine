@@ -17,6 +17,8 @@
 #include <cstring>
 #include <fstream>
 #include <string>
+#include <unordered_map>
+#include <utility>
 #include <vector>
 
 namespace smol::serialization
@@ -31,6 +33,17 @@ namespace smol::serialization
             };
         }
 
+        std::string meta_key(const char* name, u32_t id) { return name ? std::string(name) : std::to_string(id); }
+
+        bool is_numeric_key(const std::string& key)
+        { return !key.empty() && key.find_first_not_of("0123456789") == std::string::npos; }
+
+        u32_t key_to_hash(const std::string& key)
+        { return is_numeric_key(key) ? static_cast<u32_t>(std::stoul(key)) : smol::hash_string(key); }
+
+        std::string describe_key(const std::string& name, u32_t hash)
+        { return name.empty() ? std::to_string(hash) : name; }
+
         template <typename T>
         void write_pod(std::ofstream& out, const T& v)
         { out.write(reinterpret_cast<const char*>(&v), sizeof(T)); }
@@ -41,6 +54,87 @@ namespace smol::serialization
             write_pod(out, len);
             out.write(s.data(), s.size());
         }
+
+        std::unordered_map<u32_t, smol::reflection::type_t> component_types_by_pool(smol::world_t& world)
+        {
+            std::unordered_map<u32_t, smol::reflection::type_t> by_pool;
+            for (auto [meta_id, type] : smol::reflection::resolve(*world.reflection_ctx))
+            {
+                if (!type.func("get"_h)) { continue; } // not a component
+                by_pool.emplace(static_cast<u32_t>(type.info().hash()), type);
+            }
+            return by_pool;
+        }
+
+        nlohmann::json encode_component_fields(smol::world_t& world, smol::reflection::type_t type,
+                                               smol::reflection::any_t& instance)
+        {
+            nlohmann::json comp_json = nlohmann::json::object();
+
+            for (auto [data_id, data] : type.data())
+            {
+                smol::reflection::type_t field_type = data.type();
+                smol::reflection::any_t field_value = data.get(instance);
+                std::string prop_key = meta_key(data.name(), data_id);
+
+                smol::reflection::editor_prop_t* prop = static_cast<smol::reflection::editor_prop_t*>(data.custom());
+                if (prop && prop->asset_type_hash != 0)
+                {
+                    asset_handle_t handle = field_value.cast<asset_handle_t>();
+                    std::string path = smol::engine::get_asset_registry().get_path(handle);
+                    std::string_view guid = smol::asset_meta::get_guid(path);
+                    comp_json[prop_key] = tagged(
+                        scene_value_type_e::ASSET_REF,
+                        {
+                            {"t", prop->asset_type_hash                },
+                            {"g", guid.empty() ? "" : std::string(guid)},
+                            {"p", path                                 }
+                    });
+                    continue;
+                }
+
+                if (field_type == smol::reflection::resolve<i32>(*world.reflection_ctx))
+                {
+                    comp_json[prop_key] = tagged(scene_value_type_e::I32, field_value.cast<i32>());
+                }
+                else if (field_type == smol::reflection::resolve<u32>(*world.reflection_ctx))
+                {
+                    comp_json[prop_key] = tagged(scene_value_type_e::U32, field_value.cast<u32>());
+                }
+                else if (field_type == smol::reflection::resolve<f32>(*world.reflection_ctx))
+                {
+                    comp_json[prop_key] = tagged(scene_value_type_e::F32, field_value.cast<f32>());
+                }
+                else if (field_type == smol::reflection::resolve<bool>(*world.reflection_ctx))
+                {
+                    comp_json[prop_key] = tagged(scene_value_type_e::BOOL, field_value.cast<bool>());
+                }
+                else if (field_type == smol::reflection::resolve<std::string>(*world.reflection_ctx))
+                {
+                    comp_json[prop_key] = tagged(scene_value_type_e::STRING, field_value.cast<std::string>());
+                }
+                else if (field_type == smol::reflection::resolve<vec3_t>(*world.reflection_ctx))
+                {
+                    vec3_t vec = field_value.cast<smol::vec3_t>();
+                    comp_json[prop_key] = tagged(scene_value_type_e::VEC3, {vec.x, vec.y, vec.z});
+                }
+                else if (field_type.is_enum())
+                {
+                    // as_const is load-bearing: allow_cast has a non-const overload that converts
+                    // in place and returns bool, so calling it on a mutable any yields an any
+                    // holding a bool, and the cast below then fails an assert inside entt.
+                    const smol::reflection::any_t as_int = std::as_const(field_value).allow_cast<i32>();
+                    if (as_int) { comp_json[prop_key] = tagged(scene_value_type_e::I32, as_int.cast<i32>()); }
+                }
+                else
+                {
+                    SMOL_LOG_WARN("SCENE", "Field '{}' has unsupported type '{}' -- not saved", prop_key,
+                                  field_type.name() ? field_type.name() : "?");
+                }
+            }
+
+            return comp_json;
+        }
     } // namespace
 
     nlohmann::json serialize_scene(smol::world_t& world)
@@ -48,85 +142,39 @@ namespace smol::serialization
         nlohmann::json scene_data;
         scene_data["entities"] = nlohmann::json::array();
 
+        const std::unordered_map<u32_t, smol::reflection::type_t> by_pool = component_types_by_pool(world);
+
+        std::unordered_map<smol::ecs::entity_t, std::size_t> slots;
         for (smol::ecs::entity_t entity : world.registry.view<smol::ecs::entity_t>())
         {
+            slots.emplace(entity, scene_data["entities"].size());
+
             nlohmann::json entity_json;
             entity_json["components"] = nlohmann::json::object();
+            scene_data["entities"].push_back(std::move(entity_json));
+        }
 
-            for (auto [internal_type_id, type] : smol::reflection::resolve(*world.reflection_ctx))
+        for (auto [pool_id, pool] : world.registry.storage())
+        {
+            const auto type_it = by_pool.find(static_cast<u32_t>(pool_id));
+            if (type_it == by_pool.end()) { continue; }
+
+            const smol::reflection::type_t type = type_it->second;
+            const smol::reflection::func_t get_func = type.func("get"_h);
+            const std::string type_key = meta_key(type.name(), static_cast<u32_t>(type.id()));
+
+            for (smol::ecs::entity_t entity : pool)
             {
-                u32_t type_id = static_cast<u32_t>(type.id());
-
-                smol::reflection::func_t get_func = type.func("get"_h);
-                if (!get_func) { continue; }
+                const auto slot_it = slots.find(entity);
+                if (slot_it == slots.end()) { continue; }
 
                 smol::reflection::any_t instance =
                     get_func.invoke({}, smol::reflection::forward_as_meta(world.registry), entity);
                 if (!instance) { continue; }
 
-                std::string type_hash_str = std::to_string(type_id);
-                nlohmann::json& comp_json = entity_json["components"][type_hash_str];
-                comp_json = nlohmann::json::object();
-
-                for (auto [data_id, data] : type.data())
-                {
-                    smol::reflection::type_t field_type = data.type();
-                    smol::reflection::any_t field_value = data.get(instance);
-                    std::string prop_hash_str = std::to_string(data_id);
-
-                    smol::reflection::editor_prop_t* prop =
-                        static_cast<smol::reflection::editor_prop_t*>(data.custom());
-                    if (prop && prop->asset_type_hash != 0)
-                    {
-                        asset_handle_t handle = field_value.cast<asset_handle_t>();
-                        std::string path = smol::engine::get_asset_registry().get_path(handle);
-                        std::string_view guid = smol::asset_meta::get_guid(path);
-                        comp_json[prop_hash_str] =
-                            tagged(scene_value_type_e::ASSET_REF, {
-                                                                      {"t", prop->asset_type_hash                },
-                                                                      {"g", guid.empty() ? "" : std::string(guid)},
-                                                                      {"p", path                                 }
-                        });
-                        continue;
-                    }
-
-                    if (field_type == smol::reflection::resolve<i32>(*world.reflection_ctx))
-                    {
-                        comp_json[prop_hash_str] = tagged(scene_value_type_e::I32, field_value.cast<i32>());
-                    }
-                    else if (field_type == smol::reflection::resolve<i32_t>(*world.reflection_ctx))
-                    {
-                        comp_json[prop_hash_str] = tagged(scene_value_type_e::I32, field_value.cast<i32_t>());
-                    }
-                    else if (field_type == smol::reflection::resolve<u32>(*world.reflection_ctx))
-                    {
-                        comp_json[prop_hash_str] = tagged(scene_value_type_e::U32, field_value.cast<u32>());
-                    }
-                    else if (field_type == smol::reflection::resolve<u32_t>(*world.reflection_ctx))
-                    {
-                        comp_json[prop_hash_str] = tagged(scene_value_type_e::U32, field_value.cast<u32_t>());
-                    }
-                    else if (field_type == smol::reflection::resolve<f32>(*world.reflection_ctx))
-                    {
-                        comp_json[prop_hash_str] = tagged(scene_value_type_e::F32, field_value.cast<f32>());
-                    }
-                    else if (field_type == smol::reflection::resolve<bool>(*world.reflection_ctx))
-                    {
-                        comp_json[prop_hash_str] = tagged(scene_value_type_e::BOOL, field_value.cast<bool>());
-                    }
-                    else if (field_type == smol::reflection::resolve<std::string>(*world.reflection_ctx))
-                    {
-                        comp_json[prop_hash_str] = tagged(scene_value_type_e::STRING, field_value.cast<std::string>());
-                    }
-                    else if (field_type == smol::reflection::resolve<vec3_t>(*world.reflection_ctx))
-                    {
-                        vec3_t vec = field_value.cast<smol::vec3_t>();
-                        comp_json[prop_hash_str] = tagged(scene_value_type_e::VEC3, {vec.x, vec.y, vec.z});
-                    }
-                }
+                scene_data["entities"][slot_it->second]["components"][type_key] =
+                    encode_component_fields(world, type, instance);
             }
-
-            scene_data["entities"].push_back(entity_json);
         }
 
         return scene_data;
@@ -142,15 +190,17 @@ namespace smol::serialization
         {
             scene_entity_t& out_entity = scene.entities.emplace_back();
 
-            for (const auto& [type_hash_str, props_json] : entity_json["components"].items())
+            for (const auto& [type_key, props_json] : entity_json["components"].items())
             {
                 scene_component_t& out_comp = out_entity.components.emplace_back();
-                out_comp.type_hash = static_cast<u32_t>(std::stoul(type_hash_str));
+                out_comp.type_hash = key_to_hash(type_key);
+                if (!is_numeric_key(type_key)) { out_comp.type_name = type_key; }
 
-                for (const auto& [prop_hash_str, val] : props_json.items())
+                for (const auto& [prop_key, val] : props_json.items())
                 {
                     scene_property_t prop;
-                    prop.prop_hash = static_cast<u32_t>(std::stoul(prop_hash_str));
+                    prop.prop_hash = key_to_hash(prop_key);
+                    if (!is_numeric_key(prop_key)) { prop.prop_name = prop_key; }
 
                     if (val.is_object() && val.contains("ty") && val.contains("v"))
                     {
@@ -172,36 +222,10 @@ namespace smol::serialization
                             break;
                         }
                     }
-                    else if (val.is_boolean())
-                    {
-                        prop.type = scene_value_type_e::BOOL;
-                        prop.b = val.get<bool>();
-                    }
-                    else if (val.is_object() && val.contains("t"))
-                    {
-                        prop.type = scene_value_type_e::ASSET_REF;
-                        prop.asset_type = val.value("t", u64_t{0});
-                        prop.str = val.value("p", std::string{});
-                    }
-                    else if (val.is_array())
-                    {
-                        prop.type = scene_value_type_e::VEC3;
-                        prop.vec = vec3_t(val[0].get<f32>(), val[1].get<f32>(), val[2].get<f32>());
-                    }
-                    else if (val.is_string())
-                    {
-                        prop.type = scene_value_type_e::STRING;
-                        prop.str = val.get<std::string>();
-                    }
-                    else if (val.is_number_float())
-                    {
-                        prop.type = scene_value_type_e::F32;
-                        prop.f = val.get<f32>();
-                    }
                     else
                     {
-                        prop.type = scene_value_type_e::I32;
-                        prop.i = val.get<i32_t>();
+                        SMOL_LOG_WARN("SCENE", "Property '{}' is not a tagged value -- skipped", prop_key);
+                        continue;
                     }
 
                     out_comp.properties.push_back(std::move(prop));
@@ -258,16 +282,21 @@ namespace smol::serialization
         }
     }
 
-    void instantiate_scene(smol::world_t& world, const scene_t& scene)
+    namespace
     {
-        for (const scene_entity_t& scene_entity : scene.entities)
+        void apply_scene_entity(smol::world_t& world, smol::ecs::entity_t entity, const scene_entity_t& scene_entity)
         {
-            smol::ecs::entity_t entity = world.registry.create();
-
             for (const scene_component_t& comp : scene_entity.components)
             {
-                smol::reflection::type_t type = smol::reflection::resolve(*world.reflection_ctx, comp.type_hash);
-                if (!type) { continue; }
+                const u32_t type_hash = comp.type_hash;
+                smol::reflection::type_t type = smol::reflection::resolve(*world.reflection_ctx, type_hash);
+
+                if (!type)
+                {
+                    SMOL_LOG_WARN("SCENE", "Unknown component '{}', dropped from entity",
+                                  describe_key(comp.type_name, comp.type_hash));
+                    continue;
+                }
 
                 if (smol::reflection::func_t add_func = type.func("add"_h); add_func)
                 {
@@ -284,7 +313,14 @@ namespace smol::serialization
                 for (const scene_property_t& prop : comp.properties)
                 {
                     smol::reflection::data_t data = type.data(prop.prop_hash);
-                    if (!data) { continue; }
+
+                    if (!data)
+                    {
+                        SMOL_LOG_WARN("SCENE", "Unknown field '{}' on component '{}', value dropped",
+                                      describe_key(prop.prop_name, prop.prop_hash),
+                                      describe_key(comp.type_name, comp.type_hash));
+                        continue;
+                    }
 
                     switch (prop.type)
                     {
@@ -311,6 +347,15 @@ namespace smol::serialization
                 }
             }
         }
+    } // namespace
+
+    void instantiate_scene(smol::world_t& world, const scene_t& scene)
+    {
+        for (const scene_entity_t& scene_entity : scene.entities)
+        {
+            smol::ecs::entity_t entity = world.registry.create();
+            apply_scene_entity(world, entity, scene_entity);
+        }
     }
 
     void deserialize_scene(smol::world_t& world, const nlohmann::json& scene_data)
@@ -324,5 +369,81 @@ namespace smol::serialization
         to_destroy.insert(to_destroy.end(), view.begin(), view.end());
 
         world.registry.destroy(to_destroy.begin(), to_destroy.end());
+    }
+
+    std::unordered_set<u32_t> reflected_component_pool_ids(smol::world_t& world)
+    {
+        std::unordered_set<u32_t> ids;
+        for (auto [meta_id, type] : smol::reflection::resolve(*world.reflection_ctx))
+        {
+            ids.insert(static_cast<u32_t>(type.info().hash()));
+        }
+        return ids;
+    }
+
+    reload_snapshot_t evict_game_components(smol::world_t& world, const std::unordered_set<u32_t>& engine_pool_ids)
+    {
+        reload_snapshot_t snapshot;
+
+        std::unordered_map<u32_t, smol::reflection::type_t> game_types;
+        for (const auto& [pool_id, type] : component_types_by_pool(world))
+        {
+            if (!engine_pool_ids.count(pool_id)) { game_types.emplace(pool_id, type); }
+        }
+
+        std::unordered_map<smol::ecs::entity_t, std::size_t> slots;
+        std::vector<std::pair<smol::ecs::entity_t, nlohmann::json>> collected;
+
+        for (auto [pool_id, pool] : world.registry.storage())
+        {
+            const auto type_it = game_types.find(static_cast<u32_t>(pool_id));
+            if (type_it == game_types.end()) { continue; }
+
+            const smol::reflection::type_t type = type_it->second;
+            const smol::reflection::func_t get_func = type.func("get"_h);
+            const std::string type_key = meta_key(type.name(), static_cast<u32_t>(type.id()));
+
+            for (smol::ecs::entity_t entity : pool)
+            {
+                smol::reflection::any_t instance =
+                    get_func.invoke({}, smol::reflection::forward_as_meta(world.registry), entity);
+                if (!instance) { continue; }
+
+                const auto [slot_it, inserted] = slots.try_emplace(entity, collected.size());
+                if (inserted) { collected.emplace_back(entity, nlohmann::json::object()); }
+
+                collected[slot_it->second].second[type_key] = encode_component_fields(world, type, instance);
+            }
+        }
+
+        for (auto& [entity, comps] : collected)
+        {
+            snapshot.entities.push_back({
+                {"e",          static_cast<u32_t>(entt::to_integral(entity))},
+                {"components", std::move(comps)                             }
+            });
+        }
+
+        for (const auto& [pool_id, type] : game_types) { world.registry.reset(pool_id); }
+
+        return snapshot;
+    }
+
+    void restore_game_components(smol::world_t& world, const reload_snapshot_t& snapshot)
+    {
+        for (const nlohmann::json& entry : snapshot.entities)
+        {
+            smol::ecs::entity_t entity = static_cast<smol::ecs::entity_t>(entry.at("e").get<u32_t>());
+            if (!world.registry.valid(entity)) { continue; }
+
+            nlohmann::json wrapper;
+            wrapper["entities"] = nlohmann::json::array();
+            wrapper["entities"].push_back({
+                {"components", entry.at("components")}
+            });
+
+            scene_t scene = scene_from_json(wrapper);
+            if (!scene.entities.empty()) { apply_scene_entity(world, entity, scene.entities.front()); }
+        }
     }
 } // namespace smol::serialization

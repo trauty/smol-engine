@@ -7,7 +7,7 @@
 
 namespace smol
 {
-    constexpr int SMOL_PROJECT_VERSION = 2;
+    constexpr int SMOL_PROJECT_VERSION = 1;
 
     struct project_t
     {

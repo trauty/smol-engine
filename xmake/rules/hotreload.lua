@@ -1,9 +1,5 @@
 rule("smol.hotreload")
 after_build(function(target)
-    if target:is_plat("android") then
-        return
-    end
-
     import("core.project.depend")
 
     local targetfile = target:targetfile()

@@ -24,17 +24,12 @@ std::string to_lower(std::string s)
     return s;
 }
 
-std::string vfs_prefix_from_output(const std::string& output_dir)
-{
-    std::string name = std::filesystem::path(output_dir).filename().string();
-    return name + "://assets/";
-}
-
 int main(i32 argc, char** argv)
 {
     std::vector<std::string> input_dirs;
     std::vector<std::string> include_dirs;
     std::string output_dir = ".smol";
+    std::string name_space;
 
     for (i32 i = 1; i < argc; i++)
     {
@@ -42,12 +37,15 @@ int main(i32 argc, char** argv)
         if (arg == "-i" && i + 1 < argc) { input_dirs.push_back(argv[++i]); }
         else if (arg == "-I" && i + 1 < argc) { include_dirs.push_back(argv[++i]); }
         else if (arg == "-o" && i + 1 < argc) { output_dir = argv[++i]; }
+        else if ((arg == "-n" || arg == "--namespace") && i + 1 < argc) { name_space = argv[++i]; }
     }
 
-    if (input_dirs.empty())
+    if (input_dirs.empty() || name_space.empty())
     {
-        SMOL_LOG_ERROR("ASSET_COOKER", "usage: smol-cooker -i <cook_dir> [-I <include_dir>] -o <out_dir> [--game]");
-        return 0;
+        SMOL_LOG_ERROR("ASSET_COOKER",
+                       "usage: smol-cooker -i <cook_dir> [-I <include_dir>] -o <out_dir> -n <namespace>");
+        // the namespace is the vfs scheme every cooked asset is keyed under
+        return 1;
     }
 
     std::vector<std::string> all_shader_dirs = input_dirs;
@@ -79,7 +77,7 @@ int main(i32 argc, char** argv)
         }
     }
 
-    std::string vfs_prefix = vfs_prefix_from_output(output_dir);
+    std::string vfs_prefix = name_space + "://assets/";
     nlohmann::json guid_map_data;
 
     for (const std::string& dir : input_dirs)

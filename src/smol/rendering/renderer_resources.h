@@ -99,8 +99,8 @@ namespace smol::renderer
         u32_t next_unused;
 
         void init(u32_t max_indices);
-        u32_t acquire();
-        void release(u32_t index);
+        SMOL_ENGINE_API u32_t acquire();
+        SMOL_ENGINE_API void release(u32_t index);
     };
 
     constexpr u32_t MATERIAL_HEAP_SIZE = 24 * 1024 * 1024;
@@ -166,7 +166,7 @@ namespace smol::renderer
         void process_deletions(u64_t cur_timeline_value);
     };
 
-    extern resource_system_t res_system;
+    SMOL_ENGINE_API extern resource_system_t res_system;
 
     void init_resources();
     void shutdown_resources();

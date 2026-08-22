@@ -1,6 +1,7 @@
 #include "jobs.h"
 
 #include "smol/defines.h"
+#include "smol/log.h"
 
 #include <algorithm>
 #include <array>
@@ -9,7 +10,6 @@
 #include <functional>
 #include <mutex>
 #include <thread>
-#include <utility>
 #include <vector>
 
 namespace smol::jobs
@@ -17,47 +17,91 @@ namespace smol::jobs
     constexpr u32_t MAX_JOBS = 4096;
     constexpr u32_t MASK = MAX_JOBS - 1;
 
+    constexpr std::size_t CACHE_LINE = 64;
+    constexpr u32_t SPIN_ROUNDS = 64;
+
     struct job_t
     {
         job_function<64> task;
         counter_t* counter = nullptr;
     };
 
+    struct slot_t
+    {
+        std::atomic<u32_t> sequence{0};
+        job_t job;
+    };
+
     struct job_queue_t
     {
-        std::array<job_t, MAX_JOBS> buffer;
-        std::atomic<u32_t> head{0};
-        std::atomic<u32_t> tail{0};
+        std::array<slot_t, MAX_JOBS> buffer;
+        alignas(CACHE_LINE) std::atomic<u32_t> head{0};
+        alignas(CACHE_LINE) std::atomic<u32_t> tail{0};
+        alignas(CACHE_LINE) std::atomic<u32_t> sleepers{0};
+
         std::mutex wake_mutex;
         std::condition_variable wake_cv;
 
+        job_queue_t()
+        {
+            for (u32_t i = 0; i < MAX_JOBS; i++) { buffer[i].sequence.store(i, std::memory_order_relaxed); }
+        }
+
+        bool has_work() const { return head.load(std::memory_order_acquire) != tail.load(std::memory_order_acquire); }
+
         bool push(job_function<64> task, counter_t* counter)
         {
-            u32_t cur_tail = tail.fetch_add(1, std::memory_order_acq_rel);
-            u32_t index = cur_tail & MASK;
+            u32_t pos = tail.load(std::memory_order_relaxed);
+            while (true)
+            {
+                slot_t& slot = buffer[pos & MASK];
+                const u32_t seq = slot.sequence.load(std::memory_order_acquire);
+                const i32_t diff = static_cast<i32_t>(seq - pos);
 
-            if (tail - head > MAX_JOBS) { return false; }
-
-            buffer[index].task = task;
-            buffer[index].counter = counter;
-
-            return true;
+                if (diff == 0)
+                {
+                    if (tail.compare_exchange_weak(pos, pos + 1, std::memory_order_relaxed))
+                    {
+                        slot.job.task = task;
+                        slot.job.counter = counter;
+                        slot.sequence.store(pos + 1, std::memory_order_release);
+                        return true;
+                    }
+                }
+                else if (diff < 0) { return false; } // full
+                else
+                {
+                    pos = tail.load(std::memory_order_relaxed);
+                }
+            }
         }
 
         bool pop(job_t& out_job)
         {
-            u32_t cur_head = head.load(std::memory_order_acquire);
+            u32_t pos = head.load(std::memory_order_relaxed);
             while (true)
             {
-                u32_t cur_tail = tail.load(std::memory_order_relaxed);
-                if (cur_head == cur_tail) { return false; }
+                slot_t& slot = buffer[pos & MASK];
+                const u32_t seq = slot.sequence.load(std::memory_order_acquire);
+                const i32_t diff = static_cast<i32_t>(seq - (pos + 1));
 
-                if (head.compare_exchange_weak(cur_head, cur_head + 1, std::memory_order_release,
-                                               std::memory_order_relaxed))
+                if (diff == 0)
                 {
-                    u32_t index = cur_head & MASK;
-                    out_job = std::move(buffer[index]);
-                    return true;
+                    if (head.compare_exchange_weak(pos, pos + 1, std::memory_order_relaxed))
+                    {
+                        out_job = slot.job;
+
+                        slot.job.task = job_function<64>{};
+                        slot.job.counter = nullptr;
+
+                        slot.sequence.store(pos + MAX_JOBS, std::memory_order_release);
+                        return true;
+                    }
+                }
+                else if (diff < 0) { return false; } // empty
+                else
+                {
+                    pos = head.load(std::memory_order_relaxed);
                 }
             }
         }
@@ -72,6 +116,25 @@ namespace smol::jobs
         std::thread low_priority_worker; // one for the assets and general io
         std::atomic<bool> is_running{false};
 
+        void run_job(const job_t& job)
+        {
+            if (job.task) { job.task(); }
+            if (job.counter) { job.counter->fetch_sub(1, std::memory_order_release); }
+        }
+
+        void park(job_queue_t& queue)
+        {
+            queue.sleepers.fetch_add(1, std::memory_order_seq_cst);
+
+            {
+                std::unique_lock lock(queue.wake_mutex);
+                queue.wake_cv.wait(lock, [&queue]
+                                   { return !is_running.load(std::memory_order_relaxed) || queue.has_work(); });
+            }
+
+            queue.sleepers.fetch_sub(1, std::memory_order_relaxed);
+        }
+
         void worker_loop(job_queue_t& queue)
         {
             while (is_running.load(std::memory_order_relaxed))
@@ -79,15 +142,23 @@ namespace smol::jobs
                 job_t job;
                 if (queue.pop(job))
                 {
-                    if (job.task) { job.task(); }
+                    run_job(job);
+                    continue;
+                }
 
-                    if (job.counter) { job.counter->fetch_sub(1, std::memory_order_release); }
-                }
-                else
+                bool found = false;
+                for (u32_t spin = 0; spin < SPIN_ROUNDS; spin++)
                 {
-                    std::unique_lock lock(queue.wake_mutex);
-                    queue.wake_cv.wait(lock);
+                    if (queue.pop(job))
+                    {
+                        found = true;
+                        break;
+                    }
+                    std::this_thread::yield();
                 }
+
+                if (found) { run_job(job); }
+                else if (is_running.load(std::memory_order_relaxed)) { park(queue); }
             }
         }
     } // namespace
@@ -96,24 +167,33 @@ namespace smol::jobs
     {
         void push_job(job_function<64> task, counter_t* counter, priority_e prio)
         {
-            if (prio == priority_e::HIGH) { high_priority_queue.push(std::move(task), counter); }
-            else
-            {
-                low_priority_queue.push(std::move(task), counter);
-            }
+            job_queue_t& queue = (prio == priority_e::HIGH) ? high_priority_queue : low_priority_queue;
+
+            if (queue.push(task, counter)) { return; }
+
+            SMOL_LOG_WARN("JOBS", "Job queue full ({} slots), running job on the submitting thread", MAX_JOBS);
+
+            if (task) { task(); }
+            if (counter) { counter->fetch_sub(1, std::memory_order_release); }
         }
 
         void wake_threads(priority_e prio, bool wake_all)
         {
-            if (prio == priority_e::HIGH)
+            job_queue_t& queue = (prio == priority_e::HIGH) ? high_priority_queue : low_priority_queue;
+
+            if (queue.sleepers.load(std::memory_order_seq_cst) == 0 && is_running.load(std::memory_order_relaxed))
             {
-                if (wake_all) high_priority_queue.wake_cv.notify_all();
-                else high_priority_queue.wake_cv.notify_one();
+                return;
             }
+
+            {
+                std::scoped_lock lock(queue.wake_mutex);
+            }
+
+            if (wake_all) { queue.wake_cv.notify_all(); }
             else
             {
-                if (wake_all) low_priority_queue.wake_cv.notify_all();
-                else low_priority_queue.wake_cv.notify_one();
+                queue.wake_cv.notify_one();
             }
         }
     } // namespace detail
@@ -139,8 +219,8 @@ namespace smol::jobs
     {
         is_running = false;
 
-        high_priority_queue.wake_cv.notify_all();
-        low_priority_queue.wake_cv.notify_all();
+        detail::wake_threads(priority_e::HIGH, true);
+        detail::wake_threads(priority_e::LOW, true);
 
         for (std::thread& worker : high_priority_workers)
         {
@@ -151,7 +231,7 @@ namespace smol::jobs
         if (low_priority_worker.joinable()) { low_priority_worker.join(); }
     }
 
-    // job stealing for main thread
+    // job stealing for main thread but waiting thread participates
     void wait(counter_t* counter)
     {
         if (!counter) { return; }
@@ -159,18 +239,12 @@ namespace smol::jobs
         while (counter->load(std::memory_order_acquire) > 0)
         {
             job_t job;
-            if (high_priority_queue.pop(job))
-            {
-                if (job.task) { job.task(); }
-                if (job.counter) { job.counter->fetch_sub(1, std::memory_order_release); }
-            }
+            if (high_priority_queue.pop(job)) { run_job(job); }
             else
             {
                 std::this_thread::yield();
             }
         }
-
-        counter->store(0, std::memory_order_relaxed);
     }
 
     u32_t get_worker_count() { return static_cast<u32_t>(high_priority_workers.size()); }

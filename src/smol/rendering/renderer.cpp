@@ -116,7 +116,7 @@ namespace smol::renderer
         pass.color_writes = writes;
         pass.depth_stencil = depth;
 
-        pass.execute_callback = [target_pass_tag](VkCommandBuffer cmd, ecs::registry_t& reg)
+        pass.execute_callback = [](VkCommandBuffer cmd, ecs::registry_t& reg)
         {
             per_frame_t& frame_data = ctx.per_frame_objects[ctx.cur_frame];
 
@@ -197,7 +197,7 @@ namespace smol::renderer
     SMOL_ENGINE_API rg_pass_t& add_fullscreen_pass(rendergraph_t& graph, u32_t name_hash, const char* debug_name,
                                                    smol::material_t* material, const std::vector<rg_resource_id>& reads,
                                                    const std::vector<rg_resource_id>& writes,
-                                                   std::function<void(rendergraph_t&, smol::material_t&)> on_execute)
+                                                   pass_execute_func_t on_execute)
     {
         rg_pass_t& pass = graph.add_pass(name_hash, debug_name);
         pass.texture_reads = reads;
@@ -244,7 +244,7 @@ namespace smol::renderer
                                                 smol::material_t* material, u32_t dispatch_x, u32_t dispatch_y,
                                                 u32_t dispatch_z, const std::vector<rg_resource_id>& reads,
                                                 const std::vector<rg_resource_id>& writes,
-                                                std::function<void(rendergraph_t&, smol::material_t&)> on_execute)
+                                                pass_execute_func_t on_execute)
     {
         rg_pass_t& pass = graph.add_pass(name_hash, debug_name);
         pass.texture_reads = reads;
@@ -783,8 +783,7 @@ namespace smol::renderer
 
         ctx.tonemap_shader =
             smol::engine::get_asset_registry().load_sync<shader_t>("engine://assets/shaders/tonemap.slang");
-        ctx.tonemap_material =
-            smol::engine::get_asset_registry().load_sync<material_t>("engine_tonemap", ctx.tonemap_shader);
+        ctx.tonemap_material = material_t(ctx.tonemap_shader);
 
         ctx.default_tex =
             smol::engine::get_asset_registry().load_sync<texture_t>("engine://assets/textures/default_white.png");
@@ -802,7 +801,10 @@ namespace smol::renderer
             for (auto& [name_hash, vgr_ptr] : frame_data.views) { vgr_ptr->culling_instance.shutdown(); }
         }
 
+        ctx.tonemap_material.release_heap();
+
         smol::engine::get_asset_registry().release<shader_t>(ctx.culling_shader);
+        smol::engine::get_asset_registry().release<shader_t>(ctx.tonemap_shader);
         smol::engine::get_asset_registry().release<texture_t>(ctx.default_tex);
         rendergraph.clear();
         custom_renderer_features.clear();
@@ -1118,7 +1120,7 @@ namespace smol::renderer
 
                 if (!lhs_mat->shader_handle || !rhs_mat->shader_handle)
                 {
-                    return lhs_mat->shader_handle > lhs_mat->shader_handle;
+                    return lhs_mat->shader_handle > rhs_mat->shader_handle;
                 }
 
                 shader_t* lhs_shader = smol::engine::get_asset_registry().get<shader_t>(lhs_mat->shader_handle);
@@ -1148,10 +1150,13 @@ namespace smol::renderer
             material_t* mat = smol::engine::get_asset_registry().get<material_t>(renderer.material);
             if (!mat) { continue; }
 
-            mat->sync();
-
             shader_t* shader = smol::engine::get_asset_registry().get<shader_t>(mat->shader_handle);
             if (!shader) { continue; }
+
+            mesh_t* mesh = smol::engine::get_asset_registry().get<mesh_t>(renderer.mesh);
+            if (!mesh) { continue; }
+
+            mat->sync();
 
             VkPipeline forward_pipeline = shader->get_pipeline(pipeline_variant_e::FORWARD);
             if (forward_pipeline != last_pipeline)
@@ -1173,9 +1178,6 @@ namespace smol::renderer
             glm_mat4_inv(transform.world_mat, normal_mat);
             glm_mat4_transpose(normal_mat);
             std::memcpy(obj_data.normal_matrix.data, &normal_mat, sizeof(mat4_t));
-
-            mesh_t* mesh = smol::engine::get_asset_registry().get<mesh_t>(renderer.mesh);
-            if (!mesh) { continue; }
 
             obj_data.material_offset = mat->heap_offset[ctx.cur_frame];
             obj_data.vertex_buffer = mesh->vertex_buffer_address;
@@ -1462,8 +1464,8 @@ namespace smol::renderer
 
         for (graph_builder_func_t& feature_builder : custom_renderer_features) { feature_builder(rendergraph, reg); }
 
-        material_t* tonemap_mat = smol::engine::get_asset_registry().get<material_t>(ctx.tonemap_material);
-        if (tonemap_mat && tonemap_mat->shader_handle.is_valid())
+        material_t* tonemap_mat = &ctx.tonemap_material;
+        if (tonemap_mat->shader_handle.is_valid())
         {
             rg_resource_id scene_color = rendergraph.get_resource("SceneColor"_h);
             rg_resource_id final_target = rendergraph.get_resource("FinalOutput"_h);

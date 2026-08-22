@@ -22,6 +22,10 @@ namespace smol
         body_type_e type = body_type_e::DYNAMIC;
         bool is_sensor = false;
         bool is_initiaklized = false;
+
+        body_type_e applied_type = body_type_e::DYNAMIC;
+        bool applied_is_sensor = false;
+        u64_t applied_shape_id = 0;
     };
 
     struct SMOL_ENGINE_API box_collider_t

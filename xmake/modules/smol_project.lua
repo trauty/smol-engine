@@ -11,22 +11,7 @@ function load(projectdir)
 
     local engine = data.engine or {}
 
-    local android = data.android or {}
-    local function pkg_seg(s)
-        s = tostring(s or "game"):gsub("[^%w]", "_"):lower()
-        if s:match("^%d") then s = "_" .. s end
-        return s
-    end
-
     return {
-        android             = {
-            package_id   = android.package_id or ("com.smol." .. pkg_seg(data.project_name or "game")),
-            icon         = android.icon,
-            version_code = math.floor(tonumber(android.version_code) or 1),
-            version_name = tostring(android.version_name or "1.0"),
-            min_sdk      = math.floor(tonumber(android.min_sdk) or 24),
-            target_sdk   = math.floor(tonumber(android.target_sdk) or 34),
-        },
         file                = files[1],
         project_name        = data.project_name or "smol-game",
         game_lib_name       = data.game_lib_name or "smol-game-logic",

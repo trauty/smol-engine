@@ -1,5 +1,6 @@
 #include "reflection.h"
 
+#include "smol/asset.h"
 #include "smol/assets/material.h"
 #include "smol/assets/mesh.h"
 #include "smol/components/camera.h"
@@ -15,6 +16,7 @@
 #include <entt/entt.hpp>
 #include <entt/meta/meta.hpp>
 #include <string>
+#include <vector>
 
 namespace smol::reflection
 {
@@ -30,157 +32,157 @@ namespace smol::reflection
         transform.is_dirty = true;
     }
 
-    void register_types()
+    namespace
     {
-        factory<std::string>().type("std::string"_h);
-        factory<i32_t>().type("i32_t"_h);
-        factory<u32_t>().type("u32_t"_h);
-        factory<i32>().type("i32"_h);
-        factory<u32>().type("u32"_h);
-        factory<bool>().type("bool"_h);
+#define SMOL_PIN_MEMBER(ptr, lit) static_assert(hash_string(member_name<ptr>()) == lit##_h, "reflection id drift: " lit)
+#define SMOL_PIN_TYPE(T, lit) static_assert(hash_string(type_name<T>()) == lit##_h, "reflection id drift: " lit)
+#define SMOL_PIN_ENUM(v, lit) static_assert(hash_string(enum_name<v>()) == lit##_h, "reflection id drift: " lit)
 
-        factory<vec3_t>{}.type("vec3_t"_h).data<&vec3_t::x>("x"_h).data<&vec3_t::y>("y"_h).data<&vec3_t::z>("z"_h);
+        SMOL_PIN_TYPE(tag_t, "tag_t");
+        SMOL_PIN_MEMBER(&tag_t::name, "name");
 
-        factory<tag_t>{}
-            .type("tag_t"_h)
-            .custom<editor_prop_t>("Tag")
-            .func<&get_component<tag_t>>("get"_h)
-            .func<&add_component<tag_t>>("add"_h)
-            .func<&remove_component<tag_t>>("remove"_h)
-            .data<&tag_t::name>("name"_h)
-            .custom<editor_prop_t>("Entity Name");
+        SMOL_PIN_TYPE(transform_t, "transform_t");
+        SMOL_PIN_MEMBER(&transform_t::local_position, "local_position");
+        SMOL_PIN_MEMBER(&transform_t::local_scale, "local_scale");
 
-        factory<transform_t>{}
-            .type("transform_t"_h)
-            .custom<editor_prop_t>("Transform")
-            .func<&get_component<transform_t>>("get"_h)
-            .func<&add_component<transform_t>>("add"_h)
-            .func<&remove_component<transform_t>>("remove"_h)
-            .func<&mark_transform_dirty>("on_changed"_h)
-            .data<&transform_t::local_position>("local_position"_h)
-            .custom<editor_prop_t>("Position")
-            .data<&set_transform_rot_euler, &get_transform_rot_euler>("local_euler"_h)
-            .custom<editor_prop_t>("Rotation")
-            .data<&transform_t::local_scale>("local_scale"_h)
-            .custom<editor_prop_t>("Scale");
+        SMOL_PIN_TYPE(active_camera_tag, "active_camera_tag");
 
-        factory<smol::active_camera_tag>{}
-            .type("active_camera_tag"_h)
-            .custom<editor_prop_t>("Active Camera Tag")
-            .func<&get_component<smol::active_camera_tag>>("get"_h)
-            .func<&add_component<smol::active_camera_tag>>("add"_h)
-            .func<&remove_component<smol::active_camera_tag>>("remove"_h);
+        SMOL_PIN_TYPE(camera_t, "camera_t");
+        SMOL_PIN_MEMBER(&camera_t::fov_deg, "fov_deg");
+        SMOL_PIN_MEMBER(&camera_t::near_plane, "near_plane");
+        SMOL_PIN_MEMBER(&camera_t::far_plane, "far_plane");
+        SMOL_PIN_MEMBER(&camera_t::aspect, "aspect");
 
-        factory<smol::camera_t>{}
-            .type("camera_t"_h)
-            .custom<editor_prop_t>("Camera")
-            .func<&get_component<smol::camera_t>>("get"_h)
-            .func<&add_component<smol::camera_t>>("add"_h)
-            .func<&remove_component<smol::camera_t>>("remove"_h)
-            .data<&smol::camera_t::fov_deg>("fov_deg"_h)
-            .custom<editor_prop_t>("FOV")
-            .data<&smol::camera_t::near_plane>("near_plane"_h)
-            .custom<editor_prop_t>("Near Plane")
-            .data<&smol::camera_t::far_plane>("far_plane"_h)
-            .custom<editor_prop_t>("Far Plane")
-            .data<&smol::camera_t::aspect>("aspect"_h)
-            .custom<editor_prop_t>("Aspect Ratio");
+        SMOL_PIN_TYPE(directional_light_t, "directional_light_t");
+        SMOL_PIN_TYPE(point_light_t, "point_light_t");
+        SMOL_PIN_TYPE(spot_light_t, "spot_light_t");
+        SMOL_PIN_MEMBER(&directional_light_t::color, "color");
+        SMOL_PIN_MEMBER(&directional_light_t::intensity, "intensity");
+        SMOL_PIN_MEMBER(&point_light_t::radius, "radius");
+        SMOL_PIN_MEMBER(&spot_light_t::inner_angle, "inner_angle");
+        SMOL_PIN_MEMBER(&spot_light_t::outer_angle, "outer_angle");
+
+        SMOL_PIN_TYPE(body_type_e, "body_type_e");
+        SMOL_PIN_ENUM(body_type_e::STATIC, "STATIC");
+        SMOL_PIN_ENUM(body_type_e::KINEMATIC, "KINEMATIC");
+        SMOL_PIN_ENUM(body_type_e::DYNAMIC, "DYNAMIC");
+
+        SMOL_PIN_TYPE(rigidbody_t, "rigidbody_t");
+        SMOL_PIN_MEMBER(&rigidbody_t::type, "type");
+        SMOL_PIN_MEMBER(&rigidbody_t::is_sensor, "is_sensor");
+
+        SMOL_PIN_TYPE(box_collider_t, "box_collider_t");
+        SMOL_PIN_MEMBER(&box_collider_t::extents, "extents");
+        SMOL_PIN_MEMBER(&box_collider_t::offset, "offset");
+
+        SMOL_PIN_TYPE(sphere_collider_t, "sphere_collider_t");
+        SMOL_PIN_MEMBER(&sphere_collider_t::radius, "radius");
+
+        SMOL_PIN_TYPE(mesh_renderer_t, "mesh_renderer_t");
+        SMOL_PIN_MEMBER(&mesh_renderer_t::mesh, "mesh");
+        SMOL_PIN_MEMBER(&mesh_renderer_t::material, "material");
+        SMOL_PIN_MEMBER(&mesh_renderer_t::active, "active");
+        SMOL_PIN_MEMBER(&mesh_renderer_t::casts_shadow, "casts_shadow");
+
+#undef SMOL_PIN_MEMBER
+#undef SMOL_PIN_TYPE
+#undef SMOL_PIN_ENUM
+    } // namespace
+
+    namespace
+    {
+        std::vector<register_func_t>& registrations()
+        {
+            static std::vector<register_func_t> list;
+            return list;
+        }
+    } // namespace
+
+    void add_registration(register_func_t fn)
+    {
+        if (fn != nullptr) { registrations().push_back(fn); }
+    }
+
+    void run_registrations(ctx_t& ctx)
+    {
+        for (register_func_t fn : registrations()) { fn(ctx); }
+    }
+
+    void clear_registrations() { registrations().clear(); }
+
+    void register_types() { register_types_into(get_engine_context()); }
+
+    void register_types_into(ctx_t& ctx)
+    {
+        factory<std::string>(ctx).type("std::string"_h, "std::string");
+        // i32_t/u32_t are the same types as i32/u32 -- registering both just overwrites
+        factory<i32>(ctx).type("i32"_h, "i32");
+        factory<u32>(ctx).type("u32"_h, "u32");
+        factory<bool>(ctx).type("bool"_h, "bool");
+
+        factory<f32>(ctx).type("f32"_h, "f32");
+        factory<asset_handle_t>(ctx).type("asset_handle_t"_h, "asset_handle_t");
+
+        factory<vec3_t>{ctx}
+            .type("vec3_t"_h, "vec3_t")
+            .data<&vec3_t::x>("x"_h)
+            .data<&vec3_t::y>("y"_h)
+            .data<&vec3_t::z>("z"_h);
+
+        component<tag_t>(ctx, "Tag").field<&tag_t::name>("Entity Name");
+
+        component<transform_t>(ctx, "Transform")
+            .field<&transform_t::local_position>("Position")
+            .accessor<&set_transform_rot_euler, &get_transform_rot_euler>("Rotation", unit_e::RADIANS,
+                                                                          stable_id{"local_euler"})
+            .field<&transform_t::local_scale>("Scale")
+            .on_changed<&mark_transform_dirty>();
+
+        component<active_camera_tag>(ctx, "Active Camera Tag");
+
+        component<camera_t>(ctx, "Camera")
+            .field<&camera_t::fov_deg>("FOV")
+            .field<&camera_t::near_plane>("Near Plane")
+            .field<&camera_t::far_plane>("Far Plane")
+            .field<&camera_t::aspect>("Aspect Ratio");
 
         // lighting
-        factory<smol::directional_light_t>{}
-            .type("directional_light_t"_h)
-            .custom<editor_prop_t>("Directional Light")
-            .func<&get_component<smol::directional_light_t>>("get"_h)
-            .func<&add_component<smol::directional_light_t>>("add"_h)
-            .func<&remove_component<smol::directional_light_t>>("remove"_h)
-            .data<&smol::directional_light_t::color>("color"_h)
-            .custom<editor_prop_t>("Color")
-            .data<&smol::directional_light_t::intensity>("intensity"_h)
-            .custom<editor_prop_t>("Intensity");
+        component<directional_light_t>(ctx, "Directional Light")
+            .field<&directional_light_t::color>("Color")
+            .field<&directional_light_t::intensity>("Intensity");
 
-        factory<smol::point_light_t>{}
-            .type("point_light_t"_h)
-            .custom<editor_prop_t>("Point Light")
-            .func<&get_component<smol::point_light_t>>("get"_h)
-            .func<&add_component<smol::point_light_t>>("add"_h)
-            .func<&remove_component<smol::point_light_t>>("remove"_h)
-            .data<&smol::point_light_t::color>("color"_h)
-            .custom<editor_prop_t>("Color")
-            .data<&smol::point_light_t::intensity>("intensity"_h)
-            .custom<editor_prop_t>("Intensity")
-            .data<&smol::point_light_t::radius>("radius"_h)
-            .custom<editor_prop_t>("Radius");
+        component<point_light_t>(ctx, "Point Light")
+            .field<&point_light_t::color>("Color")
+            .field<&point_light_t::intensity>("Intensity")
+            .field<&point_light_t::radius>("Radius");
 
-        factory<smol::spot_light_t>{}
-            .type("spot_light_t"_h)
-            .custom<editor_prop_t>("Spot Light")
-            .func<&get_component<smol::spot_light_t>>("get"_h)
-            .func<&add_component<smol::spot_light_t>>("add"_h)
-            .func<&remove_component<smol::spot_light_t>>("remove"_h)
-            .data<&smol::spot_light_t::color>("color"_h)
-            .custom<editor_prop_t>("Color")
-            .data<&smol::spot_light_t::intensity>("intensity"_h)
-            .custom<editor_prop_t>("Intensity")
-            .data<&smol::spot_light_t::radius>("radius"_h)
-            .custom<editor_prop_t>("Radius")
-            .data<&smol::spot_light_t::inner_angle>("inner_angle"_h)
-            .custom<editor_prop_t>("Inner Angle")
-            .data<&smol::spot_light_t::outer_angle>("outer_angle"_h)
-            .custom<editor_prop_t>("Outer Angle");
+        component<spot_light_t>(ctx, "Spot Light")
+            .field<&spot_light_t::color>("Color")
+            .field<&spot_light_t::intensity>("Intensity")
+            .field<&spot_light_t::radius>("Radius")
+            .field<&spot_light_t::inner_angle>("Inner Angle")
+            .field<&spot_light_t::outer_angle>("Outer Angle");
 
         // physics
-        factory<smol::body_type_e>{}
-            .type("body_type_e"_h)
-            .custom<editor_prop_t>("Body Type")
-            .data<smol::body_type_e::STATIC>("STATIC"_h)
-            .data<smol::body_type_e::KINEMATIC>("KINEMATIC"_h)
-            .data<smol::body_type_e::DYNAMIC>("DYNAMIC"_h);
+        enumeration<body_type_e>(ctx, "Body Type");
 
-        factory<smol::rigidbody_t>{}
-            .type("rigidbody_t"_h)
-            .custom<editor_prop_t>("Rigidbody")
-            .func<&get_component<smol::rigidbody_t>>("get"_h)
-            .func<&add_component<smol::rigidbody_t>>("add"_h)
-            .func<&remove_component<smol::rigidbody_t>>("remove"_h)
-            .data<&smol::rigidbody_t::type>("type"_h)
-            .custom<editor_prop_t>("Body Type")
-            .data<&smol::rigidbody_t::is_sensor>("is_sensor"_h)
-            .custom<editor_prop_t>("Is Sensor");
+        component<rigidbody_t>(ctx, "Rigidbody")
+            .field<&rigidbody_t::type>("Body Type")
+            .field<&rigidbody_t::is_sensor>("Is Sensor");
 
-        factory<smol::box_collider_t>{}
-            .type("box_collider_t"_h)
-            .custom<editor_prop_t>("Box Collider")
-            .func<&get_component<smol::box_collider_t>>("get"_h)
-            .func<&add_component<smol::box_collider_t>>("add"_h)
-            .func<&remove_component<smol::box_collider_t>>("remove"_h)
-            .data<&smol::box_collider_t::extents>("extents"_h)
-            .custom<editor_prop_t>("Extents")
-            .data<&smol::box_collider_t::offset>("offset"_h)
-            .custom<editor_prop_t>("Offset");
+        component<box_collider_t>(ctx, "Box Collider")
+            .field<&box_collider_t::extents>("Extents")
+            .field<&box_collider_t::offset>("Offset");
 
-        factory<smol::sphere_collider_t>{}
-            .type("sphere_collider_t"_h)
-            .custom<editor_prop_t>("Sphere Collider")
-            .func<&get_component<smol::sphere_collider_t>>("get"_h)
-            .func<&add_component<smol::sphere_collider_t>>("add"_h)
-            .func<&remove_component<smol::sphere_collider_t>>("remove"_h)
-            .data<&smol::sphere_collider_t::radius>("radius"_h)
-            .custom<editor_prop_t>("Radius");
+        component<sphere_collider_t>(ctx, "Sphere Collider").field<&sphere_collider_t::radius>("Radius");
 
         // rendering
-        factory<smol::mesh_renderer_t>{}
-            .type("mesh_renderer_t"_h)
-            .custom<editor_prop_t>("Mesh Renderer")
-            .func<&get_component<smol::mesh_renderer_t>>("get"_h)
-            .func<&add_component<smol::mesh_renderer_t>>("add"_h)
-            .func<&remove_component<smol::mesh_renderer_t>>("remove"_h)
-            .data<&smol::mesh_renderer_t::mesh>("mesh"_h)
-            .custom<editor_prop_t>(editor_prop_t{"Mesh", smol::get_type_id<smol::mesh_t>()})
-            .data<&smol::mesh_renderer_t::material>("material"_h)
-            .custom<editor_prop_t>(editor_prop_t{"Material", smol::get_type_id<smol::material_t>()})
-            .data<&smol::mesh_renderer_t::active>("active"_h)
-            .custom<editor_prop_t>("Active")
-            .data<&smol::mesh_renderer_t::casts_shadow>("casts_shadow"_h)
-            .custom<editor_prop_t>("Casts Shadow");
+        component<mesh_renderer_t>(ctx, "Mesh Renderer")
+            .field_asset<&mesh_renderer_t::mesh, smol::mesh_t>("Mesh")
+            .field_asset<&mesh_renderer_t::material, smol::material_t>("Material")
+            .field<&mesh_renderer_t::active>("Active")
+            .field<&mesh_renderer_t::casts_shadow>("Casts Shadow");
     }
+
+    void shutdown() { entt::meta_reset(get_engine_context()); }
 } // namespace smol::reflection

@@ -28,7 +28,7 @@ namespace smol::jobs
 
         job_function() = default;
 
-        template <typename Lambda>
+        template <typename Lambda, typename = std::enable_if_t<!std::is_same_v<std::decay_t<Lambda>, job_function>>>
         job_function(Lambda&& f)
         {
             using decayed_lambda_t = std::decay_t<Lambda>;
@@ -53,8 +53,8 @@ namespace smol::jobs
 
     namespace detail
     {
-        void push_job(job_function<64> task, counter_t* counter, priority_e prio);
-        void wake_threads(priority_e prio, bool wake_all);
+        SMOL_ENGINE_API void push_job(job_function<64> task, counter_t* counter, priority_e prio);
+        SMOL_ENGINE_API void wake_threads(priority_e prio, bool wake_all);
     } // namespace detail
 
     template <typename Lambda>

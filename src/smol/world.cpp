@@ -33,6 +33,8 @@ namespace smol
     void world_t::fixed_update()
     {
         ZoneScoped;
+        if (!is_simulating) { return; }
+
         physics.create_bodies(registry);
 
         for (system_func_t& system : fixed_update_systems) { system(registry); }

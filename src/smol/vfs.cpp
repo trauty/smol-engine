@@ -3,6 +3,7 @@
 #include "SDL3/SDL_iostream.h"
 #include "SDL3/SDL_stdinc.h"
 #include "smol/engine.h"
+#include "smol/log.h"
 
 #include <SDL3/SDL_filesystem.h>
 #include <filesystem>
@@ -12,7 +13,11 @@
 
 namespace smol::vfs
 {
-    namespace { std::unordered_map<std::string, std::string> mounts; }
+    namespace
+    {
+        std::unordered_map<std::string, std::string> mounts;
+        std::string cooked_root_dir;
+    } // namespace
 
     void init()
     {
@@ -23,10 +28,6 @@ namespace smol::vfs
             SDL_free(pref_path);
         }
 
-#ifdef SMOL_PLATFORM_ANDROID
-        mount("engine://assets/", "engine/");
-        mount("game://assets/", "game/");
-#else
         const char* base_path = SDL_GetBasePath();
         if (base_path)
         {
@@ -38,19 +39,26 @@ namespace smol::vfs
 
             if (fs::exists(exe_dir / "assets" / "engine"))
             {
+                cooked_root_dir = (exe_dir / "assets").generic_string();
                 mount("engine://assets/", (exe_dir / "assets" / "engine").generic_string() + "/");
                 mount("game://assets/", (exe_dir / "assets" / "game").generic_string() + "/");
             }
             else
             {
-                const fs::path engine_assets = exe_dir.parent_path() / "share" / "smol" / "engine-assets" / "engine";
-                mount("engine://assets/", engine_assets.generic_string() + "/");
+                const fs::path engine_assets = exe_dir.parent_path() / "share" / "smol" / "engine-assets";
+                cooked_root_dir = engine_assets.generic_string();
+                mount("engine://assets/", (engine_assets / "engine").generic_string() + "/");
             }
         }
-#endif
     }
 
-    void shutdown() { mounts.clear(); }
+    void shutdown()
+    {
+        mounts.clear();
+        cooked_root_dir.clear();
+    }
+
+    const std::string& cooked_root() { return cooked_root_dir; }
 
     void mount(const std::string& alias, const std::string& physical_path) { mounts[alias] = physical_path; }
 
@@ -84,6 +92,12 @@ namespace smol::vfs
             return std::string(best_physical) + std::string(relative);
         }
 
+        if (virtual_path.find("://") != std::string_view::npos)
+        {
+            SMOL_LOG_WARN("VFS", "No mount matches '{}'", virtual_path);
+            return {};
+        }
+
         return std::string(virtual_path);
     }
 
@@ -111,9 +125,15 @@ namespace smol::vfs
             return {};
         }
 
-        std::vector<u8_t> buffer(size);
-        SDL_ReadIO(stream, buffer.data(), size);
+        std::vector<u8_t> buffer(static_cast<std::size_t>(size));
+        const std::size_t got = SDL_ReadIO(stream, buffer.data(), static_cast<std::size_t>(size));
         SDL_CloseIO(stream);
+
+        if (got != static_cast<std::size_t>(size))
+        {
+            SMOL_LOG_ERROR("VFS", "Short read on '{}': got {} of {} bytes", virtual_path, got, size);
+            return {};
+        }
 
         return buffer;
     }

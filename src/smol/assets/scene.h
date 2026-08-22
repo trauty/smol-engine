@@ -13,6 +13,7 @@ namespace smol
     struct scene_property_t
     {
         u32_t prop_hash = 0;
+        std::string prop_name;
         scene_value_type_e type = scene_value_type_e::I32;
 
         i32_t i = 0;
@@ -27,6 +28,7 @@ namespace smol
     struct scene_component_t
     {
         u32_t type_hash = 0;
+        std::string type_name;
         std::vector<scene_property_t> properties;
     };
 
@@ -41,7 +43,7 @@ namespace smol
     };
 
     template <>
-    struct asset_loader_t<scene_t>
+    struct SMOL_ENGINE_API asset_loader_t<scene_t>
     {
         static std::optional<scene_t> load(const std::string& path);
     };

@@ -16,7 +16,7 @@ sdk_dir=$(cd "$bindir/.." && pwd)
 export SMOL_ENGINE_DIR="$sdk_dir"
 
 if ! command -v xmake >/dev/null 2>&1; then
-    echo "smol: xmake was not found on PATH -- install it from https://xmake.io" >&2
+    echo "smol: xmake was not found on PATH, install it from https://xmake.io" >&2
     exit 1
 fi
 

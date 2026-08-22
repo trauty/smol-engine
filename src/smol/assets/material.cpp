@@ -81,15 +81,22 @@ namespace smol
         }
     }
 
-    std::optional<material_t> asset_loader_t<material_t>::load(const std::string& path, asset_handle_t target_shader)
+    void material_t::release_heap()
     {
-        if (target_shader.is_valid())
+        for (u32_t i = 0; i < renderer::MAX_FRAMES_IN_FLIGHT; i++)
         {
-            material_t mat(target_shader);
-            if (!mat.shader_handle.is_valid()) { return std::nullopt; }
-            return mat;
+            if (heap_offset[i] != renderer::BINDLESS_NULL_HANDLE)
+            {
+                renderer::res_system.material_heap.free(heap_offset[i], data.size());
+                heap_offset[i] = renderer::BINDLESS_NULL_HANDLE;
+            }
         }
 
+        data.clear();
+    }
+
+    std::optional<material_t> asset_loader_t<material_t>::load(const std::string& path)
+    {
         std::string cooked_path = get_cooked_path(path, ".smolmat");
         std::vector<u8_t> bytes = smol::vfs::read_bytes(cooked_path);
         if (bytes.empty())
@@ -201,15 +208,7 @@ namespace smol
 
     void asset_loader_t<material_t>::unload(material_t& mat)
     {
-        for (u32_t i = 0; i < renderer::MAX_FRAMES_IN_FLIGHT; i++)
-        {
-            if (mat.heap_offset[i] != renderer::BINDLESS_NULL_HANDLE)
-            {
-                renderer::res_system.material_heap.free(mat.heap_offset[i], mat.data.size());
-            }
-        }
-
-        mat.data.clear();
+        mat.release_heap();
         mat.bound_textures.clear();
         smol::engine::get_asset_registry().release<shader_t>(mat.shader_handle);
     }

@@ -1,6 +1,7 @@
 #pragma once
 
 #include "smol/asset.h"
+#include "smol/assets/material.h"
 #include "smol/assets/shader.h"
 #include "smol/assets/texture.h"
 #include "smol/defines.h"
@@ -361,7 +362,9 @@ namespace smol::renderer
         shader_instance_t culling_instance;
 
         asset_handle_t tonemap_shader;
-        asset_handle_t tonemap_material;
+        // built straight from the shader, not loaded: it has no authored properties, so
+        // there is nothing for a .mat file to carry and nothing else shares it
+        material_t tonemap_material;
 
         asset_handle_t default_tex;
 

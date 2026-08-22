@@ -13,6 +13,7 @@ namespace smol::engine
 {
     using event_callback_t = std::function<bool(const SDL_Event&)>;
     using ui_callback_t = std::function<void()>;
+    using post_render_callback_t = std::function<void()>;
 
     SMOL_ENGINE_API bool init(const std::string& game_name, i32 init_window_width, i32 init_window_height);
     SMOL_ENGINE_API void run();
@@ -29,4 +30,5 @@ namespace smol::engine
 
     SMOL_ENGINE_API void set_event_callback(event_callback_t cb);
     SMOL_ENGINE_API void set_ui_callback(ui_callback_t cb);
+    SMOL_ENGINE_API void set_post_render_callback(post_render_callback_t cb);
 } // namespace smol::engine

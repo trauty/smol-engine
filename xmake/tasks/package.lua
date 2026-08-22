@@ -11,7 +11,7 @@ on_run(function()
     local arch = config.get("arch") or os.arch()
     local mode = config.get("mode") or "release"
 
-    if not (config.get("standalone") or plat == "android") then
+    if not config.get("standalone") then
         raise("smol-package needs a standalone build.\n" ..
             "run:  xmake f --standalone=y -m " .. mode .. "   &&   xmake")
     end

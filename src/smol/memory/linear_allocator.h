@@ -20,4 +20,6 @@ namespace smol
     };
 
     extern thread_local linear_allocator_t* active_arena;
+
+    SMOL_ENGINE_API linear_allocator_t* get_active_arena();
 } // namespace smol

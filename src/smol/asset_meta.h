@@ -9,11 +9,12 @@
 
 namespace smol::asset_meta
 {
-    SMOL_ENGINE_API void init(const std::string& guid_map_path);
+    SMOL_ENGINE_API void load_guid_map(const std::string& guid_map_path);
     SMOL_ENGINE_API void shutdown();
 
     SMOL_ENGINE_API std::string_view get_guid(const std::string& path);
     SMOL_ENGINE_API std::string_view get_path_for_guid(const std::string& guid);
+
     SMOL_ENGINE_API uuid_t resolve_uuid(const std::string& path);
 
     SMOL_ENGINE_API std::string generate_uuid();

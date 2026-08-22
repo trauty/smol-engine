@@ -3,9 +3,12 @@
 #include "imgui/imgui.h"
 #include "smol-editor/editor_context.h"
 #include "smol/log.h"
+#include "smol/window.h"
 
 #include "json/json.hpp"
+#include <SDL3/SDL_dialog.h>
 #include <SDL3/SDL_filesystem.h>
+#include <SDL3/SDL_stdinc.h>
 #include <algorithm>
 #include <cstring>
 #include <filesystem>
@@ -65,21 +68,20 @@ namespace smol::editor::project_manager
         std::string template_dir()
         {
             const char* base = SDL_GetBasePath();
-            if (base)
-            {
-                std::string bp = base;
-                while (bp.size() > 1 && (bp.back() == '/' || bp.back() == '\\')) { bp.pop_back(); }
-                const fs::path sdk_tpl = fs::path(bp).parent_path() / "share" / "smol" / "template";
-                if (fs::is_directory(sdk_tpl)) { return sdk_tpl.string(); }
-            }
+            if (!base) { return ""; }
 
-            const char* env = std::getenv("SMOL_ENGINE_DIR");
-            if (env && *env)
+            std::string bp = base;
+            while (bp.size() > 1 && (bp.back() == '/' || bp.back() == '\\')) { bp.pop_back(); }
+            const fs::path start(bp);
+
+            const fs::path sdk_tpl = start.parent_path() / "share" / "smol" / "template";
+            if (fs::is_directory(sdk_tpl)) { return sdk_tpl.string(); }
+
+            for (fs::path p = start;; p = p.parent_path())
             {
-                const fs::path src_tpl = fs::path(env) / "template";
-                if (fs::is_directory(src_tpl)) { return src_tpl.string(); }
-                const fs::path sdk_tpl = fs::path(env) / "share" / "smol" / "template";
-                if (fs::is_directory(sdk_tpl)) { return sdk_tpl.string(); }
+                const fs::path cand = p / "template";
+                if (fs::exists(cand / "${NAME}.smolproject")) { return cand.string(); }
+                if (!p.has_parent_path() || p.parent_path() == p) { break; }
             }
 
             return "";
@@ -129,7 +131,7 @@ namespace smol::editor::project_manager
             const std::string tpl = template_dir();
             if (tpl.empty())
             {
-                err = "Project template not found (is this a full SDK install, or is SMOL_ENGINE_DIR set?)";
+                err = "Project template not found (run the editor from a smol-engine build tree or SDK install)";
                 return "";
             }
 
@@ -188,71 +190,25 @@ namespace smol::editor::project_manager
             return final_proj.string();
         }
 
-        fs::path g_browse_dir;
-
         const char* user_home()
         {
-            const char* home = std::getenv("HOME");
-            if (!home || !*home) { home = std::getenv("USERPROFILE"); }
+            const char* home = SDL_getenv("HOME");
+            if (!home || !*home) { home = SDL_getenv("USERPROFILE"); }
             return (home && *home) ? home : nullptr;
         }
 
-        void ensure_browse_dir()
+        std::string g_dialog_pick;
+        bool g_dialog_ready = false;
+        bool g_dialog_open = false;
+
+        std::string g_status;
+
+        void SDLCALL open_project_dialog_cb(void* /*userdata*/, const char* const* filelist, int /*filter*/)
         {
-            if (!g_browse_dir.empty()) { return; }
-            const char* home = user_home();
-            std::error_code ec;
-            g_browse_dir = home ? fs::path(home) : fs::current_path(ec);
-        }
-
-        bool draw_browser(bool pick_project, std::string& out)
-        {
-            ensure_browse_dir();
-            bool picked = false;
-
-            ImGui::TextDisabled("%s", g_browse_dir.string().c_str());
-
-            if (ImGui::BeginChild("browser", ImVec2(0, 220), ImGuiChildFlags_Borders))
-            {
-                std::error_code ec;
-                if (g_browse_dir.has_parent_path() && g_browse_dir.parent_path() != g_browse_dir)
-                {
-                    if (ImGui::Selectable("../")) { g_browse_dir = g_browse_dir.parent_path(); }
-                }
-
-                std::vector<fs::path> dirs, projects;
-                for (auto it = fs::directory_iterator(g_browse_dir, fs::directory_options::skip_permission_denied, ec);
-                     !ec && it != fs::directory_iterator(); it.increment(ec))
-                {
-                    const fs::path& p = it->path();
-                    const std::string fname = p.filename().string();
-                    if (!fname.empty() && fname[0] == '.') { continue; }
-                    if (it->is_directory(ec)) { dirs.push_back(p); }
-                    else if (p.extension() == ".smolproject") { projects.push_back(p); }
-                }
-                std::sort(dirs.begin(), dirs.end());
-                std::sort(projects.begin(), projects.end());
-
-                for (const fs::path& d : dirs)
-                {
-                    const std::string label = d.filename().string() + "/";
-                    if (ImGui::Selectable(label.c_str())) { g_browse_dir = d; }
-                }
-                if (pick_project)
-                {
-                    for (const fs::path& p : projects)
-                    {
-                        if (ImGui::Selectable(p.filename().string().c_str()))
-                        {
-                            out = p.string();
-                            picked = true;
-                        }
-                    }
-                }
-            }
-            ImGui::EndChild();
-
-            return picked;
+            g_dialog_open = false;
+            g_dialog_ready = true;
+            g_dialog_pick.clear();
+            if (filelist && filelist[0]) { g_dialog_pick = filelist[0]; }
         }
     } // namespace
 
@@ -279,9 +235,13 @@ namespace smol::editor::project_manager
         bool open_now = false;
 
         const ImGuiViewport* vp = ImGui::GetMainViewport();
-        ImGui::SetNextWindowSize(ImVec2(560.0f, 520.0f), ImGuiCond_FirstUseEver);
-        ImGui::SetNextWindowPos(vp->GetCenter(), ImGuiCond_FirstUseEver, ImVec2(0.5f, 0.5f));
-        if (!ImGui::Begin("Project Manager", p_open))
+        ImGui::SetNextWindowPos(vp->WorkPos);
+        ImGui::SetNextWindowSize(vp->WorkSize);
+        ImGui::SetNextWindowViewport(vp->ID);
+        const ImGuiWindowFlags pm_flags = ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                                          ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings |
+                                          ImGuiWindowFlags_NoTitleBar;
+        if (!ImGui::Begin("Project Manager", nullptr, pm_flags))
         {
             ImGui::End();
             return false;
@@ -290,11 +250,39 @@ namespace smol::editor::project_manager
         ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.6f);
         ImGui::TextUnformatted("smol");
         ImGui::PopFont();
+
+        if (p_open != nullptr)
+        {
+            const float btn_w = 70.0f;
+            ImGui::SameLine();
+            ImGui::SetCursorPosX(ImGui::GetWindowWidth() - btn_w - ImGui::GetStyle().WindowPadding.x);
+            if (ImGui::Button("Close", ImVec2(btn_w, 0.0f))) { *p_open = false; }
+        }
+
         ImGui::TextDisabled("open a project to start editing");
         ImGui::Separator();
         ImGui::Spacing();
 
-        static std::string status;
+        std::string& status = g_status;
+
+        if (g_dialog_ready)
+        {
+            g_dialog_ready = false;
+            if (!g_dialog_pick.empty())
+            {
+                std::string resolved;
+                if (resolve_project_arg(g_dialog_pick, resolved))
+                {
+                    out_project_file = resolved;
+                    open_now = true;
+                }
+                else
+                {
+                    status = "Selected file is not a .smolproject";
+                }
+            }
+            g_dialog_pick.clear();
+        }
 
         if (ImGui::CollapsingHeader("New Project", ImGuiTreeNodeFlags_DefaultOpen))
         {
@@ -322,38 +310,27 @@ namespace smol::editor::project_manager
                     else
                     {
                         add_recent(proj);
-                        status = "Created " + proj + " -- build it (xmake) before opening";
+                        status = "Created " + proj + ", open it to build and load";
                         name_buf[0] = '\0';
                     }
                 }
             }
-            ImGui::SameLine();
-            ImGui::TextDisabled("(Scaffolds the template; build with xmake, then Open)");
         }
 
         if (ImGui::CollapsingHeader("Open Project", ImGuiTreeNodeFlags_DefaultOpen))
         {
-            static char path_buf[1024] = "";
-            ImGui::InputTextWithHint("##openpath", "Path to a .smolproject (or its folder)", path_buf,
-                                     sizeof(path_buf));
-            ImGui::SameLine();
-            if (ImGui::Button("Open##openpath"))
+            ImGui::BeginDisabled(g_dialog_open);
+            if (ImGui::Button("Open Project..."))
             {
-                std::string resolved;
-                if (!resolve_project_arg(path_buf, resolved)) { status = "No .smolproject at that path"; }
-                else
-                {
-                    out_project_file = resolved;
-                    open_now = true;
-                }
+                static const SDL_DialogFileFilter filters[] = {
+                    {"smol project", "smolproject"},
+                };
+                g_dialog_open = true;
+                g_dialog_ready = false;
+                SDL_ShowOpenFileDialog(open_project_dialog_cb, nullptr, smol::window::get_window(), filters, 1, nullptr,
+                                       false);
             }
-
-            std::string picked;
-            if (draw_browser(true, picked))
-            {
-                out_project_file = picked;
-                open_now = true;
-            }
+            ImGui::EndDisabled();
         }
 
         if (ImGui::CollapsingHeader("Recent Projects", ImGuiTreeNodeFlags_DefaultOpen))
@@ -397,5 +374,56 @@ namespace smol::editor::project_manager
         ImGui::End();
 
         return open_now;
+    }
+
+    void report_status(const std::string& message) { g_status = message; }
+
+    std::string engine_dir()
+    {
+        const char* base = SDL_GetBasePath();
+        if (!base) { return ""; }
+
+        std::string bp = base;
+        while (bp.size() > 1 && (bp.back() == '/' || bp.back() == '\\')) { bp.pop_back(); }
+        const fs::path start(bp);
+
+        if (fs::is_directory(start.parent_path() / "share" / "smol" / "rules")) { return start.parent_path().string(); }
+
+        for (fs::path p = start;; p = p.parent_path())
+        {
+            if (fs::exists(p / "xmake.lua") && fs::is_directory(p / "template")) { return p.string(); }
+            if (!p.has_parent_path() || p.parent_path() == p) { break; }
+        }
+
+        return "";
+    }
+
+    void draw_building(const std::string& project_name)
+    {
+        const ImGuiViewport* vp = ImGui::GetMainViewport();
+        ImGui::SetNextWindowPos(vp->WorkPos);
+        ImGui::SetNextWindowSize(vp->WorkSize);
+        ImGui::SetNextWindowViewport(vp->ID);
+        const ImGuiWindowFlags flags = ImGuiWindowFlags_NoResize | ImGuiWindowFlags_NoMove |
+                                       ImGuiWindowFlags_NoCollapse | ImGuiWindowFlags_NoSavedSettings |
+                                       ImGuiWindowFlags_NoTitleBar;
+        if (ImGui::Begin("Building", nullptr, flags))
+        {
+            ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.6f);
+            ImGui::TextUnformatted("smol");
+            ImGui::PopFont();
+            ImGui::TextDisabled("building project");
+            ImGui::Separator();
+            ImGui::Spacing();
+
+            ImGui::Text("Building %s ...", project_name.c_str());
+            ImGui::Spacing();
+
+            ImGui::ProgressBar(-1.0f * (float)ImGui::GetTime(), ImVec2(ImGui::GetContentRegionAvail().x, 0.0f),
+                               nullptr);
+            ImGui::Spacing();
+            ImGui::TextDisabled("Running xmake, see the console for build output.");
+        }
+        ImGui::End();
     }
 } // namespace smol::editor::project_manager

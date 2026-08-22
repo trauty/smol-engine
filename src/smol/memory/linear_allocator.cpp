@@ -29,4 +29,6 @@ namespace smol
     void linear_allocator_t::reset() { cur_offset = 0; }
 
     thread_local linear_allocator_t* active_arena = nullptr;
+
+    linear_allocator_t* get_active_arena() { return active_arena; }
 } // namespace smol

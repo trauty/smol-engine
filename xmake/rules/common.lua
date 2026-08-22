@@ -35,8 +35,8 @@ on_load(function(target)
             if semver.compare(engine_version, proj.engine_version) < 0 then
                 raise("This project needs smol-engine >= " .. proj.engine_version ..
                     ", but the resolved engine is " .. engine_version .. ".\n" ..
-                    "Point it at a newer engine: update the submodule, set\n" ..
-                    "SMOL_ENGINE_DIR, or install smol-engine " .. proj.engine_version .. "+.")
+                    "Point it at a newer engine: update the smol-engine submodule,\n" ..
+                    "vendor it beside the project, or install smol-engine " .. proj.engine_version .. "+.")
             end
         end
     end
@@ -66,18 +66,37 @@ on_load(function(target)
     end
 
     if is_mode("debug") then
-        if not target:is_plat("android") then
-            target:set("policy", "build.sanitizer.address", true)
-        end
+        target:set("policy", "build.sanitizer.address", true)
 
         if target:is_plat("windows") then
-            target:add("defines", "_DISABLE_STRING_ANNOTATION",
-                "_DISABLE_VECTOR_ANNOTATION", { public = true })
+            target:add("defines", "_DISABLE_STL_ANNOTATION", { public = true })
         end
     end
 
     if target:is_plat("linux") and target:kind() == "binary" then
         target:add("rpathdirs", "@loader_path", "@loader_path/../lib")
+    end
+end)
+
+after_build(function(target)
+    import("lib.detect.find_tool")
+
+    if not (target:is_plat("windows") and target:kind() == "binary" and is_mode("debug")) then
+        return
+    end
+
+    local dll_name = "clang_rt.asan_dynamic-x86_64.dll"
+    local clang = find_tool("clang-cl")
+    if not (clang and clang.program) then
+        return
+    end
+
+    local llvm_root = path.directory(path.directory(clang.program))
+    local files = os.files(path.join(llvm_root, "lib", "clang", "*", "lib", "windows", dll_name))
+    if files and #files > 0 then
+        os.trycp(files[1], target:targetdir())
+    else
+        print("Could not find " .. dll_name)
     end
 end)
 rule_end()

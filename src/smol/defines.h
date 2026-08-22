@@ -50,9 +50,6 @@ enum smol_result_e
 
 #elif defined(__linux__) || defined(__gnu_linux__)
     #define SMOL_PLATFORM_LINUX 1
-    #if defined(__ANDROID__)
-        #define SMOL_PLATFORM_ANDROID 1
-    #endif
 
 #elif defined(__unix__)
     #define SMOL_PLATFORM_UNIX 1
@@ -62,10 +59,13 @@ enum smol_result_e
 
 #elif __APPLE__
     #define SMOL_PLATFORM_APPLE 1
-    #define SMOL_PLATFORM_MACOS 1 // no ios support, probably also no macos support
+    #define SMOL_PLATFORM_MACOS 1 // no ios support, macos support will be considered
 #endif
 
-#if defined(SMOL_PLATFORM_WIN)
+#if defined(SMOL_STATIC_LINK)
+    #define SMOL_ENGINE_API
+    #define SMOL_GAME_API
+#elif defined(SMOL_PLATFORM_WIN)
     #if defined(SMOL_ENGINE_EXPORT)
         #define SMOL_ENGINE_API __declspec(dllexport)
     #else

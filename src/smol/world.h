@@ -25,6 +25,8 @@ namespace smol
         std::vector<system_func_t> fixed_update_systems;
         std::vector<system_func_t> shutdown_systems;
 
+        bool is_simulating = true;
+
         void init();
         void update();
         void fixed_update();

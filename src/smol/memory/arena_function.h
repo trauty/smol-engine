@@ -24,7 +24,14 @@ namespace smol
         {
             using decayed_lambda_t = std::decay_t<Lambda>;
 
-            linear_allocator_t* arena = active_arena;
+            // The arena is reset by moving an offset back to zero, so nothing placed in it is
+            // ever destroyed. A capture that owns memory (std::string, std::function, a vector)
+            // would leak its buffer on every frame the callback is rebuilt.
+            static_assert(std::is_trivially_destructible_v<decayed_lambda_t>,
+                          "arena_function captures must be trivially destructible -- the arena never "
+                          "runs destructors, so an owning capture leaks every frame");
+
+            linear_allocator_t* arena = get_active_arena();
             if (!arena)
             {
                 SMOL_LOG_FATAL("MEMORY", "Tried to create an arena_function without an active arena");

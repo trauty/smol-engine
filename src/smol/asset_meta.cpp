@@ -6,8 +6,10 @@
 #include "json/json.hpp"
 #include <filesystem>
 #include <fstream>
+#include <mutex>
 #include <random>
 #include <unordered_map>
+#include <unordered_set>
 
 namespace smol::asset_meta
 {
@@ -26,7 +28,7 @@ namespace smol::asset_meta
         }
     } // namespace
 
-    void init(const std::string& guid_map_path)
+    void load_guid_map(const std::string& guid_map_path)
     {
         std::string text = smol::vfs::read_text(guid_map_path);
         if (text.empty())
@@ -84,6 +86,18 @@ namespace smol::asset_meta
     {
         std::string_view guid = get_guid(path);
         if (!guid.empty()) { return hash_string64(guid); }
+
+        {
+            static std::mutex warned_mutex;
+            static std::unordered_set<std::string> warned;
+
+            std::scoped_lock lock(warned_mutex);
+            if (warned.insert(path).second)
+            {
+                SMOL_LOG_WARN("ASSET_META", "No GUID for '{}', falling back to its path as identity", path);
+            }
+        }
+
         return hash_string64(path);
     }
 

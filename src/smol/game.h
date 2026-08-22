@@ -2,12 +2,14 @@
 
 namespace smol { struct world_t; }
 
+typedef void (*game_register_types_func)(smol::world_t*);
 typedef void (*game_init_func)(smol::world_t*);
 typedef void (*game_update_func)(smol::world_t*);
 typedef void (*game_shutdown_func)(smol::world_t*);
 
 extern "C"
 {
+    void smol_game_register_types(smol::world_t* world); // only for registering types, no game logic here
     void smol_game_init(smol::world_t* world);
     void smol_game_update(smol::world_t* world);
     void smol_game_shutdown(smol::world_t* world);
@@ -17,6 +19,8 @@ extern "C"
     #define SMOL_GAME_ENTRY()                                                                                          \
         extern "C"                                                                                                     \
         {                                                                                                              \
+            SMOL_GAME_API void smol_game_register_types_internal(smol::world_t* world)                                 \
+            { smol_game_register_types(world); }                                                                       \
             SMOL_GAME_API void smol_game_init_internal(smol::world_t* world)                                           \
             {                                                                                                          \
                 volkInitialize();                                                                                      \
