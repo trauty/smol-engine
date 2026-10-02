@@ -1,5 +1,6 @@
 #include "texture.h"
 
+#include "smol/asset_table.h"
 #include "smol/asset.h"
 #include "smol/defines.h"
 #include "smol/log.h"
@@ -22,7 +23,7 @@ namespace smol
 {
     std::optional<texture_t> asset_loader_t<texture_t>::load(const std::string& path, texture_format_e type)
     {
-        std::string cooked_path = get_cooked_path(path, ".ktx2");
+        std::string cooked_path = smol::asset_table::cooked_path(smol::get_type_id<texture_t>(), path);
 
         std::vector<u8_t> file_data = smol::vfs::read_bytes(cooked_path);
         if (file_data.empty())
@@ -247,6 +248,7 @@ namespace smol
                 .handle = {.buffer = {staging_buf, staging_alloc}},
                 .bindless_id = renderer::BINDLESS_NULL_HANDLE,
                 .gpu_timeline_value = signal_value,
+                .clock = renderer::deletion_clock_e::TRANSFER,
             });
         }
 
@@ -265,7 +267,7 @@ namespace smol
             .type = renderer::resource_type_e::TEXTURE,
             .handle = {.texture = {tex.image, tex.allocation, tex.view}},
             .bindless_id = tex.bindless_id,
-            .gpu_timeline_value = renderer::res_system.timeline_value,
+            .gpu_timeline_value = renderer::deletion_timeline_value(),
         });
     }
 } // namespace smol

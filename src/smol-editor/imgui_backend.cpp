@@ -9,6 +9,7 @@
 #include "smol/hash.h"
 #include "smol/math.h"
 #include "smol/rendering/renderer.h"
+#include "smol/rendering/renderer_constants.h"
 #include "smol/rendering/renderer_resources.h"
 #include "smol/rendering/renderer_types.h"
 #include "smol/rendering/rendergraph.h"
@@ -26,8 +27,7 @@ namespace smol::editor::imgui
     struct imgui_ctx_t
     {
         asset_handle_t shader;
-        // built straight from the shader rather than loaded: nothing authors it and
-        // nothing else shares it, so there is no asset for it to be
+        // built straight from the shader: nothing authors or shares it, so it is not an asset
         material_t material;
 
         VkImage font_image = VK_NULL_HANDLE;
@@ -724,10 +724,12 @@ namespace smol::editor::imgui
                 .handle = {.buffer = {staging_buf, staging_alloc}},
                 .bindless_id = renderer::BINDLESS_NULL_HANDLE,
                 .gpu_timeline_value = signal_value,
+                .clock = renderer::deletion_clock_e::TRANSFER,
             });
         }
 
         renderer::register_renderer_feature(
+            "ImGui"_h, renderer::FEATURE_ORDER_AFTER_POST,
             [](renderer::rendergraph_t& graph, ecs::registry_t& reg)
             {
                 renderer::rg_pass_t& pass = graph.add_pass("ImGuiPass"_h, "ImGuiPass");

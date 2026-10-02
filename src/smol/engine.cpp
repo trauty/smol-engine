@@ -29,6 +29,8 @@
 // clang-format off
 #include "smol/rendering/vulkan.h"
 #include <SDL3/SDL_events.h>
+#include <SDL3/SDL_filesystem.h>
+#include <filesystem>
 #include <SDL3/SDL_hints.h>
 #include <SDL3/SDL_init.h>
 #include <SDL3/SDL_video.h>
@@ -68,32 +70,49 @@ namespace smol::engine
         smol::log::init();
         smol::log::set_level(smol::log::level_e::LOG_DEBUG);
 
+        // a release build has no console to print to, so without this a crash leaves nothing behind
+        // named after the process, as the editor and a game can share a bin directory
+        if (const char* base = SDL_GetBasePath())
+        {
+            const std::filesystem::path log_path =
+                std::filesystem::path(base) / "logs" / (name + ".log");
+            if (!smol::log::to_file(log_path.string()))
+            {
+                SMOL_LOG_WARN("ENGINE", "Could not open a log file at {}", log_path.string());
+            }
+        }
+
         SMOL_LOG_INFO("ENGINE", "Starting engine...");
 
-        // The renderer and the editor UI load engine:// assets during init, long before a
-        // project is opened. Without the map those get cached under their path instead of
-        // their GUID, so opening a project later would load a second copy of each.
+        // load the guid map first: engine:// assets loaded at init would otherwise get uuids as paths
         const std::string& cooked_root = smol::vfs::cooked_root();
         if (!cooked_root.empty()) { smol::asset_meta::load_guid_map(cooked_root + "/guid_map.json"); }
 
         smol::reflection::register_types();
         smol::jobs::init();
 
-        smol::asset_serde::reg(
-            smol::get_type_id<smol::mesh_t>(),
-            [](smol::asset_registry_t& r, const std::string& p) { return r.load_sync<smol::mesh_t>(p); }, "Mesh");
-        smol::asset_serde::reg(
-            smol::get_type_id<smol::material_t>(), [](smol::asset_registry_t& r, const std::string& p)
-            { return r.load_sync<smol::material_t>(p); }, "Material");
-        smol::asset_serde::reg(
-            smol::get_type_id<smol::texture_t>(),
-            [](smol::asset_registry_t& r, const std::string& p) { return r.load_sync<smol::texture_t>(p); }, "Texture");
-        smol::asset_serde::reg(
-            smol::get_type_id<smol::shader_t>(),
-            [](smol::asset_registry_t& r, const std::string& p) { return r.load_sync<smol::shader_t>(p); }, "Shader");
-        smol::asset_serde::reg(
-            smol::get_type_id<smol::scene_t>(),
-            [](smol::asset_registry_t& r, const std::string& p) { return r.load_sync<smol::scene_t>(p); }, "Scene");
+        // names and extensions live in asset_table; only the loader is bound here
+        smol::asset_serde::reg(smol::get_type_id<smol::mesh_t>(), [](smol::asset_registry_t& r, const std::string& p)
+                               { return r.load_sync<smol::mesh_t>(p); },
+                               [](smol::asset_registry_t& r, const std::string& p)
+                               { return r.reload<smol::mesh_t>(p); });
+        smol::asset_serde::reg(smol::get_type_id<smol::material_t>(),
+                               [](smol::asset_registry_t& r, const std::string& p)
+                               { return r.load_sync<smol::material_t>(p); },
+                               [](smol::asset_registry_t& r, const std::string& p)
+                               { return r.reload<smol::material_t>(p); });
+        smol::asset_serde::reg(smol::get_type_id<smol::texture_t>(), [](smol::asset_registry_t& r, const std::string& p)
+                               { return r.load_sync<smol::texture_t>(p); },
+                               [](smol::asset_registry_t& r, const std::string& p)
+                               { return r.reload<smol::texture_t>(p); });
+        smol::asset_serde::reg(smol::get_type_id<smol::shader_t>(), [](smol::asset_registry_t& r, const std::string& p)
+                               { return r.load_sync<smol::shader_t>(p); },
+                               [](smol::asset_registry_t& r, const std::string& p)
+                               { return r.reload<smol::shader_t>(p); });
+        smol::asset_serde::reg(smol::get_type_id<smol::scene_t>(), [](smol::asset_registry_t& r, const std::string& p)
+                               { return r.load_sync<smol::scene_t>(p); },
+                               [](smol::asset_registry_t& r, const std::string& p)
+                               { return r.reload<smol::scene_t>(p); });
 
         // SDL_SetHintWithPriority(SDL_HINT_SHUTDOWN_DBUS_ON_QUIT, "1", SDL_HintPriority::SDL_HINT_OVERRIDE);
         SDL_Init(SDL_INIT_VIDEO);

@@ -166,6 +166,11 @@ target("smol-cooker")
     add_deps("smol-engine")
 
     add_files("src/smol-cooker/**.cpp")
+
+    -- a debug cooker writes debuggable shaders: see COOK_SHADER_DEBUG in cache_manager.h
+    if is_mode("debug") then
+        add_defines("SMOL_COOK_SHADER_DEBUG")
+    end
     add_files("lib/tinygltf/tiny_gltf.cpp", {warnings = "none"})
     add_files("lib/stb/*.cpp", {warnings = "none"})
     add_files("lib/meshoptimizer/*.cpp", {warnings = "none"})
@@ -181,25 +186,18 @@ target("smol-cooker")
         if so then add_links(":" .. path.filename(so)) end
     end
 
-    add_linkdirs(path.join(os.scriptdir(), "lib", "spirv-tools", vendor_platdir()))
-    add_links("SPIRV-Tools-opt", "SPIRV-Tools")
+    -- Slang's runtime is two libraries: the compiler, and slang-glslang, which the compiler
+    -- loads from beside itself to validate and optimise the SPIR-V it emits. Without it Slang
+    -- still compiles but silently skips both -- or picks up whichever copy is on PATH, such as
+    -- the Vulkan SDK's, of some other Slang version. The cooker refuses to run without it.
+    local slang_runtime = path.join(slang_libdir, is_plat("windows") and "*.dll" or "libslang-*.so*")
 
     after_build(function (target)
-        local dest_dir = target:targetdir()
-        if target:is_plat("linux") then
-            os.trycp(path.join(slang_libdir, "libslang-compiler.so*"), dest_dir)
-        elseif target:is_plat("windows") then
-            os.trycp(path.join(slang_libdir, "slang-compiler.dll"), dest_dir)
-        end
+        os.trycp(slang_runtime, target:targetdir())
     end)
 
     after_install(function (target)
-        local bindir = path.join(target:installdir(), "bin")
-        if target:is_plat("linux") then
-            os.trycp(path.join(slang_libdir, "libslang-compiler.so*"), bindir)
-        elseif target:is_plat("windows") then
-            os.trycp(path.join(slang_libdir, "slang-compiler.dll"), bindir)
-        end
+        os.trycp(slang_runtime, path.join(target:installdir(), "bin"))
     end)
 target_end()
 

@@ -13,7 +13,7 @@ RWStructuredBuffer<uint> draw_counts;
 [[vk::binding(1, 2)]]
 RWStructuredBuffer<DrawIndirectCommand> indirect_commands;
 [[vk::binding(2, 2)]]
-StructuredBuffer<ObjectData> objects; // adreno drivers = garbage
+StructuredBuffer<CullData> cull_inputs;
 
 bool frustumCull(float4 sphere_center, float radius)
 {
@@ -32,9 +32,9 @@ void computeMain(uint3 thread_id: SV_DispatchThreadID)
 {
     if (thread_id.x >= globals.object_count) { return; }
 
-    ObjectData obj = objects[thread_id.x];
+    CullData obj = cull_inputs[thread_id.x];
 
-    bool is_visible = frustumCull(obj.bounding_sphere_center, obj.bounding_sphere_radius);
+    bool is_visible = frustumCull(float4(obj.bounding_sphere.xyz, 0.0f), obj.bounding_sphere.w);
 
     // shadow only skips non casters
     if ((globals.cull_flags & 1u) != 0u && (obj.flags & 1u) == 0u) { is_visible = false; }
@@ -69,9 +69,6 @@ void computeMain(uint3 thread_id: SV_DispatchThreadID)
         cmd.first_vertex = 0;
         cmd.first_instance = thread_id.x;
 
-        uint max_draws_per_bin = globals.object_count;
-        uint array_index = (obj.pipeline_index * max_draws_per_bin) + final_index;
-
-        indirect_commands[array_index] = cmd;
+        indirect_commands[obj.draw_bin_offset + final_index] = cmd;
     }
 }

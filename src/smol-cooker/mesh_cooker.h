@@ -2,4 +2,4 @@
 
 #include <string>
 
-namespace smol::cooker::mesh { void cook_mesh(const std::string& input_path, const std::string& output_path); }
+namespace smol::cooker::mesh { bool cook_mesh(const std::string& input_path, const std::string& output_path); }

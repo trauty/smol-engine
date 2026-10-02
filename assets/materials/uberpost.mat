@@ -1,0 +1,13 @@
+{
+    "guid": "634021bc-77f6-1712-9e81-9a38f9cc07bf",
+    "properties": {
+        "contrast": 1.0,
+        "exposure": 1.1200000047683716,
+        "grain_strength": 0.0,
+        "saturation": 1.0,
+        "tonemap_op": 1,
+        "vignette_radius": 0.75,
+        "vignette_strength": 0.0
+    },
+    "shader": "engine://assets/shaders/uberpost.slang"
+}

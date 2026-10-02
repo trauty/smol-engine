@@ -1,7 +1,9 @@
 #include "shader.h"
 
 #include "smol/asset.h"
+#include "smol/asset_table.h"
 #include "smol/assets/shader_format.h"
+#include "smol/containers/flat_map.h"
 #include "smol/defines.h"
 #include "smol/log.h"
 #include "smol/rendering/renderer.h"
@@ -13,10 +15,10 @@
 
 #include <SDL3/SDL_iostream.h>
 #include <algorithm>
+#include <chrono>
 #include <mutex>
 #include <optional>
 #include <string>
-#include <unordered_map>
 #include <vector>
 
 namespace smol
@@ -42,7 +44,7 @@ namespace smol
 
     std::optional<shader_t> smol::asset_loader_t<shader_t>::load(const std::string& path)
     {
-        std::string cooked_path = get_cooked_path(path, ".smolshader");
+        std::string cooked_path = smol::asset_table::cooked_path(smol::get_type_id<shader_t>(), path);
 
         SDL_IOStream* stream = smol::vfs::open_read(cooked_path);
         if (!stream)
@@ -76,6 +78,9 @@ namespace smol
         shader.target_formats.resize(header.target_format_count);
         SDL_ReadIO(stream, shader.target_formats.data(), header.target_format_count * sizeof(VkFormat));
 
+        shader.gbuffer_target_formats.resize(header.gbuffer_target_format_count);
+        SDL_ReadIO(stream, shader.gbuffer_target_formats.data(), header.gbuffer_target_format_count * sizeof(VkFormat));
+
         for (VkFormat& format : shader.target_formats)
         {
             if (format == VK_FORMAT_UNDEFINED) { format = renderer::ctx.swapchain.format; }
@@ -89,7 +94,7 @@ namespace smol
             shader.module = {
                 .name = mod_header.name,
                 .size = mod_header.size,
-                .target_pass = mod_header.target_pass,
+                .domain = mod_header.domain,
                 .blend_mode = mod_header.blend_mode,
                 .depth_write = mod_header.depth_write,
                 .depth_test = mod_header.depth_test,
@@ -100,7 +105,10 @@ namespace smol
             {
                 shader_member_header_t member_header;
                 SDL_ReadIO(stream, &member_header, sizeof(shader_member_header_t));
-                shader.module.members[member_header.name_hash] = {"", member_header.offset, member_header.size};
+                shader.module.members[member_header.name_hash] = {
+                    member_header.name,      member_header.offset,     member_header.size,
+                    member_header.type,      member_header.edit,       member_header.range_min,
+                    member_header.range_max, member_header.enum_names, member_header.tooltip};
             }
         }
 
@@ -113,17 +121,20 @@ namespace smol
 
         std::vector<u32_t> vert_spirv(header.vert_spirv_size);
         std::vector<u32_t> frag_spirv(header.frag_spirv_size);
+        std::vector<u32_t> gbuffer_spirv(header.gbuffer_spirv_size);
         std::vector<u32_t> comp_spirv(header.comp_spirv_size);
 
         if (header.vert_spirv_size > 0) { SDL_ReadIO(stream, vert_spirv.data(), header.vert_spirv_size * 4); }
 
         if (header.frag_spirv_size > 0) { SDL_ReadIO(stream, frag_spirv.data(), header.frag_spirv_size * 4); }
 
+        if (header.gbuffer_spirv_size > 0) { SDL_ReadIO(stream, gbuffer_spirv.data(), header.gbuffer_spirv_size * 4); }
+
         if (header.comp_spirv_size > 0) { SDL_ReadIO(stream, comp_spirv.data(), header.comp_spirv_size * 4); }
 
         SDL_CloseIO(stream);
 
-        std::unordered_map<u32_t, std::vector<VkDescriptorSetLayoutBinding>> set_bindings;
+        flat_map_t<std::vector<VkDescriptorSetLayoutBinding>> set_bindings;
         for (const shader_descriptor_binding_t& b : shader.descriptor_bindings)
         {
             VkDescriptorSetLayoutBinding layout_binding = {
@@ -160,7 +171,7 @@ namespace smol
         for (u32_t i = 2; i <= max_set; i++)
         {
             // should also check for skipped sets, but this works for now
-            if (shader.custom_layouts.count(i)) { set_layouts[i] = shader.custom_layouts[i]; }
+            if (shader.custom_layouts.contains(i)) { set_layouts[i] = shader.custom_layouts[i]; }
         }
 
         VkPipelineColorBlendAttachmentState base_blend = {
@@ -175,7 +186,7 @@ namespace smol
                               VK_COLOR_COMPONENT_A_BIT,
         };
 
-        std::string blend_mode = "Opaque";
+        blend_mode_e blend_mode = blend_mode_e::SOLID;
         bool is_depth_write = true;
         bool is_depth_test = true;
 
@@ -186,29 +197,31 @@ namespace smol
             is_depth_test = shader.module.depth_test;
         }
 
-        if (blend_mode == "TransparentAlpha")
+        switch (blend_mode)
         {
+        case blend_mode_e::TRANSPARENT_ALPHA:
             base_blend.blendEnable = VK_TRUE;
             base_blend.srcColorBlendFactor = VK_BLEND_FACTOR_SRC_ALPHA;
             base_blend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
             base_blend.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
             base_blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
-        }
-        else if (blend_mode == "TransparentAdd")
-        {
+            break;
+        case blend_mode_e::TRANSPARENT_ADD:
             base_blend.blendEnable = VK_TRUE;
             base_blend.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
             base_blend.dstColorBlendFactor = VK_BLEND_FACTOR_ONE;
             base_blend.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
             base_blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
-        }
-        else if (blend_mode == "TransparentMult")
-        {
+            break;
+        case blend_mode_e::TRANSPARENT_MULT:
             base_blend.blendEnable = VK_TRUE;
             base_blend.srcColorBlendFactor = VK_BLEND_FACTOR_DST_COLOR;
             base_blend.dstColorBlendFactor = VK_BLEND_FACTOR_ZERO;
             base_blend.srcAlphaBlendFactor = VK_BLEND_FACTOR_DST_ALPHA;
             base_blend.dstAlphaBlendFactor = VK_BLEND_FACTOR_ZERO;
+            break;
+        case blend_mode_e::SOLID:
+        case blend_mode_e::CUTOUT: break;
         }
 
         VkPipelineVertexInputStateCreateInfo vertex_input_info = {
@@ -252,7 +265,7 @@ namespace smol
             .sType = VK_STRUCTURE_TYPE_PIPELINE_DEPTH_STENCIL_STATE_CREATE_INFO,
             .depthTestEnable = is_depth_test ? VK_TRUE : VK_FALSE,
             .depthWriteEnable = is_depth_write ? VK_TRUE : VK_FALSE,
-            .depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL,
+            .depthCompareOp = VK_COMPARE_OP_GREATER_OR_EQUAL, // reverse z
             .depthBoundsTestEnable = VK_FALSE,
             .stencilTestEnable = VK_FALSE,
         };
@@ -317,8 +330,11 @@ namespace smol
             };
 
             VkPipeline compute_pipeline = VK_NULL_HANDLE;
-            VkResult comp_result = vkCreateComputePipelines(renderer::ctx.device, VK_NULL_HANDLE, 1,
+            const auto comp_start = std::chrono::steady_clock::now();
+            VkResult comp_result = vkCreateComputePipelines(renderer::ctx.device, renderer::ctx.pipeline_cache, 1,
                                                             &comp_pipeline_info, nullptr, &compute_pipeline);
+            renderer::note_pipeline_created(
+                std::chrono::duration<f64, std::milli>(std::chrono::steady_clock::now() - comp_start).count());
             if (comp_result != VK_SUCCESS)
             {
                 SMOL_LOG_ERROR("SHADER", "Failed to create compute pipeline for shader at path: {} (VkResult {})", path,
@@ -334,9 +350,14 @@ namespace smol
         else
         {
             VkShaderModule vert_mod = create_shader_module(vert_spirv);
-            VkShaderModule frag_mod = create_shader_module(frag_spirv);
+            VkShaderModule frag_mod = frag_spirv.empty() ? VK_NULL_HANDLE : create_shader_module(frag_spirv);
+            VkShaderModule gbuffer_mod = gbuffer_spirv.empty() ? VK_NULL_HANDLE : create_shader_module(gbuffer_spirv);
 
-            if (!vert_mod || !frag_mod)
+            // a shader that always draws into the gbuffer ships without forward fragment code
+            // the cooker leaves it out, since nothing could bind it
+            const bool needs_forward = renderer::pass_for(shader) != renderer::mesh_pass_e::GBUFFER;
+
+            if (!vert_mod || (needs_forward && !frag_mod))
             {
                 if (vert_mod) { vkDestroyShaderModule(renderer::ctx.device, vert_mod, nullptr); }
                 if (frag_mod) { vkDestroyShaderModule(renderer::ctx.device, frag_mod, nullptr); }
@@ -355,6 +376,14 @@ namespace smol
             frag_stage_info.pName = "main";
 
             VkPipelineShaderStageCreateInfo shader_stages[] = {vert_stage_info, frag_stage_info};
+
+            VkPipelineColorBlendAttachmentState gbuffer_blend = {
+                .blendEnable = VK_FALSE,
+                .colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT |
+                                  VK_COLOR_COMPONENT_A_BIT,
+            };
+            std::vector<VkPipelineColorBlendAttachmentState> gbuffer_blend_attachments(
+                shader.gbuffer_target_formats.size(), gbuffer_blend);
 
             VkPipelineRenderingCreateInfo pipeline_rendering_info = {
                 .sType = VK_STRUCTURE_TYPE_PIPELINE_RENDERING_CREATE_INFO,
@@ -380,14 +409,24 @@ namespace smol
             const pipeline_variant_config_t variant_configs[] = {
                 {pipeline_variant_e::FORWARD, true,  true,  rasterizer_info.cullMode, false},
                 {pipeline_variant_e::SHADOW,  false, false, VK_CULL_MODE_FRONT_BIT,   true },
+                {pipeline_variant_e::GBUFFER, true,  true,  rasterizer_info.cullMode, false},
             };
 
             auto wants_variant = [&](pipeline_variant_e variant)
             {
-                if (variant == pipeline_variant_e::FORWARD) { return true; }
+                if (variant == pipeline_variant_e::FORWARD)
+                {
+                    // smolSurfaceFragment is the forward/transparent path, never bound for a deferred
+                    // capable opaque surface shader (always routed to the gbuffer pass), so skip its compile
+                    return needs_forward;
+                }
                 if (variant == pipeline_variant_e::SHADOW)
                 {
                     return shader.has_material_data && shader.module.casts_shadow;
+                }
+                if (variant == pipeline_variant_e::GBUFFER)
+                {
+                    return gbuffer_mod != VK_NULL_HANDLE && !shader.gbuffer_target_formats.empty();
                 }
                 return false;
             };
@@ -402,9 +441,16 @@ namespace smol
                     variant_rendering_info.colorAttachmentCount = 0;
                     variant_rendering_info.pColorAttachmentFormats = nullptr;
                 }
+                if (cfg.variant == pipeline_variant_e::GBUFFER)
+                {
+                    variant_rendering_info.colorAttachmentCount =
+                        static_cast<u32_t>(shader.gbuffer_target_formats.size());
+                    variant_rendering_info.pColorAttachmentFormats = shader.gbuffer_target_formats.data();
+                    variant_rendering_info.depthAttachmentFormat = renderer::ctx.swapchain.depth_format;
+                }
                 if (cfg.variant == pipeline_variant_e::SHADOW)
                 {
-                    // depth-only variants always render into a depth attachment
+                    // depth only variants always render into a depth attachment
                     variant_rendering_info.depthAttachmentFormat = renderer::ctx.swapchain.depth_format;
                 }
 
@@ -422,6 +468,7 @@ namespace smol
                 {
                     variant_depth_stencil.depthTestEnable = VK_TRUE;
                     variant_depth_stencil.depthWriteEnable = VK_TRUE;
+                    variant_depth_stencil.depthCompareOp = VK_COMPARE_OP_LESS_OR_EQUAL;
                 }
 
                 VkPipelineColorBlendStateCreateInfo variant_color_blend = color_blend_info;
@@ -430,12 +477,29 @@ namespace smol
                     variant_color_blend.attachmentCount = 0;
                     variant_color_blend.pAttachments = nullptr;
                 }
+                if (cfg.variant == pipeline_variant_e::GBUFFER)
+                {
+                    variant_color_blend.attachmentCount = static_cast<u32_t>(gbuffer_blend_attachments.size());
+                    variant_color_blend.pAttachments = gbuffer_blend_attachments.data();
+                }
+
+                // the gbuffer variant swaps in its own fragment stage
+                VkPipelineShaderStageCreateInfo variant_stages[2] = {shader_stages[0], shader_stages[1]};
+                if (cfg.variant == pipeline_variant_e::GBUFFER) { variant_stages[1].module = gbuffer_mod; }
+
+                VkPipelineDepthStencilStateCreateInfo gbuffer_depth = variant_depth_stencil;
+                if (cfg.variant == pipeline_variant_e::GBUFFER)
+                {
+                    gbuffer_depth.depthTestEnable = VK_TRUE;
+                    gbuffer_depth.depthWriteEnable = VK_TRUE;
+                    variant_depth_stencil = gbuffer_depth;
+                }
 
                 VkGraphicsPipelineCreateInfo pipeline_info = {
                     .sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO,
                     .pNext = &variant_rendering_info,
                     .stageCount = cfg.needs_fragment_stage ? 2u : 1u,
-                    .pStages = shader_stages,
+                    .pStages = variant_stages,
                     .pVertexInputState = &vertex_input_info,
                     .pInputAssemblyState = &input_assembly,
                     .pViewportState = &viewport_state,
@@ -451,13 +515,18 @@ namespace smol
                 };
 
                 VkPipeline variant_pipeline = VK_NULL_HANDLE;
-                VkResult gfx_result = vkCreateGraphicsPipelines(renderer::ctx.device, VK_NULL_HANDLE, 1, &pipeline_info,
-                                                                nullptr, &variant_pipeline);
+                const auto gfx_start = std::chrono::steady_clock::now();
+                VkResult gfx_result = vkCreateGraphicsPipelines(renderer::ctx.device, renderer::ctx.pipeline_cache, 1,
+                                                                &pipeline_info, nullptr, &variant_pipeline);
+                renderer::note_pipeline_created(
+                    std::chrono::duration<f64, std::milli>(std::chrono::steady_clock::now() - gfx_start).count());
                 if (gfx_result != VK_SUCCESS)
                 {
+                    const char* variant_name = cfg.variant == pipeline_variant_e::SHADOW    ? "shadow"
+                                               : cfg.variant == pipeline_variant_e::GBUFFER ? "gbuffer"
+                                                                                            : "forward";
                     SMOL_LOG_ERROR("SHADER", "Failed to create {} pipeline for shader at path: {} (VkResult {})",
-                                   cfg.variant == pipeline_variant_e::SHADOW ? "shadow" : "forward", path,
-                                   (int)gfx_result);
+                                   variant_name, path, (int)gfx_result);
                     continue;
                 }
 
@@ -465,7 +534,8 @@ namespace smol
             }
 
             vkDestroyShaderModule(renderer::ctx.device, vert_mod, nullptr);
-            vkDestroyShaderModule(renderer::ctx.device, frag_mod, nullptr);
+            if (frag_mod) { vkDestroyShaderModule(renderer::ctx.device, frag_mod, nullptr); }
+            if (gbuffer_mod) { vkDestroyShaderModule(renderer::ctx.device, gbuffer_mod, nullptr); }
         }
 
         return shader;
@@ -485,7 +555,7 @@ namespace smol
                 .type = renderer::resource_type_e::PIPELINE,
                 .handle = {.pipeline = {pipeline, layout_attached ? VK_NULL_HANDLE : shader.pipeline_layout}},
                 .bindless_id = renderer::BINDLESS_NULL_HANDLE,
-                .gpu_timeline_value = renderer::res_system.timeline_value,
+                .gpu_timeline_value = renderer::deletion_timeline_value(),
             });
             layout_attached = true;
         }
@@ -496,7 +566,7 @@ namespace smol
                 .type = renderer::resource_type_e::DESCRIPTOR_SET_LAYOUT,
                 .handle = {.descriptor_set_layout = layout},
                 .bindless_id = renderer::BINDLESS_NULL_HANDLE,
-                .gpu_timeline_value = renderer::res_system.timeline_value,
+                .gpu_timeline_value = renderer::deletion_timeline_value(),
             });
         }
 

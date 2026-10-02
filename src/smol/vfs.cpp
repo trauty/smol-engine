@@ -60,6 +60,14 @@ namespace smol::vfs
 
     const std::string& cooked_root() { return cooked_root_dir; }
 
+    path_parts_t split_protocol(std::string_view virtual_path)
+    {
+        const std::size_t proto = virtual_path.find("://");
+        if (proto == std::string_view::npos) { return {{}, virtual_path}; }
+
+        return {virtual_path.substr(0, proto + 3), virtual_path.substr(proto + 3)};
+    }
+
     void mount(const std::string& alias, const std::string& physical_path) { mounts[alias] = physical_path; }
 
     std::string resolve(std::string_view virtual_path)

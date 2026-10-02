@@ -9,8 +9,8 @@
 #include <memory>
 #include <optional>
 #include <string>
-#include <unordered_map>
 #include <vector>
+
 
 namespace smol
 {
@@ -19,16 +19,25 @@ namespace smol
         std::string name;
         u32_t offset = 0;
         u32_t size = 0;
+        shader_member_type_e type = shader_member_type_e::UNKNOWN;
+
+        shader_member_edit_e edit = shader_member_edit_e::DEFAULT;
+        f32 range_min = 0.0f;
+        f32 range_max = 0.0f;
+        std::string enum_names;
+        std::string tooltip;
+
+        bool has_range() const { return range_max > range_min; }
     };
 
     struct SMOL_ENGINE_API shader_module_info_t
     {
         std::string name;
         u32_t size;
-        std::unordered_map<u32_t, shader_member_t> members;
+        flat_map_t<shader_member_t> members;
 
-        std::string target_pass = "MainForwardPass";
-        std::string blend_mode = "Opaque";
+        shader_domain_e domain = shader_domain_e::SURFACE;
+        blend_mode_e blend_mode = blend_mode_e::SOLID;
         bool depth_write = true;
         bool depth_test = true;
         bool casts_shadow = true;
@@ -37,7 +46,8 @@ namespace smol
     enum class pipeline_variant_e : u32_t
     {
         FORWARD,
-        SHADOW
+        SHADOW,
+        GBUFFER,
     };
 
     struct SMOL_ENGINE_API shader_t
@@ -48,11 +58,14 @@ namespace smol
         bool has_material_data = false;
         shader_module_info_t module;
 
-        std::unordered_map<u32_t, VkDescriptorSetLayout> custom_layouts;
+        flat_map_t<VkDescriptorSetLayout> custom_layouts;
         std::vector<shader_descriptor_binding_t> descriptor_bindings;
 
         bool is_compute = false;
         std::vector<VkFormat> target_formats;
+        std::vector<VkFormat> gbuffer_target_formats;
+
+        bool is_deferred_capable() const { return !gbuffer_target_formats.empty(); }
 
         VkPipeline get_pipeline(pipeline_variant_e variant) const
         {

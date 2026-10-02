@@ -2,6 +2,7 @@
 #include "smol/asset.h"
 #include "smol/assets/shader.h"
 #include "smol/assets/texture.h"
+#include "smol/containers/flat_map.h"
 #include "smol/defines.h"
 #include "smol/engine.h"
 #include "smol/log.h"
@@ -10,7 +11,6 @@
 
 #include <climits>
 #include <cstring>
-#include <unordered_map>
 #include <vector>
 
 namespace smol
@@ -22,7 +22,13 @@ namespace smol
         asset_handle_t shader_handle;
         std::vector<u8> data;
 
-        std::unordered_map<u32_t, asset_handle_t> bound_textures;
+        std::vector<u32_t> authored_properties;
+
+        flat_map_t<asset_handle_t> bound_textures;
+
+        // a texture the file names that failed to load draws as the fallback, the original reference is kept
+        // so saving writes what the file said. rebinding or clearing the slot forgets it
+        flat_map_t<std::string> missing_textures;
 
         u32_t heap_offset[renderer::MAX_FRAMES_IN_FLIGHT];
         u32_t dirty_frames = renderer::MAX_FRAMES_IN_FLIGHT;
@@ -39,16 +45,16 @@ namespace smol
             shader_t* shader = smol::engine::get_asset_registry().get<shader_t>(shader_handle);
             if (!shader) { return; }
 
-            const std::unordered_map<u32_t, shader_member_t>& members = shader->module.members;
-            auto it = members.find(name_hash);
+            const flat_map_t<shader_member_t>& members = shader->module.members;
+            const shader_member_t* it = members.find(name_hash);
 
-            if (it == members.end())
+            if (it == nullptr)
             {
-                SMOL_LOG_WARN("MATERIAL", "Property '{}' not found in shader", name_hash);
+                SMOL_LOG_WARN("MATERIAL", "Property {} not found in shader '{}'", name_hash, shader->module.name);
                 return;
             }
 
-            const shader_member_t& member = it->second;
+            const shader_member_t& member = *it;
 
             if (sizeof(T) != member.size)
             {
@@ -61,20 +67,24 @@ namespace smol
             dirty_frames = renderer::MAX_FRAMES_IN_FLIGHT;
         }
 
-        void set_texture(u32_t name_hash, asset_handle_t tex_handle)
-        {
-            texture_t* tex = smol::engine::get_asset_registry().get<texture_t>(tex_handle);
-            if (tex)
-            {
-                set_property<u32_t>(name_hash, tex->bindless_id);
-                bound_textures[name_hash] = tex_handle;
-            }
-        }
+        // every bound_textures entry is a reference the material owns, released on rebind, clear or unload
+        // set_texture takes over a caller held reference, even when the texture did not load
+        void set_texture(u32_t name_hash, asset_handle_t tex_handle);
+        void clear_texture(u32_t name_hash);
+
+        // rereads the bindless id of bound textures reloaded in place, touches no reference counts
+        void refresh_texture(u32_t name_hash);
 
         void set_property_raw(u32_t name_hash, const void* value, u32_t size);
 
-        // Gives back the material heap allocations. Does not touch shader_handle or
-        // bound_textures -- who owns those depends on how the material was made.
+        bool has_property(u32_t name_hash) const;
+
+        template <typename T>
+        void set_property_if_present(u32_t name_hash, const T& value)
+        {
+            if (has_property(name_hash)) { set_property(name_hash, value); }
+        }
+
         void release_heap();
 
         void set_sampler(u32_t name_hash, sampler_type_e sampler)

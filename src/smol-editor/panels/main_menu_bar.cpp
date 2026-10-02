@@ -1,6 +1,7 @@
 #include "main_menu_bar.h"
 
 #include "imgui.h"
+#include "smol/asset_meta.h"
 #include "smol/log.h"
 #include "smol/serialization.h"
 #include "smol/window.h"
@@ -62,9 +63,14 @@ namespace smol::editor::panels
                 if (ImGui::MenuItem("Save", nullptr, false, !ctx.current_scene_path.empty()))
                 {
                     nlohmann::json scene_json = smol::serialization::serialize_scene(world);
+                    scene_json["guid"] = smol::asset_meta::guid_for_writing(ctx.current_scene_path);
                     std::ofstream file(ctx.current_scene_path);
                     file << scene_json.dump(4);
+                    file.close();
+
                     SMOL_LOG_INFO("EDITOR", "Scene saved to {}", ctx.current_scene_path);
+
+                    // nothing more needed: the watcher cooks the write and skips the reload of the open scene
                 }
 
                 if (ImGui::MenuItem("Save As..."))

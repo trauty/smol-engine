@@ -1,6 +1,7 @@
 #pragma once
 
 #include "entt/locator/locator.hpp"
+#include "entt/meta/container.hpp"
 #include "entt/meta/context.hpp"
 #include "entt/meta/factory.hpp"
 #include "entt/meta/meta.hpp"
@@ -48,11 +49,24 @@ namespace smol::reflection
 
     template <typename T>
     void add_component(smol::ecs::registry_t& reg, smol::ecs::entity_t entity)
-    { reg.emplace_or_replace<T>(entity); }
+    {
+        if constexpr (std::is_empty_v<T>) { reg.emplace_or_replace<T>(entity); }
+        else
+        {
+            T& component = reg.emplace_or_replace<T>(entity);
+            if constexpr (requires { component.on_added(); }) { component.on_added(); }
+        }
+    }
 
     template <typename T>
     void remove_component(smol::ecs::registry_t& reg, smol::ecs::entity_t entity)
     { reg.remove<T>(entity); }
+
+    // creates T's pool from the module this is instantiated in, the engine for engine components
+    // an entt pool keeps the type_info pointer of its creator, so a pool the game DLL created dangles after unload
+    template <typename T>
+    void ensure_storage(smol::ecs::registry_t& reg)
+    { reg.storage<T>(); }
 
     enum class unit_e : u8_t
     {
@@ -66,9 +80,14 @@ namespace smol::reflection
         u64_t asset_type_hash = 0;
         unit_e unit = unit_e::NONE;
 
+        bool is_list = false;
+
         editor_prop_t() = default;
         editor_prop_t(const char* n) : name(n) {}
         editor_prop_t(const char* n, u64_t asset_type) : name(n), asset_type_hash(asset_type) {}
+        editor_prop_t(const char* n, u64_t asset_type, bool list) : name(n), asset_type_hash(asset_type), is_list(list)
+        {
+        }
         editor_prop_t(const char* n, unit_e u) : name(n), unit(u) {}
     };
 
@@ -88,7 +107,8 @@ namespace smol::reflection
                 .template custom<editor_prop_t>(label)
                 .template func<&get_component<T>>("get"_h)
                 .template func<&add_component<T>>("add"_h)
-                .template func<&remove_component<T>>("remove"_h);
+                .template func<&remove_component<T>>("remove"_h)
+                .template func<&ensure_storage<T>>("storage"_h);
         }
 
         template <auto MemberPtr>
@@ -108,6 +128,14 @@ namespace smol::reflection
             return bind_field<MemberPtr>(smol::hash_string(smol::member_name<MemberPtr>()),
                                          smol::member_label<MemberPtr>.c_str(),
                                          editor_prop_t{label, smol::get_type_id<AssetT>()});
+        }
+
+        template <auto MemberPtr, typename AssetT>
+        component_t& field_asset_list(const char* label)
+        {
+            return bind_field<MemberPtr>(smol::hash_string(smol::member_name<MemberPtr>()),
+                                         smol::member_label<MemberPtr>.c_str(),
+                                         editor_prop_t{label, smol::get_type_id<AssetT>(), true});
         }
 
         template <auto Setter, auto Getter>

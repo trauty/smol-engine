@@ -2,4 +2,4 @@
 
 #include <string>
 
-namespace smol::cooker::material { void cook_material(const std::string& input_path, const std::string& output_path); }
+namespace smol::cooker::material { bool cook_material(const std::string& input_path, const std::string& output_path); }

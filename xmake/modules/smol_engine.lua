@@ -35,6 +35,8 @@ function resolve(engine_dir)
             path.join(engine_dir, "lib", "JoltPhysics"),
         }
         info.engine_assets = path.join(engine_dir, "assets")
+        -- shaders #include "smol/rendering/shader_shared.h", the same path C++ uses
+        info.shader_include = path.join(engine_dir, "src")
         info.engine_cooked = path.join(info.libdir, "assets", "engine")
         info.engine_guid_map = path.join(info.libdir, "assets", "guid_map.json")
         info.version_file = path.join(engine_dir, "VERSION")
@@ -46,6 +48,7 @@ function resolve(engine_dir)
             path.join(engine_dir, "include", "imgui"),
         }
         info.engine_assets = path.join(engine_dir, "share", "smol", "engine-assets-src")
+        info.shader_include = path.join(engine_dir, "include")
         info.engine_cooked = path.join(engine_dir, "share", "smol", "engine-assets", "engine")
         info.engine_guid_map = path.join(engine_dir, "share", "smol", "engine-assets", "guid_map.json")
         info.version_file = path.join(engine_dir, "share", "smol", "VERSION")
@@ -62,14 +65,28 @@ function link_name(static)
     return static and "smol-engine-static" or "smol-engine"
 end
 
+function library_file(info, target, static)
+    local name = link_name(static)
+    if target:is_plat("windows") then
+        return path.join(info.libdir, name .. ".lib")
+    elseif static then
+        return path.join(info.libdir, "lib" .. name .. ".a")
+    end
+    return path.join(info.libdir, "lib" .. name .. ".so")
+end
+
 function missing_artifact_error(info, what, wanted)
     local how
     if info.source then
+        local mode = config.get("mode") or "debug"
         how = "build it in the engine repo:\n" ..
             "  cd " .. info.dir .. "\n" ..
-            "  xmake f -m " .. (config.get("mode") or "debug") .. " && xmake"
+            "  xmake f -m " .. mode .. "\n" ..
+            "  xmake"
         if wanted == "static" then
-            how = how .. " build smol-engine-static"
+            how = how .. "\n  xmake build smol-engine-static\n\n" ..
+                "the static engine is not part of a plain 'xmake', and it has to be built in\n" ..
+                "the same mode (" .. mode .. ") as this game"
         end
     else
         how = "the SDK install at " .. info.dir .. " looks incomplete"

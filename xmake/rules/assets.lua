@@ -4,10 +4,12 @@ rule("smol.assets")
 on_buildcmd(function(target, batchcmds, opt)
     local cooker        = target:dep("smol-cooker"):targetfile()
     local engine_assets = path.join(engine_dir, "assets")
+    -- shaders #include "smol/rendering/shader_shared.h" out of the engine header root
+    local engine_include = path.join(engine_dir, "src")
     local engine_out    = path.join(target:dep("smol-cooker"):targetdir(), "assets", "engine")
 
     batchcmds:show("cooking engine assets")
-    batchcmds:vrunv(cooker, { "-i", engine_assets, "-o", engine_out, "-n", "engine" })
+    batchcmds:vrunv(cooker, { "-i", engine_assets, "-I", engine_include, "-o", engine_out, "-n", "engine" })
 
     local depfiles = os.files(path.join(engine_assets, "**"))
     table.insert(depfiles, cooker)

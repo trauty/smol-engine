@@ -9,6 +9,7 @@
 #include "defines.h"
 
 #include <cglm/cglm.h>
+#include <cmath>
 #include <cstring>
 
 namespace smol
@@ -357,6 +358,17 @@ namespace smol
         float* operator[](int col) { return &m00 + (col * 4); }
         const float* operator[](int col) const { return const_cast<float*>(&m00 + (col * 4)); }
     };
+
+    inline void perspective_reverse_infinite_lh_zo(f32 fovy_rad, f32 aspect, f32 near_plane, mat4_t& out)
+    {
+        const f32 focal = 1.0f / std::tan(fovy_rad * 0.5f);
+
+        std::memset(&out, 0, sizeof(mat4_t));
+        out.m00 = focal / aspect;
+        out.m11 = focal;
+        out.m23 = 1.0f;       // clip.w = z_view
+        out.m32 = near_plane; // clip.z = near, ndc.z = near / z_view
+    }
 
     inline void flip_clip_y(mat4_t& proj)
     {

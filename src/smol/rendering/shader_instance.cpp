@@ -39,7 +39,7 @@ namespace smol
 
         for (u32_t i = 0; i < renderer::MAX_FRAMES_IN_FLIGHT; i++)
         {
-            for (auto& [set_id, set] : sets[i])
+            for (auto [set_id, set] : sets[i])
             {
                 if (set != VK_NULL_HANDLE)
                 {
@@ -47,7 +47,7 @@ namespace smol
                         .type = renderer::resource_type_e::DESCRIPTOR_SET,
                         .handle = {.descriptor_set = {.pool = renderer::res_system.instance_pool, .set = set}},
                         .bindless_id = renderer::BINDLESS_NULL_HANDLE,
-                        .gpu_timeline_value = renderer::res_system.timeline_value,
+                        .gpu_timeline_value = renderer::deletion_timeline_value(),
                     });
                 }
             }
@@ -92,10 +92,10 @@ namespace smol
 
         for (const shader_descriptor_binding_t& binding : shader->descriptor_bindings)
         {
-            auto it = bound_resources.find(binding.name_hash);
-            if (it == bound_resources.end()) { continue; }
+            const bound_resource_t* it = bound_resources.find(binding.name_hash);
+            if (it == nullptr) { continue; }
 
-            const bound_resource_t& res = it->second;
+            const bound_resource_t& res = *it;
 
             VkWriteDescriptorSet write_info = {
                 .sType = VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET,

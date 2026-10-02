@@ -60,6 +60,21 @@ on_load(function(target)
     smol_engine.apply_links(target, info, standalone)
 end)
 
+before_link(function(target)
+    import("core.project.config")
+    import("smol_engine")
+
+    local static = config.get("standalone") and true or false
+    local info = smol_engine.resolve(config.get("smol_engine_dir"))
+    local libfile = smol_engine.library_file(info, target, static)
+
+    if not os.isfile(libfile) then
+        smol_engine.missing_artifact_error(info, path.filename(libfile) .. " (looked in " .. info.libdir .. ")",
+            static and "static" or "shared")
+    end
+end)
+
+
 after_build(function(target)
     import("core.project.config")
     import("core.project.depend")
@@ -76,10 +91,6 @@ after_build(function(target)
         smol_engine.missing_artifact_error(info, "smol-cooker (needed to cook assets)", "cooker")
     end
 
-    -- depend.on_changed only watches its inputs. If the cooked output was deleted -- a
-    -- cache wipe, a fresh clone -- the sources still look unchanged and the cook silently
-    -- does nothing, leaving the game with no assets at all. Drop the stamp when an output
-    -- it was supposed to produce is gone, so the next build regenerates it.
     local function force_if_missing(dependfile, ...)
         for _, out in ipairs({ ... }) do
             if not os.exists(out) then
@@ -129,7 +140,8 @@ after_build(function(target)
     force_if_missing(game_depfile, game_out)
 
     depend.on_changed(function()
-        os.vrunv(info.cooker, { "-i", proj.assets_dir, "-I", info.engine_assets, "-o", game_out, "-n", "game" })
+        os.vrunv(info.cooker, { "-i", proj.assets_dir, "-I", info.engine_assets, "-I", info.shader_include,
+                                "-o", game_out, "-n", "game" })
     end, { files = depfiles, dependfile = game_depfile })
 
     if config.get("standalone") then

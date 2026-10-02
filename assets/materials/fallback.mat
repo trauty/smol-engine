@@ -1,0 +1,8 @@
+{
+    "guid": "d047000b-4989-839a-a195-e8c5ff75ce08",
+    "shader": "engine://assets/shaders/fallback.slang",
+    "properties": {
+        "tint": [1.0, 0.0, 1.0, 1.0],
+        "checker_scale": 2.0
+    }
+}

@@ -3,6 +3,7 @@
 #include "imgui.h"
 #include "imgui_internal.h"
 #include "smol/ecs_fwd.h"
+#include "smol/rendering/renderer_types.h"
 
 namespace smol::editor::panels
 {
@@ -29,6 +30,28 @@ namespace smol::editor::panels
                 ctx.selected_entity = smol::ecs::NULL_ENTITY;
                 ctx.cur_mode = editor_mode_e::EDIT;
             }
+        }
+
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(150.0f);
+
+        ImGui::Checkbox("Post", &ctx.post_processing);
+        if (ImGui::IsItemHovered())
+        {
+            ImGui::SetTooltip("Run the camera's post-process stack and volumes in the viewport.\n"
+                              "Off still tonemaps, so the scene stays viewable.");
+        }
+
+        ImGui::SameLine();
+        ImGui::SetNextItemWidth(150.0f);
+
+#define SMOL_DEBUG_VIEW_LABEL(name, value, label) label,
+        static const char* const DEBUG_VIEW_NAMES[] = {SMOL_DEBUG_VIEW_LIST(SMOL_DEBUG_VIEW_LABEL)};
+#undef SMOL_DEBUG_VIEW_LABEL
+        i32 current = static_cast<i32>(ctx.debug_view);
+        if (ImGui::Combo("##debug_view", &current, DEBUG_VIEW_NAMES, IM_ARRAYSIZE(DEBUG_VIEW_NAMES)))
+        {
+            ctx.debug_view = static_cast<smol::renderer::debug_view_e>(current);
         }
 
         ImGui::End();

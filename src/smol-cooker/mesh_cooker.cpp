@@ -12,7 +12,7 @@
 
 namespace smol::cooker::mesh
 {
-    void cook_mesh(const std::string& input_path, const std::string& output_path)
+    bool cook_mesh(const std::string& input_path, const std::string& output_path)
     {
         SMOL_LOG_INFO("MESH_COOKER", "Cooking Mesh: {} -> {}", input_path, output_path);
 
@@ -27,7 +27,7 @@ namespace smol::cooker::mesh
         if (!loaded || model.meshes.empty())
         {
             SMOL_LOG_ERROR("MESH_COOKER", "GLTF load error: {}", err);
-            return;
+            return false;
         }
 
         const tinygltf::Mesh& mesh = model.meshes[0];
@@ -156,5 +156,6 @@ namespace smol::cooker::mesh
         out.write(reinterpret_cast<const char*>(optimized_vertices.data()),
                   optimized_vertices.size() * sizeof(vertex_t));
         out.write(reinterpret_cast<const char*>(optimized_indices.data()), optimized_indices.size() * sizeof(u32_t));
+        return true;
     }
 } // namespace smol::cooker::mesh

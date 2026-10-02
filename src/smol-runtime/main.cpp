@@ -47,9 +47,8 @@ int main(int argc, char* argv[])
     const char* window_name = have_project ? project.project_name.c_str() : "smol";
     if (!smol::engine::init(window_name, 1280, 720)) { return -1; }
 
-    // engine::init() already mounted the cooked tree beside the binary and loaded its guid
-    // map. A project keeps its own copy of the engine assets, so its root supersedes that
-    // one; the guid map merges, and the engine GUIDs are identical in both.
+    // engine::init() already mounted the cooked tree beside the binary and loaded its guid map
+    // a project keeps its own engine asset copy, its root supersedes that one, guid maps merge
     if (have_project)
     {
         namespace fs = std::filesystem;
@@ -64,6 +63,7 @@ int main(int argc, char* argv[])
 
 #ifdef SMOL_STATIC_LINK
     smol_game_init(&cur_world);
+    smol::game::run_on_load(cur_world);
 #else
     if (have_project)
     {
@@ -92,6 +92,7 @@ int main(int argc, char* argv[])
         }
 
         game_init(&cur_world);
+        smol::game::run_on_load(cur_world);
     }
     else
     {

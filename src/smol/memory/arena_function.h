@@ -19,14 +19,17 @@ namespace smol
 
         arena_function() = default;
 
+        // the constraint is load bearing: without it this greedy ctor also matches arena_function itself
+        // copying from a non const lvalue then prefers it over the implicit copy ctor
+        // and the placement new below reenters it on the copy, recursing until the stack dies
         template <typename Lambda>
+            requires(!std::is_same_v<std::decay_t<Lambda>, arena_function>)
         arena_function(Lambda&& lambda)
         {
             using decayed_lambda_t = std::decay_t<Lambda>;
 
-            // The arena is reset by moving an offset back to zero, so nothing placed in it is
-            // ever destroyed. A capture that owns memory (std::string, std::function, a vector)
-            // would leak its buffer on every frame the callback is rebuilt.
+            // the arena resets by moving an offset back to zero, so nothing placed in it is ever destroyed
+            // a capture owning memory (std::string, std::function, a vector) would leak its buffer every frame
             static_assert(std::is_trivially_destructible_v<decayed_lambda_t>,
                           "arena_function captures must be trivially destructible -- the arena never "
                           "runs destructors, so an owning capture leaks every frame");

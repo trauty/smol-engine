@@ -6,6 +6,7 @@
 #include "smol/components/camera.h"
 #include "smol/components/lighting.h"
 #include "smol/components/physics.h"
+#include "smol/components/post_process.h"
 #include "smol/components/renderer.h"
 #include "smol/components/tag.h"
 #include "smol/components/transform.h"
@@ -59,6 +60,9 @@ namespace smol::reflection
         SMOL_PIN_MEMBER(&directional_light_t::color, "color");
         SMOL_PIN_MEMBER(&directional_light_t::intensity, "intensity");
         SMOL_PIN_MEMBER(&point_light_t::radius, "radius");
+        SMOL_PIN_MEMBER(&directional_light_t::casts_shadow, "casts_shadow");
+        SMOL_PIN_MEMBER(&point_light_t::casts_shadow, "casts_shadow");
+        SMOL_PIN_MEMBER(&spot_light_t::casts_shadow, "casts_shadow");
         SMOL_PIN_MEMBER(&spot_light_t::inner_angle, "inner_angle");
         SMOL_PIN_MEMBER(&spot_light_t::outer_angle, "outer_angle");
 
@@ -77,6 +81,19 @@ namespace smol::reflection
 
         SMOL_PIN_TYPE(sphere_collider_t, "sphere_collider_t");
         SMOL_PIN_MEMBER(&sphere_collider_t::radius, "radius");
+
+        SMOL_PIN_TYPE(post_process_t, "post_process_t");
+        SMOL_PIN_MEMBER(&post_process_t::effects, "effects");
+        SMOL_PIN_MEMBER(&post_process_t::final_pass, "final_pass");
+        SMOL_PIN_MEMBER(&post_process_t::enabled, "enabled");
+
+        SMOL_PIN_TYPE(post_volume_t, "post_volume_t");
+        SMOL_PIN_MEMBER(&post_volume_t::overrides, "overrides");
+        SMOL_PIN_MEMBER(&post_volume_t::is_global, "is_global");
+        SMOL_PIN_MEMBER(&post_volume_t::extents, "extents");
+        SMOL_PIN_MEMBER(&post_volume_t::blend_distance, "blend_distance");
+        SMOL_PIN_MEMBER(&post_volume_t::weight, "weight");
+        SMOL_PIN_MEMBER(&post_volume_t::priority, "priority");
 
         SMOL_PIN_TYPE(mesh_renderer_t, "mesh_renderer_t");
         SMOL_PIN_MEMBER(&mesh_renderer_t::mesh, "mesh");
@@ -115,7 +132,7 @@ namespace smol::reflection
     void register_types_into(ctx_t& ctx)
     {
         factory<std::string>(ctx).type("std::string"_h, "std::string");
-        // i32_t/u32_t are the same types as i32/u32 -- registering both just overwrites
+
         factory<i32>(ctx).type("i32"_h, "i32");
         factory<u32>(ctx).type("u32"_h, "u32");
         factory<bool>(ctx).type("bool"_h, "bool");
@@ -149,19 +166,22 @@ namespace smol::reflection
         // lighting
         component<directional_light_t>(ctx, "Directional Light")
             .field<&directional_light_t::color>("Color")
-            .field<&directional_light_t::intensity>("Intensity");
+            .field<&directional_light_t::intensity>("Intensity")
+            .field<&directional_light_t::casts_shadow>("Casts Shadow");
 
         component<point_light_t>(ctx, "Point Light")
             .field<&point_light_t::color>("Color")
             .field<&point_light_t::intensity>("Intensity")
-            .field<&point_light_t::radius>("Radius");
+            .field<&point_light_t::radius>("Radius")
+            .field<&point_light_t::casts_shadow>("Casts Shadow");
 
         component<spot_light_t>(ctx, "Spot Light")
             .field<&spot_light_t::color>("Color")
             .field<&spot_light_t::intensity>("Intensity")
             .field<&spot_light_t::radius>("Radius")
             .field<&spot_light_t::inner_angle>("Inner Angle")
-            .field<&spot_light_t::outer_angle>("Outer Angle");
+            .field<&spot_light_t::outer_angle>("Outer Angle")
+            .field<&spot_light_t::casts_shadow>("Casts Shadow");
 
         // physics
         enumeration<body_type_e>(ctx, "Body Type");
@@ -177,6 +197,19 @@ namespace smol::reflection
         component<sphere_collider_t>(ctx, "Sphere Collider").field<&sphere_collider_t::radius>("Radius");
 
         // rendering
+        component<post_process_t>(ctx, "Post Process")
+            .field<&post_process_t::enabled>("Enabled")
+            .field_asset_list<&post_process_t::effects, smol::material_t>("Effects")
+            .field_asset<&post_process_t::final_pass, smol::material_t>("Final Pass");
+
+        component<post_volume_t>(ctx, "Post Volume")
+            .field_asset<&post_volume_t::overrides, smol::material_t>("Overrides")
+            .field<&post_volume_t::is_global>("Global")
+            .field<&post_volume_t::extents>("Extents")
+            .field<&post_volume_t::blend_distance>("Blend Distance")
+            .field<&post_volume_t::weight>("Weight")
+            .field<&post_volume_t::priority>("Priority");
+
         component<mesh_renderer_t>(ctx, "Mesh Renderer")
             .field_asset<&mesh_renderer_t::mesh, smol::mesh_t>("Mesh")
             .field_asset<&mesh_renderer_t::material, smol::material_t>("Material")

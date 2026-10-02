@@ -91,6 +91,40 @@ namespace smol
             }
         }
 
+        // reruns the loader for something live, in place: handle, uuid and pool slot survive
+        // the new asset loads before the old is released, so a failed reload leaves the old intact
+        // old GPU resources use deferred deletion, so this is safe inside a frame
+        template <typename T, typename... Args>
+        bool reload(const std::string& path, Args&&... args)
+        {
+            const uuid_t uuid = smol::asset_meta::resolve_uuid(path);
+
+            std::unique_lock map_lock(lookup_mutex);
+
+            auto it = lookup.find(uuid);
+            if (it == lookup.end() || it->second.type_id != get_asset_type_id<T>()) { return false; }
+
+            auto* slot = static_cast<typename asset_pool_t<T>::slot_t*>(it->second.slot_ptr);
+            const std::string slot_path = it->second.path;
+
+            map_lock.unlock();
+
+            std::optional<T> res = asset_loader_t<T>::load(slot_path, std::forward<Args>(args)...);
+            if (!res)
+            {
+                SMOL_LOG_ERROR("ASSET", "Failed to reload: {}", slot_path);
+                return false;
+            }
+
+            if constexpr (has_asset_unload<T>) { asset_loader_t<T>::unload(slot->data); }
+
+            slot->data = std::move(*res);
+            slot->state = asset_state_e::READY;
+
+            SMOL_LOG_INFO("ASSET", "Reloaded asset: {}", slot_path);
+            return true;
+        }
+
         std::string get_path(asset_handle_t handle)
         {
             if (!handle.is_valid()) { return {}; }

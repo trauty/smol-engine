@@ -5,6 +5,7 @@
 #include <stddef.h>
 #include <string>
 #include <string_view>
+#include <vector>
 
 #ifdef ERROR
     #undef ERROR
@@ -22,9 +23,31 @@ namespace smol::log
         LOG_FATAL
     };
 
+    struct entry_t
+    {
+        level_e level;
+        std::string category;
+        std::string message;
+    };
+
     SMOL_ENGINE_API void set_level(level_e level);
     SMOL_ENGINE_API void set_max_file_size(size_t size);
+
+    // a path with an extension names the file, anything else is a directory for a dated file
+    // rotates by size once max_file_size is passed
     SMOL_ENGINE_API bool to_file(const std::string& path);
+
+    // keeps the most recent lines in memory for a UI. off by default
+    // the editor enables it before anything else logs, so its console has the whole session
+    SMOL_ENGINE_API void set_history_capacity(size_t max_lines);
+
+    // appends everything logged since `cursor` and moves it forward
+    // a cursor older than the oldest held line resumes from that line
+    SMOL_ENGINE_API void read_history(u64_t& cursor, std::vector<entry_t>& out);
+
+    // strips escape sequences from child output (the cooker, xmake) before it is logged, and a trailing carriage return
+    SMOL_ENGINE_API std::string strip_ansi(std::string_view text);
+
     SMOL_ENGINE_API void init();
     SMOL_ENGINE_API void shutdown();
     SMOL_ENGINE_API void write(level_e level, const char* category, std::string_view msg);

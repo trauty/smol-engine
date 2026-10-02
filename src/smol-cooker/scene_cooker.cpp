@@ -10,7 +10,7 @@
 
 namespace smol::cooker::scene
 {
-    void cook_scene(const std::string& input_path, const std::string& output_path)
+    bool cook_scene(const std::string& input_path, const std::string& output_path)
     {
         SMOL_LOG_INFO("SCENE_COOKER", "Cooking scene: {} -> {}", input_path, output_path);
 
@@ -18,19 +18,20 @@ namespace smol::cooker::scene
         if (!file.is_open())
         {
             SMOL_LOG_ERROR("SCENE_COOKER", "Failed to open scene file: {}", input_path);
-            return;
+            return false;
         }
 
         nlohmann::json scene_json = nlohmann::json::parse(file, nullptr, false);
         if (scene_json.is_discarded())
         {
             SMOL_LOG_ERROR("SCENE_COOKER", "Scene file is not valid JSON: {}", input_path);
-            return;
+            return false;
         }
 
         smol::scene_t scene = smol::serialization::scene_from_json(scene_json);
 
         std::filesystem::create_directories(std::filesystem::path(output_path).parent_path());
         smol::serialization::write_scene_binary(scene, output_path);
+        return true;
     }
 } // namespace smol::cooker::scene

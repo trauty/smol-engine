@@ -24,7 +24,7 @@ namespace smol::cooker::texture
         return s;
     }
 
-    void cook_texture(const std::string& input_path, const std::string& output_path)
+    bool cook_texture(const std::string& input_path, const std::string& output_path)
     {
         SMOL_LOG_INFO("TEXTURE_COOKER", "Cooking texture: {} -> {}", input_path, output_path);
 
@@ -63,7 +63,7 @@ namespace smol::cooker::texture
         if (!pixels)
         {
             SMOL_LOG_ERROR("TEXTURE_COOKER", "Failed to load texture: {}", input_path);
-            return;
+            return false;
         }
 
         u32_t mip_count = static_cast<u32_t>(std::floor(std::log2(std::max(width, height)))) + 1;
@@ -86,7 +86,7 @@ namespace smol::cooker::texture
         {
             SMOL_LOG_ERROR("TEXTURE_COOKER", "Failed to create ktx2 texture: {}", input_path);
             stbi_image_free(pixels);
-            return;
+            return false;
         }
 
         u32_t mip_w = width;
@@ -155,7 +155,7 @@ namespace smol::cooker::texture
         {
             SMOL_LOG_ERROR("TEXTURE_COOKER", "Failed to compress ktx2 texture '{}': {}", input_path,
                            ktxErrorString(res));
-            return;
+            return false;
         }
 
         std::filesystem::create_directories(std::filesystem::path(output_path).parent_path());
@@ -165,5 +165,6 @@ namespace smol::cooker::texture
         }
 
         ktxTexture_Destroy(ktxTexture(tex));
+        return true;
     }
 } // namespace smol::cooker::texture

@@ -7,33 +7,45 @@
 #include "smol/rendering/rendergraph.h"
 #include "smol/window.h"
 
+#include <span>
 #include <vector>
 
 namespace smol::renderer
 {
     using graph_builder_func_t = void (*)(rendergraph_t&, ecs::registry_t&);
 
-    // A plain function pointer, not std::function: pass callbacks live in the frame arena,
-    // which never destroys what it holds, so a capture owning memory would leak per frame.
-    using pass_execute_func_t = void (*)(rendergraph_t&, smol::material_t&);
+    SMOL_ENGINE_API mesh_pass_e pass_for(const shader_t& shader);
 
-    SMOL_ENGINE_API void register_renderer_feature(graph_builder_func_t builder);
+    SMOL_ENGINE_API VkPipeline binding_pipeline(const shader_t& shader);
+
+    // capturing: a pass is handed the resources of its own view, not a lookup by name
+    // two colour views own separately named gbuffers
+    using pass_execute_func_t = smol::arena_function<void(rendergraph_t&, smol::material_t&)>;
+
+    SMOL_ENGINE_API void register_renderer_feature(u32_t name_hash, i32 order, graph_builder_func_t builder);
+
+    // features whose builder is code in that module (see os::module_base_of)
+    // a game library's go when it is unloaded and it registers them again from SMOL_ON_LOAD
+    SMOL_ENGINE_API u32_t remove_features_of(void* module_base);
+    SMOL_ENGINE_API u32_t count_features_of(void* module_base);
 
     SMOL_ENGINE_API rg_pass_t& add_mesh_pass(rendergraph_t& graph, u32_t name_hash, const char* debug_name,
-                                             const std::string& target_pass_tag,
+                                             u32_t view_name_hash, mesh_pass_e pass, bool depth_only,
                                              const std::vector<rg_resource_id>& reads,
                                              const std::vector<rg_resource_id>& writes, rg_resource_id depth);
 
-    SMOL_ENGINE_API rg_pass_t&
-    add_fullscreen_pass(rendergraph_t& graph, u32_t name_hash, const char* debug_name, smol::material_t* material,
-                        const std::vector<rg_resource_id>& reads, const std::vector<rg_resource_id>& writes,
-                        pass_execute_func_t on_execute = nullptr);
+    // reads and writes are spans, copied into the pass at once, vectors cost a temporary per call per frame
+    SMOL_ENGINE_API rg_pass_t& add_fullscreen_pass(rendergraph_t& graph, u32_t name_hash, const char* debug_name,
+                                                   smol::material_t* material, std::span<const rg_resource_id> reads,
+                                                   std::span<const rg_resource_id> writes,
+                                                   pass_execute_func_t on_execute = {}, u32_t view_name_hash = 0,
+                                                   rg_resource_id depth_tex_res = RG_NULL_ID);
 
-    SMOL_ENGINE_API rg_pass_t&
-    add_compute_pass(rendergraph_t& graph, u32_t name_hash, const char* debug_name, smol::material_t* material,
-                     u32_t dispatch_x, u32_t dispatch_y, u32_t dispatch_z, const std::vector<rg_resource_id>& reads,
-                     const std::vector<rg_resource_id>& writes,
-                     pass_execute_func_t on_execute = nullptr);
+    SMOL_ENGINE_API rg_pass_t& add_compute_pass(rendergraph_t& graph, u32_t name_hash, const char* debug_name,
+                                                smol::material_t* material, u32_t dispatch_x, u32_t dispatch_y,
+                                                u32_t dispatch_z, const std::vector<rg_resource_id>& reads,
+                                                const std::vector<rg_resource_id>& writes,
+                                                pass_execute_func_t on_execute = {}, u32_t view_name_hash = 0);
 
     bool init(const context_config_t& config, SDL_Window* window);
     void reset_assets();
@@ -68,6 +80,7 @@ namespace smol::renderer
     SMOL_ENGINE_API u64_t submit_transfer_commands(VkCommandBuffer cmd);
 
     VkSampler create_sampler(VkFilter filter, VkSamplerAddressMode address_mode);
+    VkSampler create_shadow_sampler();
 
     SMOL_ENGINE_API void submit_output_target(u32_t target_hash, VkExtent2D extent);
 
@@ -75,9 +88,57 @@ namespace smol::renderer
 
     SMOL_ENGINE_API void submit_color_view(u32_t name_hash, const mat4_t& view, const mat4_t& projection,
                                            const mat4_t& view_proj, const vec3_t& position, u32_t color_target_hash,
-                                           u32_t depth_target_hash, VkExtent2D extent);
-    SMOL_ENGINE_API void submit_shadow_view(u32_t name_hash, const mat4_t& view, const mat4_t& projection,
-                                            u32_t depth_target_hash, VkExtent2D extent, const image_desc_t& depth_desc);
+                                           u32_t depth_target_hash, VkExtent2D extent, f32 z_near = 0.0f,
+                                           f32 z_far = 0.0f);
+
+    SMOL_ENGINE_API void set_view_debug_view(u32_t view_name_hash, debug_view_e debug_view);
+
+    SMOL_ENGINE_API void set_view_post_processing(u32_t view_name_hash, bool enabled);
+
+    SMOL_ENGINE_API void submit_shadow_cascade_view(u32_t name_hash, const mat4_t& view, const mat4_t& projection,
+                                                    u32_t atlas_target_hash, const image_desc_t& atlas_desc,
+                                                    VkRect2D atlas_rect, f32 split_far, f32 normal_bias_texels = 1.5f,
+                                                    f32 depth_bias_ndc = 0.0f);
+
+    SMOL_ENGINE_API void submit_punctual_shadow_view(u32_t name_hash, const mat4_t& view, const mat4_t& projection,
+                                                     const image_desc_t& atlas_desc, VkRect2D atlas_rect,
+                                                     u32_t shadow_slot, f32 range, bool needs_render = true,
+                                                     f32 normal_bias_texels = 2.0f, f32 depth_bias_ndc = 0.0f);
+
+    SMOL_ENGINE_API void submit_shadow_cascade_light(ecs::entity_t light);
+
+    SMOL_ENGINE_API void submit_punctual_shadow_slot(ecs::entity_t light, u32_t shadow_slot);
 
     SMOL_ENGINE_API bool get_primary_camera_position(ecs::registry_t& reg, vec3_t& out_pos);
+
+    struct primary_view_info_t
+    {
+        vec3_t position;
+        vec3_t forward;
+        f32 fov_rad;
+        f32 aspect;
+        f32 z_near;
+        f32 z_far;
+
+        // inward facing planes
+        vec4_t frustum_planes[6];
+        bool has_frustum_planes = false;
+    };
+
+    SMOL_ENGINE_API bool get_primary_view_info(ecs::registry_t& reg, primary_view_info_t& out_info);
+
+    SMOL_ENGINE_API bool get_primary_depth_bounds(f32& out_near_z, f32& out_far_z);
+
+    // a missing asset is reported once, not once per frame
+    // reloading anything clears that, so breaking the same file twice tells you twice
+    SMOL_ENGINE_API void forget_missing_asset_reports();
+
+    // every pipeline creation reports here, so the cache knows there is something to save and the log can show the cost
+    SMOL_ENGINE_API void note_pipeline_created(f64 milliseconds);
+
+    // the render timeline value a GPU resource freed now must outlive
+    // submitted frames are at or below ctx.timeline_value and the one being recorded signals the next
+    // so once it completes nothing in flight refers to it
+    // the render timeline on purpose, res_system's is the transfer one and says nothing about frames binding the thing
+    SMOL_ENGINE_API u64_t deletion_timeline_value();
 } // namespace smol::renderer

@@ -54,7 +54,12 @@ namespace smol
 
         void clear()
         {
-            for (slot_t& s : slots) { s.key = EMPTY; }
+            for (slot_t& s : slots)
+            {
+                s.key = EMPTY;
+                s.value = T{};
+            }
+
             live_count = 0;
             tombstone_count = 0;
         }
@@ -87,6 +92,24 @@ namespace smol
             std::pair<u32_t, T&> operator*() { return {cur->key, cur->value}; }
         };
 
+        struct const_iterator_t
+        {
+            const slot_t* cur;
+            const slot_t* end;
+            void skip_empty()
+            {
+                while (cur != end && (cur->key == EMPTY || cur->key == TOMBSTONE)) { cur++; }
+            }
+            const_iterator_t& operator++()
+            {
+                cur++;
+                skip_empty();
+                return *this;
+            }
+            bool operator!=(const const_iterator_t& o) const { return cur != o.cur; }
+            std::pair<u32_t, const T&> operator*() const { return {cur->key, cur->value}; }
+        };
+
       public:
         iterator_t begin()
         {
@@ -95,6 +118,14 @@ namespace smol
             return it;
         }
         iterator_t end() { return {slots.data() + slots.size(), slots.data() + slots.size()}; }
+
+        const_iterator_t begin() const
+        {
+            const_iterator_t it{slots.data(), slots.data() + slots.size()};
+            it.skip_empty();
+            return it;
+        }
+        const_iterator_t end() const { return {slots.data() + slots.size(), slots.data() + slots.size()}; }
 
       private:
         std::vector<slot_t> slots;
@@ -161,7 +192,10 @@ namespace smol
         void rehash(u32_t new_capacity)
         {
             std::vector<slot_t> old = std::move(slots);
-            slots.assign(new_capacity, slot_t{});
+
+            // resize, not assign: assign copies into every slot, which rules out move only values
+            slots.clear();
+            slots.resize(new_capacity);
             capacity = new_capacity;
             mask = capacity - 1;
             live_count = 0;

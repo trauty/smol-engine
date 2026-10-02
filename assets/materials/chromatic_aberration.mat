@@ -1,0 +1,7 @@
+{
+    "guid": "424cc0da-630d-ccfe-860a-a77ad1e1b095",
+    "properties": {
+        "strength": 6.0
+    },
+    "shader": "engine://assets/shaders/chromatic_aberration.slang"
+}

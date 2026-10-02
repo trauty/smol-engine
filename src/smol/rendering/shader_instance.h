@@ -2,11 +2,10 @@
 
 #include "smol/asset.h"
 #include "smol/assets/shader.h"
+#include "smol/containers/flat_map.h"
 #include "smol/defines.h"
 #include "smol/rendering/renderer_constants.h"
 #include "smol/rendering/samplers.h"
-
-#include <unordered_map>
 
 namespace smol
 {
@@ -27,8 +26,8 @@ namespace smol
     {
         asset_handle_t shader_handle;
 
-        std::unordered_map<u32_t, bound_resource_t> bound_resources;
-        std::unordered_map<u32_t, VkDescriptorSet> sets[renderer::MAX_FRAMES_IN_FLIGHT];
+        flat_map_t<bound_resource_t> bound_resources;
+        flat_map_t<VkDescriptorSet> sets[renderer::MAX_FRAMES_IN_FLIGHT];
 
         u32_t dirty_frames = renderer::MAX_FRAMES_IN_FLIGHT;
         u32_t last_synced_frame = renderer::BINDLESS_NULL_HANDLE;

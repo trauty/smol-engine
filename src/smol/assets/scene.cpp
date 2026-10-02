@@ -1,5 +1,7 @@
 #include "scene.h"
 
+#include "smol/asset_table.h"
+#include "smol/hash.h"
 #include "smol/asset_handle.h"
 #include "smol/assets/scene_format.h"
 #include "smol/log.h"
@@ -28,7 +30,7 @@ namespace smol
 
     std::optional<scene_t> asset_loader_t<scene_t>::load(const std::string& path)
     {
-        std::string cooked_path = get_cooked_path(path, ".smolscene");
+        std::string cooked_path = smol::asset_table::cooked_path(smol::get_type_id<scene_t>(), path);
 
         SDL_IOStream* stream = smol::vfs::open_read(cooked_path);
         if (!stream)
@@ -111,8 +113,21 @@ namespace smol
                         break;
                     case scene_value_type_e::STRING: ok = read_str(stream, prop.str); break;
                     case scene_value_type_e::ASSET_REF:
-                        ok = read_pod(stream, prop.asset_type) && read_str(stream, prop.str);
+                        ok = read_pod(stream, prop.asset_type) && read_str(stream, prop.str) &&
+                             read_str(stream, prop.guid);
                         break;
+                    case scene_value_type_e::ASSET_REF_LIST:
+                    {
+                        u32_t entry_count = 0;
+                        ok = read_pod(stream, prop.asset_type) && read_pod(stream, entry_count);
+
+                        for (u32_t i = 0; i < entry_count && ok; i++)
+                        {
+                            ok = read_str(stream, prop.strs.emplace_back()) &&
+                                 read_str(stream, prop.guids.emplace_back());
+                        }
+                        break;
+                    }
                     default: ok = false; break;
                     }
                 }

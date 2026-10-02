@@ -13,9 +13,18 @@ namespace smol::vfs
 
     SMOL_ENGINE_API void mount(const std::string& alias, const std::string& physical_path);
 
-    // Directory holding the cooked tree init() found: the parent of engine/ and game/,
-    // and where guid_map.json sits. Empty if no cooked assets were located.
+    // directory of the cooked tree init() found, parent of engine/ and game/, where guid_map.json sits. empty if none
     SMOL_ENGINE_API const std::string& cooked_root();
+
+    // splits "game://assets/x.png" into {"game://", "assets/x.png"}, no protocol gives {"", path}
+    // everything that takes a vfs path apart goes through here instead of hunting for "://"
+    struct path_parts_t
+    {
+        std::string_view protocol; // includes the "://", empty when there is none
+        std::string_view rest;
+    };
+
+    SMOL_ENGINE_API path_parts_t split_protocol(std::string_view virtual_path);
 
     SMOL_ENGINE_API std::string resolve(std::string_view virtual_path);
 

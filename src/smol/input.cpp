@@ -1,7 +1,9 @@
 #include "input.h"
 
 #include "SDL3/SDL_mouse.h"
+#include "smol/containers/flat_map.h"
 #include "smol/hash.h"
+#include "smol/os.h"
 #include "smol/window.h"
 
 #include <SDL3/SDL_events.h>
@@ -40,6 +42,7 @@ namespace smol::input
         listener_id_t id;
         input_state_t triggerState;
         input_callback_t callback;
+        void* owner = nullptr; // module that registered it; its code is what the callback runs
     };
 
     namespace
@@ -47,7 +50,7 @@ namespace smol::input
         input_frame_state_t input_state;
         std::vector<key_e> scancode_map;
         std::vector<std::vector<action_id_t>> keybinds;
-        std::unordered_map<action_id_t, std::vector<action_listener_t>> listeners;
+        flat_map_t<std::vector<action_listener_t>> listeners;
 
         void build_lookup_table()
         {
@@ -129,11 +132,11 @@ namespace smol::input
             const std::vector<action_id_t>& actions = keybinds[(size_t)key_t];
             for (action_id_t id : actions)
             {
-                auto iter = listeners.find(id);
-                if (iter != listeners.end())
+                const std::vector<action_listener_t>* iter = listeners.find(id);
+                if (iter != nullptr)
                 {
                     input_context_t ctx = {id, state, key_t};
-                    for (const action_listener_t& listener : iter->second)
+                    for (const action_listener_t& listener : *iter)
                     {
                         if (listener.triggerState == state) { listener.callback(ctx); }
                     }
@@ -191,20 +194,50 @@ namespace smol::input
         if (std::find(bindings.begin(), bindings.end(), id) == bindings.end()) { bindings.push_back(id); }
     }
 
-    listener_id_t on_action(const std::string& action_name, input_state_t state, input_callback_t callback)
+    // never inlined: the return address must be the caller's
+    // or a listener registered inside an engine function is filed under that function's caller
+    SMOL_NOINLINE listener_id_t on_action(const std::string& action_name, input_state_t state,
+                                          input_callback_t callback)
     {
         action_id_t id = smol::hash_string(action_name.c_str());
 
         static std::atomic<u32_t> nextId{0};
         listener_id_t listener_id_t = nextId.fetch_add(1, std::memory_order_relaxed);
 
-        listeners[id].push_back({listener_id_t, state, callback});
+        listeners[id].push_back({listener_id_t, state, callback, os::module_base_of(SMOL_CALLER_ADDRESS())});
         return listener_id_t;
+    }
+
+    u32_t remove_listeners_of(void* module_base)
+    {
+        u32_t removed = 0;
+        for (auto [action_id, action_listeners] : listeners)
+        {
+            const auto first = std::remove_if(action_listeners.begin(), action_listeners.end(),
+                                              [module_base](const action_listener_t& listener)
+                                              { return listener.owner == module_base; });
+            removed += static_cast<u32_t>(action_listeners.end() - first);
+            action_listeners.erase(first, action_listeners.end());
+        }
+        return removed;
+    }
+
+    u32_t count_listeners_of(void* module_base)
+    {
+        u32_t count = 0;
+        for (auto [action_id, action_listeners] : listeners)
+        {
+            for (const action_listener_t& listener : action_listeners)
+            {
+                if (listener.owner == module_base) { count++; }
+            }
+        }
+        return count;
     }
 
     void remove_listener(listener_id_t id)
     {
-        for (auto& [action_id, listeners] : listeners)
+        for (auto [action_id, listeners] : listeners)
         {
             auto iter = std::remove_if(listeners.begin(), listeners.end(),
                                        [id](const action_listener_t& listener) { return listener.id == id; });

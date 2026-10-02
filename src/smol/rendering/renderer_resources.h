@@ -45,6 +45,15 @@ namespace smol::renderer
         } barrier;
     };
 
+    // the two timelines a deletion can wait on
+    // uploads signal their own transfer semaphore, so their command buffer and staging buffer are free once it passes
+    // everything else is tagged with deletion_timeline_value() and waits on the render timeline
+    enum class deletion_clock_e : u8_t
+    {
+        RENDER,
+        TRANSFER,
+    };
+
     struct deferred_delete_t
     {
         resource_type_e type;
@@ -90,6 +99,7 @@ namespace smol::renderer
 
         u32_t bindless_id;
         u64_t gpu_timeline_value;
+        deletion_clock_e clock = deletion_clock_e::RENDER;
     };
 
     struct descriptor_heap_t
@@ -163,7 +173,7 @@ namespace smol::renderer
         std::deque<deferred_delete_t> deletion_queue;
         std::mutex deletion_mutex;
 
-        void process_deletions(u64_t cur_timeline_value);
+        void process_deletions(u64_t render_completed, u64_t transfer_completed);
     };
 
     SMOL_ENGINE_API extern resource_system_t res_system;

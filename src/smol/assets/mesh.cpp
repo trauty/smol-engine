@@ -1,5 +1,6 @@
 #include "mesh.h"
 
+#include "smol/asset_table.h"
 #include "smol/asset.h"
 #include "smol/assets/mesh_format.h"
 #include "smol/log.h"
@@ -20,7 +21,7 @@ namespace smol
 {
     std::optional<mesh_t> asset_loader_t<mesh_t>::load(const std::string& path)
     {
-        std::string cooked_path = get_cooked_path(path, ".smolmesh");
+        std::string cooked_path = smol::asset_table::cooked_path(smol::get_type_id<mesh_t>(), path);
 
         SDL_IOStream* stream = smol::vfs::open_read(cooked_path);
         if (!stream)
@@ -179,6 +180,7 @@ namespace smol
                 .handle = {.buffer = {staging_buf, staging_alloc}},
                 .bindless_id = renderer::BINDLESS_NULL_HANDLE,
                 .gpu_timeline_value = signal_value,
+                .clock = renderer::deletion_clock_e::TRANSFER,
             });
         }
 
@@ -194,7 +196,7 @@ namespace smol
             renderer::res_system.deletion_queue.push_back({
                 .type = renderer::resource_type_e::BUFFER,
                 .handle = {.buffer = {mesh.vertex_buffer, mesh.vertex_allocation}},
-                .gpu_timeline_value = renderer::res_system.timeline_value,
+                .gpu_timeline_value = renderer::deletion_timeline_value(),
             });
         }
 
@@ -203,7 +205,7 @@ namespace smol
             renderer::res_system.deletion_queue.push_back({
                 .type = renderer::resource_type_e::BUFFER,
                 .handle = {.buffer = {mesh.index_buffer, mesh.index_allocation}},
-                .gpu_timeline_value = renderer::res_system.timeline_value,
+                .gpu_timeline_value = renderer::deletion_timeline_value(),
             });
         }
     }

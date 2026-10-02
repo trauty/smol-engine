@@ -18,7 +18,7 @@
 * vulkan-headers 1.4.335
 * libktx v4.4.2
 * SDL 3.4.12
-* slang v2026.12.0.1
+* slang v2026.19
 * tracy v0.13.1
 
 ## Building
@@ -81,6 +81,24 @@ Open the project in the editor to run it. The editor loads the game library at
 runtime and hot-reloads it whenever you rebuild, so `xmake` in the game project
 is the whole edit loop.
 
+A hot reload unloads the old library, so two things matter in game code:
+
+* **Components need `SMOL_REFLECT`** to keep their data across a reload. A
+  component without it cannot be carried over; the editor then keeps the old
+  library loaded and says which component held it.
+* **Register callbacks in `SMOL_ON_LOAD()`, not in `smol_game_init`.** Input
+  actions and render features point at your code, so the engine drops them when
+  the old library goes. `SMOL_ON_LOAD()` runs after every load, the first and
+  every reload, and registers the new code's; `smol_game_init` runs once.
+
+```cpp
+SMOL_ON_LOAD()
+{
+    smol::input::bind_button("jump", smol::input::key_e::Space);
+    smol::input::on_action("jump", smol::input::input_state_t::PRESSED, [](const auto&) { /* ... */ });
+}
+```
+
 ### Standalone (no editor)
 
 Links the static engine, your game code and the runtime entry point into one
@@ -108,8 +126,8 @@ A game project then keeps one cooked root of its own, `<project>/.smol/`, holdin
 `assets/`), and a single `guid_map.json` covering both. The editor, the runtime
 and a packaged build all read that one root.
 
-The two stay in separate vfs namespaces -- `engine://assets/...` and
-`game://assets/...` -- so the engine can address its own assets by absolute path
+The two stay in separate vfs namespaces, `engine://assets/...` and
+`game://assets/...`, so the engine can address its own assets by absolute path
 from inside a library shared by every game, and generic names like
 `shaders/util.slang` cannot collide.
 
@@ -119,7 +137,24 @@ To force just the engine cook step:
 xmake build smol-assets   # engine repo
 ```
 
-## Packaging & distribution (experimental)
+### Sample project
+
+`samples/sandbox/` is a complete game project inside the engine repo: a lit sphere on a
+ground plane, and one game component (`bob_t`) that moves it in Play mode. Open it with:
+
+```bash
+smol-editor samples/sandbox/sandbox.smolproject
+```
+
+The editor builds it on first open. To build it by hand, run from `samples/sandbox/` and pass
+`-P .`, otherwise xmake walks up and configures the engine instead:
+
+```bash
+xmake f -P . -m debug
+xmake build -P .
+```
+
+## Packaging & Distribution (experimental)
 
 ### Standalone
 

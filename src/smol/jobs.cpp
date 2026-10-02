@@ -6,6 +6,7 @@
 #include <algorithm>
 #include <array>
 #include <atomic>
+#include <chrono>
 #include <condition_variable>
 #include <functional>
 #include <mutex>
@@ -115,11 +116,14 @@ namespace smol::jobs
         std::vector<std::thread> high_priority_workers;
         std::thread low_priority_worker; // one for the assets and general io
         std::atomic<bool> is_running{false};
+        std::atomic<u32_t> jobs_running{0}; // popped and not yet finished, on any thread
 
         void run_job(const job_t& job)
         {
+            jobs_running.fetch_add(1, std::memory_order_acq_rel);
             if (job.task) { job.task(); }
             if (job.counter) { job.counter->fetch_sub(1, std::memory_order_release); }
+            jobs_running.fetch_sub(1, std::memory_order_acq_rel);
         }
 
         void park(job_queue_t& queue)
@@ -231,7 +235,7 @@ namespace smol::jobs
         if (low_priority_worker.joinable()) { low_priority_worker.join(); }
     }
 
-    // job stealing for main thread but waiting thread participates
+    // the waiting thread steals jobs too
     void wait(counter_t* counter)
     {
         if (!counter) { return; }
@@ -245,6 +249,31 @@ namespace smol::jobs
                 std::this_thread::yield();
             }
         }
+    }
+
+    bool wait_idle(u32_t timeout_ms)
+    {
+        const auto deadline = std::chrono::steady_clock::now() + std::chrono::milliseconds(timeout_ms);
+
+        // a job is popped before it counts as running, so idle can be seen in the gap, check twice
+        u32_t quiet_checks = 0;
+        while (quiet_checks < 2)
+        {
+            const bool idle = !high_priority_queue.has_work() && !low_priority_queue.has_work() &&
+                              jobs_running.load(std::memory_order_acquire) == 0;
+            quiet_checks = idle ? quiet_checks + 1 : 0;
+            if (idle) { continue; }
+
+            if (std::chrono::steady_clock::now() >= deadline) { return false; }
+
+            job_t job;
+            if (high_priority_queue.pop(job)) { run_job(job); }
+            else
+            {
+                std::this_thread::yield();
+            }
+        }
+        return true;
     }
 
     u32_t get_worker_count() { return static_cast<u32_t>(high_priority_workers.size()); }

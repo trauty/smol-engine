@@ -4,6 +4,7 @@
 #include "smol/ecs_fwd.h"
 #include "smol/game.h"
 #include "smol/math.h"
+#include "smol/rendering/renderer_types.h"
 
 #include <json/json.hpp>
 #include <vector>
@@ -38,6 +39,10 @@ namespace smol
         u32_t viewport_width = 0;
         u32_t viewport_height = 0;
 
+        smol::renderer::debug_view_e debug_view = smol::renderer::debug_view_e::OFF;
+
+        bool post_processing = true;
+
         game_register_types_func game_register_types = nullptr;
         game_init_func game_init = nullptr;
         game_update_func game_update = nullptr;
@@ -56,6 +61,7 @@ namespace smol
 
         bool recompile_requested = false;
         bool recompiling = false;
+        bool cancel_build_requested = false; // the console's Cancel, while recompiling
 
         bool show_project_manager = false;
     };

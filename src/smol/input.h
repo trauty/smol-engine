@@ -143,6 +143,11 @@ namespace smol::input
 
     SMOL_ENGINE_API void remove_listener(listener_id_t id);
 
+    // every listener remembers the module that registered it (see os::module_base_of)
+    // a game library's go when it unloads, the editor removes them first and SMOL_ON_LOAD registers them again
+    SMOL_ENGINE_API u32_t remove_listeners_of(void* module_base);
+    SMOL_ENGINE_API u32_t count_listeners_of(void* module_base);
+
     SMOL_ENGINE_API void unbind_button(const std::string& action_name, key_e key);
 
     SMOL_ENGINE_API void unbind_all_buttons(const std::string& action_name);

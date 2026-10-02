@@ -2,6 +2,8 @@
 #include "imgui/imgui_impl_sdl3.h"
 #include "imgui_backend.h"
 #include "imgui_internal.h"
+#include "smol-editor/asset_cook.h"
+#include "smol-editor/asset_watch.h"
 #include "smol-editor/editor_context.h"
 #include "smol-editor/panels/console.h"
 #include "smol-editor/panels/hierarchy.h"
@@ -12,9 +14,12 @@
 #include "smol-editor/project_manager.h"
 #include "smol-editor/systems/camera.h"
 #include "smol/asset_meta.h"
+#include "smol/asset_table.h"
 #include "smol/engine.h"
 #include "smol/game.h"
 #include "smol/hash.h"
+#include "smol/input.h"
+#include "smol/jobs.h"
 #include "smol/log.h"
 #include "smol/os.h"
 #include "smol/project.h"
@@ -53,11 +58,57 @@ std::string source_lib_name;
 std::string cur_temp_lib_name = "";
 
 smol::os::lib_handle_t game_lib = nullptr;
+
+// game libraries that could not be unloaded safely, kept loaded until exit with a warning
+std::vector<smol::os::lib_handle_t> g_retired_game_libs;
 std::filesystem::file_time_type last_reload_time;
 
 std::unordered_set<u32_t> g_engine_pool_ids;
 
 typedef void (*editor_init_func)(smol::world_t*, smol::editor_context_t*, ImGuiContext*);
+
+// runs xmake from the project's own directory, as it writes its configuration where it runs
+// one build at a time, so one token stops whichever runs
+// reset on the UI thread before a build starts so an immediate Cancel counts
+static smol::os::process_cancel_t g_build_cancel;
+
+static bool run_xmake(const std::string& project_dir, const std::vector<std::string>& args, const char* what)
+{
+    // markers are the ones clang, gcc, msvc and xmake print, so error_handler.cpp stays info
+    auto forward = [](std::string_view raw)
+    {
+        const std::string line = smol::log::strip_ansi(raw);
+        if (line.empty()) { return; }
+
+        auto has = [&line](const char* marker) { return line.find(marker) != std::string::npos; };
+        if (has("error:") || has(": error")) { SMOL_LOG_ERROR("BUILD", "{}", line); }
+        else if (has("warning:") || has(": warning")) { SMOL_LOG_WARN("BUILD", "{}", line); }
+        else
+        {
+            SMOL_LOG_INFO("BUILD", "{}", line);
+        }
+    };
+
+    const smol::os::process_result_t run = smol::os::run_process("xmake", args, project_dir, forward, &g_build_cancel);
+    if (!run.started)
+    {
+        SMOL_LOG_ERROR("EDITOR", "Could not start xmake to {} the project -- is it on PATH?", what);
+        return false;
+    }
+
+    if (run.cancelled)
+    {
+        SMOL_LOG_WARN("EDITOR", "Cancelled: xmake {} stopped", what);
+        return false;
+    }
+
+    if (run.exit_code != 0)
+    {
+        SMOL_LOG_ERROR("EDITOR", "xmake could not {} the project (exit {})", what, run.exit_code);
+        return false;
+    }
+    return true;
+}
 
 bool build_project(const std::filesystem::path& project_file, const std::string& engine_dir)
 {
@@ -77,29 +128,72 @@ bool build_project(const std::filesystem::path& project_file, const std::string&
 
     if (!engine_dir.empty())
     {
-        // The project's xmake.lua discovers the engine itself, but we know exactly which one
-        // is running this editor, so name it. SMOL_ENGINE_DIR is the first thing it checks,
-        // and std::system's child inherits our environment.
+        // name the running engine through SMOL_ENGINE_DIR, the first thing the project's xmake.lua checks
         SDL_setenv_unsafe("SMOL_ENGINE_DIR", engine_dir.c_str(), 1);
 
-        const std::string cfg = "xmake f -y -m " + mode + " -P \"" + proj + "\"";
-        SMOL_LOG_INFO("EDITOR", "Configuring project: {}", cfg);
-        if (std::system(cfg.c_str()) != 0)
+        SMOL_LOG_INFO("EDITOR", "Configuring project in {}", proj);
+        // explicit project dir as well as the working directory: with no .xmake of its own xmake walks up
+        // to an outer project, e.g. the engine's samples
+        if (!run_xmake(proj, {"f", "-P", ".", "-y", "-m", mode}, "configure")) { return false; }
+    }
+
+    SMOL_LOG_INFO("EDITOR", "Building {}", target);
+    if (!run_xmake(proj, {"build", "-P", ".", target}, "build")) { return false; }
+
+    SMOL_LOG_INFO("EDITOR", "Project built successfully");
+    return true;
+}
+
+// unloads the game library after removing everything holding its code: input listeners, render features,
+// on load hooks, editor panels. components were evicted and reflection cleared before this
+// then it checks rather than trusts: running jobs, or a component pool with type info in the library, would dangle
+// either keeps the library loaded with a warning naming the holder
+static void release_game_library(smol::editor_context_t& ctx, const std::string& loaded_copy)
+{
+    void* module = smol::os::module_base_of_lib(game_lib);
+    smol::world_t& world = smol::engine::get_active_world();
+
+    const u32_t listeners = smol::input::remove_listeners_of(module);
+    const u32_t features = smol::renderer::remove_features_of(module);
+    const u32_t hooks = smol::game::remove_on_load_of(module);
+    const auto panels =
+        std::erase_if(ctx.custom_panels, [module](smol::panel_draw_func panel)
+                      { return smol::os::module_base_of(reinterpret_cast<const void*>(panel)) == module; });
+
+    std::vector<std::string> held_by;
+    if (!smol::jobs::wait_idle(5000)) { held_by.emplace_back("jobs still running after 5 s"); }
+
+    for (auto [pool_id, pool] : world.registry.storage())
+    {
+        if (smol::os::module_base_of(&pool.info()) == module)
         {
-            SMOL_LOG_ERROR("EDITOR", "xmake configure failed");
-            return false;
+            held_by.push_back(fmt::format("the '{}' component pool", pool.info().name()));
         }
     }
 
-    const std::string build = "xmake -P \"" + proj + "\" " + target;
-    SMOL_LOG_INFO("EDITOR", "Building project: {}", build);
-    if (std::system(build.c_str()) != 0)
+    if (!held_by.empty())
     {
-        SMOL_LOG_ERROR("EDITOR", "xmake build failed");
-        return false;
+        std::string list;
+        for (const std::string& item : held_by) { list += (list.empty() ? "" : ", ") + item; }
+        SMOL_LOG_WARN("EDITOR",
+                      "Kept the previous game library loaded: {} still pointed into it. A component needs "
+                      "reflection to survive a reload; give it SMOL_REFLECT.",
+                      list);
+        g_retired_game_libs.push_back(game_lib);
+        game_lib = nullptr;
+        return;
     }
-    SMOL_LOG_INFO("EDITOR", "Project built successfully");
-    return true;
+
+    smol::os::free_lib(game_lib);
+    game_lib = nullptr;
+
+    std::error_code ec;
+    std::filesystem::remove(loaded_copy, ec);
+
+    SMOL_LOG_INFO("EDITOR",
+                  "Unloaded the previous game library (released {} input listener(s), {} render feature(s), "
+                  "{} on-load hook(s), {} panel(s))",
+                  listeners, features, hooks, panels);
 }
 
 bool load_game_dll(bool is_reload, smol::editor_context_t& ctx)
@@ -118,16 +212,7 @@ bool load_game_dll(bool is_reload, smol::editor_context_t& ctx)
 
         smol::reflection::clear_registrations();
 
-        smol::os::free_lib(game_lib);
-        game_lib = nullptr;
-    }
-
-    if (!cur_temp_lib_name.empty() && std::filesystem::exists(cur_temp_lib_name))
-    {
-        std::error_code ec;
-        std::filesystem::remove(cur_temp_lib_name, ec);
-
-        if (ec) { SMOL_LOG_WARN("EDITOR", "Could not delete old temp lib: {}", ec.message()); }
+        release_game_library(ctx, cur_temp_lib_name);
     }
 
     static int reload_counter = 0;
@@ -177,6 +262,11 @@ bool load_game_dll(bool is_reload, smol::editor_context_t& ctx)
     smol::world_t& world = smol::engine::get_active_world();
     smol::reflection::register_types();
 
+    // only the engine's types are registered here, so the engine creates every engine pool before the game can
+    // else smol_game_init's view<..., transform_t>() creates the transform pool in the game DLL and hot reload
+    // leaves it dangling. every load, since a new scene is a new registry
+    smol::serialization::create_registered_pools(world);
+
     if (g_engine_pool_ids.empty()) { g_engine_pool_ids = smol::serialization::reflected_component_pool_ids(world); }
 
     ctx.game_register_types(&world);
@@ -186,6 +276,9 @@ bool load_game_dll(bool is_reload, smol::editor_context_t& ctx)
     {
         ctx.game_init(&world);
     }
+
+    // after every load, not only the first: what the previous library registered went with it
+    smol::game::run_on_load(world);
 
     if (editor_init)
     {
@@ -221,14 +314,19 @@ bool open_project(const std::filesystem::path& project_file, smol::editor_contex
 
 namespace
 {
+    // opening a project: build its library if missing, cook its assets, then open, the first two off the UI thread
     enum class gate_state_e
     {
         PICKING,
         BUILDING,
+        COOKING,
     };
 
     gate_state_e g_gate = gate_state_e::PICKING;
     std::future<bool> g_build_future;
+    std::future<bool> g_cook_future;
+    std::string g_cook_error;
+    smol::os::process_cancel_t g_cook_cancel;
     std::filesystem::path g_pending_project;
 
     std::future<bool> g_recompile_future;
@@ -245,6 +343,20 @@ namespace
         return !std::filesystem::exists(project.lib_path);
     }
 
+    // before anything loads: cooked data may predate this engine (a format bump breaks materials until recooked)
+    // a failure is reported and opening carries on, what still fails to load draws as the fallback
+    void start_cook(const std::filesystem::path& project_file, smol::editor_context_t& ctx)
+    {
+        g_pending_project = project_file;
+        g_gate = gate_state_e::COOKING;
+        ctx.project_loaded = false;
+
+        smol::editor::asset_cook::set_project(project_file.string());
+        g_cook_cancel.reset();
+        g_cook_future = std::async(std::launch::async,
+                                   [] { return smol::editor::asset_cook::cook_project(g_cook_error, &g_cook_cancel); });
+    }
+
     void request_open_project(const std::filesystem::path& project_file, smol::editor_context_t& ctx)
     {
         std::filesystem::path dir;
@@ -255,12 +367,13 @@ namespace
             ctx.project_loaded = false;
             smol::editor::project_manager::report_status("Building " + project_file.filename().string() + "...");
             const std::string eng = smol::editor::project_manager::engine_dir();
+            g_build_cancel.reset();
             g_build_future =
                 std::async(std::launch::async, [pf = project_file, eng] { return build_project(pf, eng); });
         }
         else
         {
-            ctx.project_loaded = open_project(project_file, ctx);
+            start_cook(project_file, ctx);
         }
     }
 } // namespace
@@ -274,18 +387,59 @@ void update_editor_ui(smol::world_t& world, smol::editor_context_t& ctx)
 
         if (g_gate == gate_state_e::BUILDING)
         {
-            smol::editor::project_manager::draw_building(g_pending_project.filename().string());
+            if (smol::editor::project_manager::draw_waiting(
+                    "building project", "Building " + g_pending_project.filename().string() + " ...",
+                    g_build_cancel.requested()))
+            {
+                g_build_cancel.cancel();
+            }
 
             if (g_build_future.valid() && g_build_future.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
             {
                 const bool built = g_build_future.get();
                 g_gate = gate_state_e::PICKING;
-                if (!built) { smol::editor::project_manager::report_status("Build failed, see console output"); }
-                else if (open_project(g_pending_project, ctx)) { ctx.project_loaded = true; }
+                if (g_build_cancel.requested()) { smol::editor::project_manager::report_status("Build cancelled"); }
+                else if (!built) { smol::editor::project_manager::report_status("Build failed, see console output"); }
                 else
                 {
-                    smol::editor::project_manager::report_status(
-                        "Built, but the game library failed to load, see console output");
+                    start_cook(g_pending_project, ctx);
+                }
+            }
+        }
+        else if (g_gate == gate_state_e::COOKING)
+        {
+            if (smol::editor::project_manager::draw_waiting("cooking assets",
+                                                            "Bringing " + g_pending_project.filename().string() +
+                                                                "'s cooked assets up to date ...",
+                                                            g_cook_cancel.requested()))
+            {
+                g_cook_cancel.cancel();
+            }
+
+            if (g_cook_future.valid() && g_cook_future.wait_for(std::chrono::seconds(0)) == std::future_status::ready)
+            {
+                const bool cooked = g_cook_future.get();
+                g_gate = gate_state_e::PICKING;
+
+                // a cancelled cook leaves the project closed, half cooked assets would only show fallbacks
+                if (g_cook_cancel.requested())
+                {
+                    SMOL_LOG_WARN("EDITOR", "Cancelled cooking {}", g_pending_project.filename().string());
+                    smol::editor::project_manager::report_status("Cooking cancelled");
+                }
+                else
+                {
+                    if (!cooked)
+                    {
+                        SMOL_LOG_ERROR("EDITOR", "Could not bring the project's cooked assets up to date: {}",
+                                       g_cook_error);
+                    }
+
+                    if (open_project(g_pending_project, ctx)) { ctx.project_loaded = true; }
+                    else
+                    {
+                        smol::editor::project_manager::report_status("The project failed to open, see console output");
+                    }
                 }
             }
         }
@@ -311,7 +465,7 @@ void update_editor_ui(smol::world_t& world, smol::editor_context_t& ctx)
                                                    ecam.fov_deg, aspect, ecam.near_plane, ecam.far_plane, view, proj,
                                                    view_proj);
         smol::renderer::submit_color_view("PrimaryView"_h, view, proj, view_proj, ecam.position, "SceneColor"_h,
-                                          "SceneDepth"_h, extent);
+                                          "SceneDepth"_h, extent, ecam.near_plane, ecam.far_plane);
         return;
     }
 
@@ -331,6 +485,7 @@ void update_editor_ui(smol::world_t& world, smol::editor_context_t& ctx)
                 smol::serialization::clear_scene(world);
                 smol::serialization::deserialize_scene(world, scene_json);
                 ctx.current_scene_path = ctx.pending_scene_path;
+                smol::editor::asset_watch::set_open_scene(ctx.current_scene_path);
                 SMOL_LOG_INFO("EDITOR", "Scene loaded from {}", ctx.pending_scene_path);
             }
         }
@@ -345,12 +500,28 @@ void update_editor_ui(smol::world_t& world, smol::editor_context_t& ctx)
     {
         ctx.pending_scene_save = false;
         nlohmann::json scene_json = smol::serialization::serialize_scene(world);
+        // a scene saved somewhere new is a new asset, over an existing one it keeps its identity
+        scene_json["guid"] = smol::asset_meta::guid_for_writing(ctx.pending_scene_path);
         std::ofstream file(ctx.pending_scene_path);
         file << scene_json.dump(4);
+        file.close();
+
         ctx.current_scene_path = ctx.pending_scene_path;
         SMOL_LOG_INFO("EDITOR", "Scene saved to {}", ctx.pending_scene_path);
         ctx.pending_scene_path.clear();
+
+        smol::editor::asset_watch::ignore_own_write(ctx.current_scene_path);
+        smol::editor::asset_watch::set_open_scene(ctx.current_scene_path);
+
+        // nothing to reload: the world is the scene, the cooked .smolscene is only for the runtime
+        std::string cook_err;
+        if (!smol::editor::asset_cook::cook_asset(ctx.current_scene_path, cook_err))
+        {
+            SMOL_LOG_ERROR("EDITOR", "Scene saved but could not be reimported: {}", cook_err);
+        }
     }
+
+    smol::editor::asset_watch::tick();
 
     static std::chrono::steady_clock::time_point last_check_time = std::chrono::steady_clock::now();
     std::chrono::steady_clock::time_point now = std::chrono::steady_clock::now();
@@ -372,7 +543,9 @@ void update_editor_ui(smol::world_t& world, smol::editor_context_t& ctx)
     ImGui_ImplSDL3_NewFrame();
     ImGui::NewFrame();
 
-    ImGuiID dockspace_id = ImGui::GetID("MainDockSpace");
+    // versioned: imgui.ini remembers node sizes and an old layout pins the console to its old 32px height
+    // bump the id to reset saved layouts when a default layout change must reach existing inis
+    ImGuiID dockspace_id = ImGui::GetID("MainDockSpace_v2");
 
     static bool first_time = true;
     if (first_time)
@@ -392,7 +565,7 @@ void update_editor_ui(smol::world_t& world, smol::editor_context_t& ctx)
             ImGuiID dock_toolbar =
                 ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Up, 32.0f / view_h, nullptr, &dock_main);
             ImGuiID dock_bottom =
-                ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Down, 32.0f / view_h, nullptr, &dock_main);
+                ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Down, 0.28f, nullptr, &dock_main);
             ImGuiID dock_sidebars = ImGui::DockBuilderSplitNode(dock_main, ImGuiDir_Right, 0.15f, nullptr, &dock_main);
 
             ImGuiID dock_hierarchy =
@@ -428,6 +601,8 @@ void update_editor_ui(smol::world_t& world, smol::editor_context_t& ctx)
     {
         ctx.recompile_requested = false;
         ctx.recompiling = true;
+        ctx.cancel_build_requested = false;
+        g_build_cancel.reset();
         const std::filesystem::path pf = ctx.project_file;
         const std::string eng = smol::editor::project_manager::engine_dir();
         g_recompile_future = std::async(std::launch::async, [pf, eng] { return build_project(pf, eng); });
@@ -437,8 +612,11 @@ void update_editor_ui(smol::world_t& world, smol::editor_context_t& ctx)
     {
         const bool ok = g_recompile_future.get();
         ctx.recompiling = false;
-        if (!ok) { SMOL_LOG_ERROR("EDITOR", "Recompile failed, see console output"); }
+        if (g_build_cancel.requested()) { SMOL_LOG_WARN("EDITOR", "Recompile cancelled"); }
+        else if (!ok) { SMOL_LOG_ERROR("EDITOR", "Recompile failed, see console output"); }
+        ctx.cancel_build_requested = false;
     }
+    if (ctx.recompiling && ctx.cancel_build_requested) { g_build_cancel.cancel(); }
 
     std::string chosen_project;
     bool commit_project = false;
@@ -451,6 +629,9 @@ void update_editor_ui(smol::world_t& world, smol::editor_context_t& ctx)
     smol::editor::imgui::submit(ImGui::GetDrawData());
 
     smol::renderer::submit_output_target("EditorViewport"_h, {ctx.viewport_width, ctx.viewport_height});
+
+    smol::renderer::set_view_debug_view("PrimaryView"_h, ctx.debug_view);
+    smol::renderer::set_view_post_processing("PrimaryView"_h, ctx.post_processing);
 
     smol::engine::get_active_world().is_simulating = (ctx.cur_mode == smol::editor_mode_e::PLAY);
 
@@ -487,7 +668,8 @@ void update_editor_ui(smol::world_t& world, smol::editor_context_t& ctx)
                                                    view_proj);
 
         smol::renderer::submit_color_view("PrimaryView"_h, view, proj, view_proj, ecam.position, "SceneColor"_h,
-                                          "SceneDepth"_h, smol::renderer::ctx.render_extent);
+                                          "SceneDepth"_h, smol::renderer::ctx.render_extent, ecam.near_plane,
+                                          ecam.far_plane);
     }
     else
     {
@@ -523,6 +705,11 @@ bool open_project(const std::filesystem::path& project_file, smol::editor_contex
     trigger_path = project.trigger_path;
     source_lib_name = project.lib_path.string();
     ctx.project_file = project_file.string();
+    // saving from the inspector reimports through the cooker, which needs to know the project
+    smol::editor::asset_cook::set_project(ctx.project_file);
+
+    // shaders and game code are edited outside the editor, watching is how it hears about them
+    smol::editor::asset_watch::start(project.assets_dir, smol::editor::asset_cook::engine_assets_dir());
 
     std::error_code ec;
     for (const auto& entry : std::filesystem::directory_iterator(source_lib_path.parent_path(), ec))
@@ -530,12 +717,14 @@ bool open_project(const std::filesystem::path& project_file, smol::editor_contex
         if (entry.path().string().find("-loaded-") != std::string::npos) { std::filesystem::remove(entry.path(), ec); }
     }
 
-    const std::filesystem::path proj_root = project_file.parent_path();
-    const std::filesystem::path cooked = proj_root / ".smol";
+    const std::filesystem::path cooked = project.cooked_assets_dir;
 
-    smol::vfs::mount("engine://assets/", (cooked / "engine").generic_string() + "/");
+    // assets were brought up to date before this, see start_cook
+
+    // engine:// stays on the editor's own cooked tree where vfs::init put it
+    // the project's engine asset copy only refreshes on a game build, the editor's own tree always matches
     smol::vfs::mount("game://assets/", (cooked / "game").generic_string() + "/");
-    smol::vfs::mount("src://", (proj_root / "assets").generic_string() + "/");
+    smol::vfs::mount("src://", project.assets_dir.generic_string() + "/");
 
     smol::asset_meta::load_guid_map((cooked / "guid_map.json").generic_string());
 
@@ -567,9 +756,17 @@ bool open_project(const std::filesystem::path& project_file, smol::editor_contex
         const std::string prefix = "game://assets/";
         if (rel.rfind(prefix, 0) == 0) { rel = rel.substr(prefix.size()); }
 
-        if (rel.size() > 10 && rel.compare(rel.size() - 10, 10, ".smolscene") == 0)
+        // map the cooked artifact back to the source a human edits, extensions come from asset_table
+        if (const smol::asset_type_t* scene_type = smol::asset_table::by_key("scene"))
         {
-            rel.replace(rel.size() - 10, 10, ".scene");
+            const std::string cooked_ext(scene_type->cooked_extension);
+            const std::string source_ext(scene_type->source_extensions.front());
+
+            if (rel.size() > cooked_ext.size() &&
+                rel.compare(rel.size() - cooked_ext.size(), cooked_ext.size(), cooked_ext) == 0)
+            {
+                rel.replace(rel.size() - cooked_ext.size(), cooked_ext.size(), source_ext);
+            }
         }
         std::filesystem::path scene_src = project.assets_dir / rel;
 
@@ -581,6 +778,7 @@ bool open_project(const std::filesystem::path& project_file, smol::editor_contex
             {
                 smol::serialization::deserialize_scene(smol::engine::get_active_world(), scene_json);
                 ctx.current_scene_path = scene_src.string();
+                smol::editor::asset_watch::set_open_scene(ctx.current_scene_path);
                 SMOL_LOG_INFO("EDITOR", "Opened startup scene: {}", scene_src.string());
             }
             else
@@ -602,6 +800,9 @@ bool open_project(const std::filesystem::path& project_file, smol::editor_contex
 int main(i32 argc, char** argv)
 {
     smol::log::init();
+
+    // before anything else logs, so the console opens with the whole session
+    smol::log::set_history_capacity(4096);
 
     std::filesystem::path startup_project;
     bool have_startup_project = false;
@@ -659,6 +860,10 @@ int main(i32 argc, char** argv)
 
     smol::engine::run();
 
+    // a running build or cook would hold up the exit, so stop it
+    g_build_cancel.cancel();
+    g_cook_cancel.cancel();
+
     if (editor_ctx.game_shutdown) { editor_ctx.game_shutdown(&smol::engine::get_active_world()); }
 
     vkDeviceWaitIdle(smol::renderer::ctx.device);
@@ -669,7 +874,7 @@ int main(i32 argc, char** argv)
 
     smol::engine::shutdown();
 
-    if (game_lib) { smol::os::free_lib(game_lib); }
+    // the current library and any that could not be released are left to the process exit
 
     return 0;
 }

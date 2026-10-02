@@ -1,0 +1,25 @@
+# Text is stored with LF in the repository (it already is, every file) and checked out with LF
+# on every platform, whatever core.autocrlf says on the machine. Before this, autocrlf wrote
+# CRLF on checkout while editors, clang-format and generators wrote LF, so the working tree
+# mixed both per file and every touched file warned about being converted.
+* text=auto eol=lf
+
+# Binaries: never converted, never diffed as text. Detection would catch most of these on its
+# own; naming them means a file that happens to look like text cannot be mangled.
+*.png    binary
+*.jpg    binary
+*.jpeg   binary
+*.ktx2   binary
+*.glb    binary
+*.blend  binary
+*.ttf    binary
+*.otf    binary
+*.wav    binary
+*.ogg    binary
+*.dll    binary
+*.so     binary
+*.so.*   binary
+*.lib    binary
+*.a      binary
+*.exe    binary
+*.pdb    binary

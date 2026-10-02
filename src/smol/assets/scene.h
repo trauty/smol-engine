@@ -23,6 +23,11 @@ namespace smol
         vec3_t vec = {};
         std::string str;
         u64_t asset_type = 0;
+        std::vector<std::string> strs;
+
+        // asset refs: the guid recorded beside the path in `str` / `strs`
+        std::string guid;
+        std::vector<std::string> guids;
     };
 
     struct scene_component_t

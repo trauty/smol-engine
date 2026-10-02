@@ -78,6 +78,29 @@ namespace smol::serialization
                 std::string prop_key = meta_key(data.name(), data_id);
 
                 smol::reflection::editor_prop_t* prop = static_cast<smol::reflection::editor_prop_t*>(data.custom());
+                if (prop && prop->asset_type_hash != 0 && prop->is_list)
+                {
+                    const std::vector<asset_handle_t> list = field_value.cast<std::vector<asset_handle_t>>();
+
+                    nlohmann::json entries = nlohmann::json::array();
+                    for (const asset_handle_t& handle : list)
+                    {
+                        std::string path = smol::engine::get_asset_registry().get_path(handle);
+                        std::string_view guid = smol::asset_meta::get_guid(path);
+                        entries.push_back({
+                            {"g", guid.empty() ? "" : std::string(guid)},
+                            {"p", path                                 }
+                        });
+                    }
+
+                    comp_json[prop_key] = tagged(scene_value_type_e::ASSET_REF_LIST,
+                                                 {
+                                                     {"t", prop->asset_type_hash},
+                                                     {"e", std::move(entries)   }
+                    });
+                    continue;
+                }
+
                 if (prop && prop->asset_type_hash != 0)
                 {
                     asset_handle_t handle = field_value.cast<asset_handle_t>();
@@ -120,9 +143,6 @@ namespace smol::serialization
                 }
                 else if (field_type.is_enum())
                 {
-                    // as_const is load-bearing: allow_cast has a non-const overload that converts
-                    // in place and returns bool, so calling it on a mutable any yields an any
-                    // holding a bool, and the cast below then fails an assert inside entt.
                     const smol::reflection::any_t as_int = std::as_const(field_value).allow_cast<i32>();
                     if (as_int) { comp_json[prop_key] = tagged(scene_value_type_e::I32, as_int.cast<i32>()); }
                 }
@@ -219,7 +239,19 @@ namespace smol::serialization
                         case scene_value_type_e::ASSET_REF:
                             prop.asset_type = v.value("t", u64_t{0});
                             prop.str = v.value("p", std::string{});
+                            prop.guid = v.value("g", std::string{});
                             break;
+                        case scene_value_type_e::ASSET_REF_LIST:
+                        {
+                            prop.asset_type = v.value("t", u64_t{0});
+                            const nlohmann::json entries = v.value("e", nlohmann::json::array());
+                            for (const nlohmann::json& entry : entries)
+                            {
+                                prop.strs.push_back(entry.value("p", std::string{}));
+                                prop.guids.push_back(entry.value("g", std::string{}));
+                            }
+                            break;
+                        }
                         }
                     }
                     else
@@ -275,6 +307,16 @@ namespace smol::serialization
                     case scene_value_type_e::ASSET_REF:
                         write_pod(out, prop.asset_type);
                         write_str(out, prop.str);
+                        write_str(out, prop.guid);
+                        break;
+                    case scene_value_type_e::ASSET_REF_LIST:
+                        write_pod(out, prop.asset_type);
+                        write_pod(out, static_cast<u32_t>(prop.strs.size()));
+                        for (std::size_t i = 0; i < prop.strs.size(); i++)
+                        {
+                            write_str(out, prop.strs[i]);
+                            write_str(out, i < prop.guids.size() ? prop.guids[i] : std::string{});
+                        }
                         break;
                     }
                 }
@@ -331,13 +373,31 @@ namespace smol::serialization
                     case scene_value_type_e::STRING: data.set(instance, prop.str); break;
                     case scene_value_type_e::VEC3: data.set(instance, prop.vec); break;
                     case scene_value_type_e::ASSET_REF:
-                        if (!prop.str.empty())
+                    {
+                        const std::string ref = smol::asset_meta::resolve_ref(prop.guid, prop.str);
+                        if (!ref.empty())
                         {
                             asset_handle_t handle =
-                                smol::asset_serde::load(prop.asset_type, smol::engine::get_asset_registry(), prop.str);
+                                smol::asset_serde::load(prop.asset_type, smol::engine::get_asset_registry(), ref);
                             data.set(instance, handle);
                         }
                         break;
+                    }
+                    case scene_value_type_e::ASSET_REF_LIST:
+                    {
+                        std::vector<asset_handle_t> list;
+                        list.reserve(prop.strs.size());
+                        for (std::size_t i = 0; i < prop.strs.size(); i++)
+                        {
+                            const std::string ref = smol::asset_meta::resolve_ref(
+                                i < prop.guids.size() ? prop.guids[i] : std::string{}, prop.strs[i]);
+                            list.push_back(ref.empty() ? asset_handle_t{}
+                                                       : smol::asset_serde::load(
+                                                             prop.asset_type, smol::engine::get_asset_registry(), ref));
+                        }
+                        data.set(instance, list);
+                        break;
+                    }
                     }
                 }
 
@@ -379,6 +439,15 @@ namespace smol::serialization
             ids.insert(static_cast<u32_t>(type.info().hash()));
         }
         return ids;
+    }
+
+    void create_registered_pools(smol::world_t& world)
+    {
+        for (auto [meta_id, type] : smol::reflection::resolve(*world.reflection_ctx))
+        {
+            const smol::reflection::func_t storage = type.func("storage"_h);
+            if (storage) { storage.invoke({}, smol::reflection::forward_as_meta(world.registry)); }
+        }
     }
 
     reload_snapshot_t evict_game_components(smol::world_t& world, const std::unordered_set<u32_t>& engine_pool_ids)

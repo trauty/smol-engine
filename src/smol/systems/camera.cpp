@@ -56,7 +56,8 @@ namespace smol::camera_system
     void build_view_projection(vec3_t eye, vec3_t forward, vec3_t up, f32 fov_deg, f32 aspect, f32 near_plane,
                                f32 far_plane, mat4_t& out_view, mat4_t& out_projection, mat4_t& out_view_proj)
     {
-        glm_perspective_lh_zo(glm_rad(fov_deg), aspect, near_plane, far_plane, out_projection);
+        (void)far_plane;
+        perspective_reverse_infinite_lh_zo(glm_rad(fov_deg), aspect, near_plane, out_projection);
         flip_clip_y(out_projection);
 
         vec3_t center;

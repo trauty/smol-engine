@@ -1,0 +1,273 @@
+{
+    "entities": [
+        {
+            "components": {
+                "bob_t": {
+                    "base_y": {
+                        "ty": 2,
+                        "v": 0.0
+                    },
+                    "height": {
+                        "ty": 2,
+                        "v": 0.5
+                    },
+                    "speed": {
+                        "ty": 2,
+                        "v": 1.5
+                    }
+                },
+                "mesh_renderer_t": {
+                    "active": {
+                        "ty": 3,
+                        "v": true
+                    },
+                    "casts_shadow": {
+                        "ty": 3,
+                        "v": true
+                    },
+                    "material": {
+                        "ty": 6,
+                        "v": {
+                            "g": "784f873c-c691-5155-9995-6107b75c4869",
+                            "p": "game://assets/materials/sphere.mat",
+                            "t": 6177817143880753076
+                        }
+                    },
+                    "mesh": {
+                        "ty": 6,
+                        "v": {
+                            "g": "9c461082-f0a8-25cf-a35e-e4808a0c2ab0",
+                            "p": "game://assets/models/sphere.glb",
+                            "t": 1917752902274337936
+                        }
+                    }
+                },
+                "tag_t": {
+                    "name": {
+                        "ty": 4,
+                        "v": "sphere"
+                    }
+                },
+                "transform_t": {
+                    "local_euler": {
+                        "ty": 5,
+                        "v": [
+                            -0.0,
+                            0.0,
+                            -0.0
+                        ]
+                    },
+                    "local_position": {
+                        "ty": 5,
+                        "v": [
+                            0.0,
+                            0.0,
+                            12.0
+                        ]
+                    },
+                    "local_scale": {
+                        "ty": 5,
+                        "v": [
+                            1.0,
+                            1.0,
+                            1.0
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "components": {
+                "mesh_renderer_t": {
+                    "active": {
+                        "ty": 3,
+                        "v": true
+                    },
+                    "casts_shadow": {
+                        "ty": 3,
+                        "v": true
+                    },
+                    "material": {
+                        "ty": 6,
+                        "v": {
+                            "g": "2e4c17cd-51ed-9a1f-b280-8e1f12f40b3d",
+                            "p": "game://assets/materials/ground.mat",
+                            "t": 6177817143880753076
+                        }
+                    },
+                    "mesh": {
+                        "ty": 6,
+                        "v": {
+                            "g": "f545e40d-c05e-e053-a022-897a586cffa5",
+                            "p": "game://assets/models/ground.glb",
+                            "t": 1917752902274337936
+                        }
+                    }
+                },
+                "tag_t": {
+                    "name": {
+                        "ty": 4,
+                        "v": "ground"
+                    }
+                },
+                "transform_t": {
+                    "local_euler": {
+                        "ty": 5,
+                        "v": [
+                            -0.0,
+                            0.0,
+                            -0.0
+                        ]
+                    },
+                    "local_position": {
+                        "ty": 5,
+                        "v": [
+                            0.0,
+                            -1.5,
+                            12.0
+                        ]
+                    },
+                    "local_scale": {
+                        "ty": 5,
+                        "v": [
+                            12.0,
+                            1.0,
+                            12.0
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "components": {
+                "directional_light_t": {
+                    "casts_shadow": {
+                        "ty": 3,
+                        "v": true
+                    },
+                    "color": {
+                        "ty": 5,
+                        "v": [
+                            1.0,
+                            0.9599999785423279,
+                            0.8999999761581421
+                        ]
+                    },
+                    "intensity": {
+                        "ty": 2,
+                        "v": 3.5
+                    }
+                },
+                "tag_t": {
+                    "name": {
+                        "ty": 4,
+                        "v": "sun"
+                    }
+                },
+                "transform_t": {
+                    "local_euler": {
+                        "ty": 5,
+                        "v": [
+                            1.1000001430511475,
+                            0.5,
+                            -1.6979782913040253e-08
+                        ]
+                    },
+                    "local_position": {
+                        "ty": 5,
+                        "v": [
+                            0.0,
+                            0.0,
+                            0.0
+                        ]
+                    },
+                    "local_scale": {
+                        "ty": 5,
+                        "v": [
+                            1.0,
+                            1.0,
+                            1.0
+                        ]
+                    }
+                }
+            }
+        },
+        {
+            "components": {
+                "active_camera_tag": {},
+                "camera_t": {
+                    "aspect": {
+                        "ty": 2,
+                        "v": 2.386813163757324
+                    },
+                    "far_plane": {
+                        "ty": 2,
+                        "v": 1000.0
+                    },
+                    "fov_deg": {
+                        "ty": 2,
+                        "v": 45.0
+                    },
+                    "near_plane": {
+                        "ty": 2,
+                        "v": 0.10000000149011612
+                    }
+                },
+                "post_process_t": {
+                    "effects": {
+                        "ty": 7,
+                        "v": {
+                            "e": [],
+                            "t": 6177817143880753076
+                        }
+                    },
+                    "enabled": {
+                        "ty": 3,
+                        "v": true
+                    },
+                    "final_pass": {
+                        "ty": 6,
+                        "v": {
+                            "g": "634021bc-77f6-1712-9e81-9a38f9cc07bf",
+                            "p": "engine://assets/materials/uberpost.mat",
+                            "t": 6177817143880753076
+                        }
+                    }
+                },
+                "tag_t": {
+                    "name": {
+                        "ty": 4,
+                        "v": "camera"
+                    }
+                },
+                "transform_t": {
+                    "local_euler": {
+                        "ty": 5,
+                        "v": [
+                            0.11999999731779099,
+                            0.0,
+                            -0.0
+                        ]
+                    },
+                    "local_position": {
+                        "ty": 5,
+                        "v": [
+                            0.0,
+                            1.5,
+                            3.0
+                        ]
+                    },
+                    "local_scale": {
+                        "ty": 5,
+                        "v": [
+                            1.0,
+                            1.0,
+                            1.0
+                        ]
+                    }
+                }
+            }
+        }
+    ],
+    "guid": "2946b33c-1bb2-e9fe-b606-762af10042c5"
+}

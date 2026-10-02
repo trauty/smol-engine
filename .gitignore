@@ -19,3 +19,6 @@ imgui.ini
 include/smol-engine/
 .xmake/
 .toolchains/
+
+# Blender's backup of the previous save, written next to every .blend
+*.blend1

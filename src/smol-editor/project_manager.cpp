@@ -2,6 +2,7 @@
 
 #include "imgui/imgui.h"
 #include "smol-editor/editor_context.h"
+#include "smol-editor/panels/console.h"
 #include "smol/log.h"
 #include "smol/window.h"
 
@@ -398,8 +399,10 @@ namespace smol::editor::project_manager
         return "";
     }
 
-    void draw_building(const std::string& project_name)
+    bool draw_waiting(const char* activity, const std::string& line, bool cancelling)
     {
+        bool cancel = false;
+
         const ImGuiViewport* vp = ImGui::GetMainViewport();
         ImGui::SetNextWindowPos(vp->WorkPos);
         ImGui::SetNextWindowSize(vp->WorkSize);
@@ -412,18 +415,29 @@ namespace smol::editor::project_manager
             ImGui::PushFont(nullptr, ImGui::GetStyle().FontSizeBase * 1.6f);
             ImGui::TextUnformatted("smol");
             ImGui::PopFont();
-            ImGui::TextDisabled("building project");
+            ImGui::TextDisabled("%s", activity);
             ImGui::Separator();
             ImGui::Spacing();
 
-            ImGui::Text("Building %s ...", project_name.c_str());
+            ImGui::TextUnformatted(line.c_str());
             ImGui::Spacing();
 
-            ImGui::ProgressBar(-1.0f * (float)ImGui::GetTime(), ImVec2(ImGui::GetContentRegionAvail().x, 0.0f),
-                               nullptr);
+            const float button_width = 90.0f;
+            const float bar_width = ImGui::GetContentRegionAvail().x - button_width - ImGui::GetStyle().ItemSpacing.x;
+            ImGui::ProgressBar(-1.0f * (float)ImGui::GetTime(), ImVec2(bar_width, 0.0f),
+                               cancelling ? "cancelling..." : nullptr);
+            ImGui::SameLine();
+            ImGui::BeginDisabled(cancelling);
+            if (ImGui::Button("Cancel", ImVec2(button_width, 0.0f))) { cancel = true; }
+            ImGui::EndDisabled();
+
             ImGui::Spacing();
-            ImGui::TextDisabled("Running xmake, see the console for build output.");
+            ImGui::Separator();
+
+            panels::draw_log_view();
         }
         ImGui::End();
+
+        return cancel;
     }
 } // namespace smol::editor::project_manager

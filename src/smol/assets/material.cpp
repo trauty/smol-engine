@@ -1,7 +1,9 @@
 #include "material.h"
 
 #include "entt/core/type_info.hpp"
+#include "smol/asset_table.h"
 #include "smol/asset.h"
+#include "smol/asset_meta.h"
 #include "smol/asset_registry.h"
 #include "smol/assets/material_format.h"
 #include "smol/assets/shader.h"
@@ -36,20 +38,42 @@ namespace smol
         }
     }
 
+    namespace
+    {
+        std::string join_member_names(const shader_t& shader)
+        {
+            std::string out;
+            for (const auto& [hash, member] : shader.module.members)
+            {
+                if (!out.empty()) { out += ", "; }
+                out += member.name.empty() ? "?" : member.name;
+            }
+            return out;
+        }
+    } // namespace
+
+    bool material_t::has_property(u32_t name_hash) const
+    {
+        shader_t* shader = smol::engine::get_asset_registry().get<shader_t>(shader_handle);
+        if (!shader) { return false; }
+        return shader->module.members.contains(name_hash);
+    }
+
     void material_t::set_property_raw(u32_t name_hash, const void* value, u32_t size)
     {
         shader_t* shader = smol::engine::get_asset_registry().get<shader_t>(shader_handle);
         if (!shader) { return; }
 
         const auto& members = shader->module.members;
-        auto it = members.find(name_hash);
-        if (it == members.end())
+        const shader_member_t* it = members.find(name_hash);
+        if (it == nullptr)
         {
-            SMOL_LOG_WARN("MATERIAL", "Property '{}' not found in shader", name_hash);
+            SMOL_LOG_WARN("MATERIAL", "Property {} not found in shader '{}', it has: {}", name_hash,
+                          shader->module.name, join_member_names(*shader));
             return;
         }
 
-        const shader_member_t& member = it->second;
+        const shader_member_t& member = *it;
         if (size != member.size)
         {
             SMOL_LOG_ERROR("MATERIAL", "Size mismatch for '{}': expected {} bytes, got {}", name_hash, member.size,
@@ -59,6 +83,51 @@ namespace smol
 
         std::memcpy(data.data() + member.offset, value, size);
         dirty_frames = renderer::MAX_FRAMES_IN_FLIGHT;
+    }
+
+    void material_t::set_texture(u32_t name_hash, asset_handle_t tex_handle)
+    {
+        asset_registry_t& assets = smol::engine::get_asset_registry();
+
+        texture_t* tex = assets.get<texture_t>(tex_handle);
+        if (tex == nullptr)
+        {
+            // nothing to bind, but the reference was handed over all the same
+            assets.release<texture_t>(tex_handle);
+            return;
+        }
+
+        // store before releasing: rebinding the same texture hands back the old reference, the new one keeps it alive
+        asset_handle_t previous = {};
+        if (asset_handle_t* bound = bound_textures.find(name_hash)) { previous = *bound; }
+
+        bound_textures[name_hash] = tex_handle;
+        missing_textures.erase(name_hash);
+        set_property<u32_t>(name_hash, tex->bindless_id);
+
+        assets.release<texture_t>(previous);
+    }
+
+    void material_t::clear_texture(u32_t name_hash)
+    {
+        const asset_handle_t* bound = bound_textures.find(name_hash);
+        if (bound == nullptr) { return; }
+
+        const asset_handle_t previous = *bound;
+        bound_textures.erase(name_hash);
+        missing_textures.erase(name_hash);
+        set_property_if_present<u32_t>(name_hash, renderer::BINDLESS_NULL_HANDLE);
+
+        smol::engine::get_asset_registry().release<texture_t>(previous);
+    }
+
+    void material_t::refresh_texture(u32_t name_hash)
+    {
+        const asset_handle_t* bound = bound_textures.find(name_hash);
+        if (bound == nullptr) { return; }
+
+        const texture_t* tex = smol::engine::get_asset_registry().get<texture_t>(*bound);
+        if (tex != nullptr) { set_property<u32_t>(name_hash, tex->bindless_id); }
     }
 
     void material_t::sync()
@@ -97,7 +166,7 @@ namespace smol
 
     std::optional<material_t> asset_loader_t<material_t>::load(const std::string& path)
     {
-        std::string cooked_path = get_cooked_path(path, ".smolmat");
+        std::string cooked_path = smol::asset_table::cooked_path(smol::get_type_id<material_t>(), path);
         std::vector<u8_t> bytes = smol::vfs::read_bytes(cooked_path);
         if (bytes.empty())
         {
@@ -135,10 +204,23 @@ namespace smol
         std::string shader_path(reinterpret_cast<char*>(bytes.data() + offset), header->shader_path_length);
         offset += header->shader_path_length;
 
-        asset_handle_t shader_handle = smol::engine::get_asset_registry().load_sync<shader_t>(shader_path);
-        if (!shader_handle.is_valid())
+        if (offset + header->shader_guid_length > bytes.size())
         {
-            SMOL_LOG_ERROR("MATERIAL", "Failed to load shader '{}' for material", shader_path);
+            SMOL_LOG_ERROR("MATERIAL", "Truncated shader guid in: {}", cooked_path);
+            return std::nullopt;
+        }
+        std::string shader_guid(reinterpret_cast<char*>(bytes.data() + offset), header->shader_guid_length);
+        offset += header->shader_guid_length;
+
+        shader_path = smol::asset_meta::resolve_ref(shader_guid, shader_path);
+
+        asset_handle_t shader_handle = smol::engine::get_asset_registry().load_sync<shader_t>(shader_path);
+
+        // is_valid only says a slot was reserved, a shader that failed to compile still has one
+        // ask for the shader itself, or a material loads holding a dead handle and reports success
+        if (smol::engine::get_asset_registry().get<shader_t>(shader_handle) == nullptr)
+        {
+            SMOL_LOG_ERROR("MATERIAL", "Shader '{}' did not load, so this material cannot be built", shader_path);
             return std::nullopt;
         }
 
@@ -163,12 +245,38 @@ namespace smol
             std::string tex_path(reinterpret_cast<char*>(bytes.data() + offset), tex_bind->path_length);
             offset += tex_bind->path_length;
 
+            if (offset + tex_bind->guid_length > bytes.size())
+            {
+                SMOL_LOG_ERROR("MATERIAL", "Truncated texture guid in: {}", cooked_path);
+                return std::nullopt;
+            }
+            std::string tex_guid(reinterpret_cast<char*>(bytes.data() + offset), tex_bind->guid_length);
+            offset += tex_bind->guid_length;
+
+            tex_path = smol::asset_meta::resolve_ref(tex_guid, tex_path);
+
             asset_handle_t tex_handle = smol::engine::get_asset_registry().load_sync<texture_t>(tex_path);
-            if (tex_handle.is_valid()) { mat.set_texture(tex_bind->name_hash, tex_handle); }
+
+            // is_valid only says a slot was made, whether it loaded is whether the texture itself is there
+            if (smol::engine::get_asset_registry().get<texture_t>(tex_handle) == nullptr)
+            {
+                SMOL_LOG_WARN("MATERIAL", "Texture '{}' did not load, binding the fallback", tex_path);
+
+                // hand back the reference on the one that failed and take one on the fallback
+                // so the material owns exactly what it binds
+                smol::engine::get_asset_registry().release<texture_t>(tex_handle);
+                tex_handle = smol::engine::get_asset_registry().load_sync<texture_t>(renderer::FALLBACK_TEXTURE_PATH);
+
+                mat.set_texture(tex_bind->name_hash, tex_handle);
+                mat.missing_textures[tex_bind->name_hash] = tex_path;
+            }
             else
             {
-                SMOL_LOG_WARN("MATERIAL", "Failed to load texture '{}' for material", tex_path);
+                mat.set_texture(tex_bind->name_hash, tex_handle);
             }
+
+            // the file named it, so it is authored: save_material writes only authored entries
+            mat.authored_properties.push_back(tex_bind->name_hash);
         }
 
         for (u32_t i = 0; i < header->sampler_count; i++)
@@ -182,6 +290,7 @@ namespace smol
             offset += sizeof(cooked_sampler_bind_t);
 
             mat.set_sampler(smp_bind->name_hash, static_cast<sampler_type_e>(smp_bind->sampler_value));
+            mat.authored_properties.push_back(smp_bind->name_hash);
         }
 
         for (u32_t i = 0; i < header->property_count; i++)
@@ -200,6 +309,7 @@ namespace smol
                 return std::nullopt;
             }
             mat.set_property_raw(prop->name_hash, bytes.data() + offset, prop->data_size);
+            mat.authored_properties.push_back(prop->name_hash);
             offset += prop->data_size;
         }
 
@@ -209,6 +319,12 @@ namespace smol
     void asset_loader_t<material_t>::unload(material_t& mat)
     {
         mat.release_heap();
+
+        // each binding owns a reference, release them or every texture a material used stays alive until exit
+        for (auto [name_hash, handle] : mat.bound_textures)
+        {
+            smol::engine::get_asset_registry().release<texture_t>(handle);
+        }
         mat.bound_textures.clear();
         smol::engine::get_asset_registry().release<shader_t>(mat.shader_handle);
     }

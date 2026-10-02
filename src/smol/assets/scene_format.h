@@ -5,7 +5,7 @@
 namespace smol
 {
     constexpr u32_t SMOL_SCENE_MAGIC = 0x4e435353; // "SSCN"
-    constexpr u32_t SMOL_SCENE_VERSION = 1;
+    constexpr u32_t SMOL_SCENE_VERSION = 3;
 
     enum class scene_value_type_e : u8_t
     {
@@ -16,6 +16,7 @@ namespace smol
         STRING = 4,
         VEC3 = 5,
         ASSET_REF = 6,
+        ASSET_REF_LIST = 7,
     };
 
     struct scene_header_t

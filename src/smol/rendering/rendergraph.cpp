@@ -69,6 +69,27 @@ namespace smol::renderer
         return id;
     }
 
+    rg_resource_id rendergraph_t::import_persistent_image(u32_t name_hash, const char* debug_name, VkImage image,
+                                                          VkImageView view, const image_desc_t& desc, u32_t bindless_id,
+                                                          VkImageLayout cur_layout)
+    {
+        if (active_resource_count >= resources.size()) { resources.push_back({}); }
+
+        rg_resource_id id = active_resource_count++;
+        rg_resource_t& res = resources[id];
+
+        res.name_hash = name_hash;
+        res.debug_name = debug_name;
+        res.desc = desc;
+        res.image = image;
+        res.view = view;
+        res.bindless_id = bindless_id;
+        res.cur_layout = cur_layout;
+        res.is_imported = true;
+
+        return id;
+    }
+
     rg_pass_t& rendergraph_t::add_pass(u32_t name_hash, const char* debug_name)
     {
         if (active_pass_count >= passes.size()) { passes.push_back({}); }
@@ -81,6 +102,8 @@ namespace smol::renderer
         pass.storage_writes.clear();
         pass.texture_reads.clear();
         pass.depth_stencil = RG_NULL_ID;
+        pass.render_rect = {};
+        pass.force_depth_clear = false;
         pass.execute_callback = {};
 
         return pass;
@@ -109,6 +132,46 @@ namespace smol::renderer
             }
         }
 
+        {
+            std::vector<size_t> first_writer(active_resource_count, SIZE_MAX);
+            for (size_t i = active_pass_count; i-- > 0;)
+            {
+                const rg_pass_t& pass = passes[i];
+                for (rg_resource_id res : pass.color_writes) { first_writer[res] = i; }
+                for (rg_resource_id res : pass.storage_writes) { first_writer[res] = i; }
+                if (pass.depth_stencil != RG_NULL_ID) { first_writer[pass.depth_stencil] = i; }
+            }
+
+            for (size_t i = 0; i < active_pass_count; i++)
+            {
+                const rg_pass_t& pass = passes[i];
+                for (rg_resource_id res : pass.texture_reads)
+                {
+                    const size_t writer = first_writer[res];
+                    if (writer == SIZE_MAX || writer <= i) { continue; }
+
+                    const rg_pass_t& writer_pass = passes[writer];
+                    const u64_t key = (static_cast<u64_t>(pass.name_hash) * 0x9e3779b97f4a7c15ull) ^
+                                      (static_cast<u64_t>(writer_pass.name_hash) * 0xc2b2ae3d27d4eb4full) ^
+                                      static_cast<u64_t>(resources[res].name_hash);
+                    if (std::find(reported_hazards.begin(), reported_hazards.end(), key) != reported_hazards.end())
+                    {
+                        continue;
+                    }
+                    reported_hazards.push_back(key);
+
+                    SMOL_LOG_ERROR("RENDERGRAPH",
+                                   "Pass '{}' reads '{}' but every writer is declared later (first is '{}'). "
+                                   "It will sample last frame's contents. Declare '{}' before '{}'.",
+                                   pass.debug_name ? pass.debug_name : "<unnamed>",
+                                   resources[res].debug_name ? resources[res].debug_name : "<unnamed>",
+                                   writer_pass.debug_name ? writer_pass.debug_name : "<unnamed>",
+                                   writer_pass.debug_name ? writer_pass.debug_name : "<unnamed>",
+                                   pass.debug_name ? pass.debug_name : "<unnamed>");
+                }
+            }
+        }
+
         std::vector<std::vector<size_t>> adjacency_list(active_pass_count);
         std::vector<size_t> in_degree(active_pass_count, 0);
         std::vector<size_t> latest_writer(active_resource_count, SIZE_MAX);
@@ -117,22 +180,24 @@ namespace smol::renderer
         {
             rg_pass_t& pass = passes[i];
 
+            auto add_edge_from_writer = [&](rg_resource_id res)
+            {
+                const size_t writer_idx = latest_writer[res];
+                if (writer_idx == SIZE_MAX || writer_idx == i) { return; }
+
+                auto& adj = adjacency_list[writer_idx];
+                if (std::find(adj.begin(), adj.end(), i) == adj.end())
+                {
+                    adj.push_back(i);
+                    in_degree[i]++;
+                }
+            };
+
+            for (rg_resource_id res : pass.texture_reads) { add_edge_from_writer(res); }
+
             auto add_dep = [&](rg_resource_id res)
             {
-                if (latest_writer[res] != SIZE_MAX)
-                {
-                    size_t writer_idx = latest_writer[res];
-                    if (writer_idx != i)
-                    {
-                        auto& adj = adjacency_list[writer_idx];
-                        if (std::find(adj.begin(), adj.end(), i) == adj.end())
-                        {
-                            adj.push_back(i);
-                            in_degree[i]++;
-                        }
-                    }
-                }
-
+                add_edge_from_writer(res);
                 latest_writer[res] = i;
             };
 
@@ -141,30 +206,8 @@ namespace smol::renderer
             if (pass.depth_stencil != RG_NULL_ID) { add_dep(pass.depth_stencil); }
         }
 
-        for (size_t i = 0; i < active_pass_count; i++)
-        {
-            rg_pass_t& pass = passes[i];
-
-            for (rg_resource_id res : pass.texture_reads)
-            {
-                if (latest_writer[res] != SIZE_MAX)
-                {
-                    size_t writer_idx = latest_writer[res];
-                    if (writer_idx != i)
-                    {
-                        auto& adj = adjacency_list[writer_idx];
-                        if (std::find(adj.begin(), adj.end(), i) == adj.end())
-                        {
-                            adj.push_back(i);
-                            in_degree[i]++;
-                        }
-                    }
-                }
-            }
-        }
-
         std::queue<size_t> queue;
-        for (size_t i = 0; i < passes.size(); i++)
+        for (size_t i = 0; i < active_pass_count; i++)
         {
             if (in_degree[i] == 0) { queue.push(i); }
         }
@@ -237,7 +280,7 @@ namespace smol::renderer
                 }
             }
 
-            bool depth_needs_clear = true;
+            bool depth_needs_clear = false;
             if (pass.depth_stencil != RG_NULL_ID)
             {
                 rg_resource_t& res = resources[pass.depth_stencil];
@@ -297,22 +340,32 @@ namespace smol::renderer
                     render_height = res.desc.height;
 
                     VkClearValue clear_depth = {
-                        .depthStencil = {1.0f, 0}
+                        .depthStencil = {res.desc.depth_clear, 0}
                     };
 
                     depth_attachment = {
                         .sType = VK_STRUCTURE_TYPE_RENDERING_ATTACHMENT_INFO,
                         .imageView = res.view,
                         .imageLayout = VK_IMAGE_LAYOUT_DEPTH_STENCIL_ATTACHMENT_OPTIMAL,
-                        .loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR,
+                        .loadOp = (depth_needs_clear || pass.force_depth_clear) ? VK_ATTACHMENT_LOAD_OP_CLEAR
+                                                                                : VK_ATTACHMENT_LOAD_OP_LOAD,
                         .storeOp = VK_ATTACHMENT_STORE_OP_STORE,
                         .clearValue = clear_depth,
                     };
                 }
 
+                VkRect2D render_area = {
+                    .offset = {0,            0            },
+                      .extent = {render_width, render_height}
+                };
+                if (pass.render_rect.extent.width > 0 && pass.render_rect.extent.height > 0)
+                {
+                    render_area = pass.render_rect;
+                }
+
                 VkRenderingInfo rendering_info = {
                     .sType = VK_STRUCTURE_TYPE_RENDERING_INFO,
-                    .renderArea = {.extent = {render_width, render_height}},
+                    .renderArea = render_area,
                     .layerCount = 1,
                     .colorAttachmentCount = static_cast<u32_t>(color_attachments.size()),
                     .pColorAttachments = color_attachments.empty() ? nullptr : color_attachments.data(),
@@ -322,19 +375,16 @@ namespace smol::renderer
                 vkCmdBeginRendering(cmd, &rendering_info);
 
                 VkViewport vp = {
-                    .x = 0.0f,
-                    .y = 0.0f,
-                    .width = static_cast<f32>(render_width),
-                    .height = static_cast<f32>(render_height),
+                    .x = static_cast<f32>(render_area.offset.x),
+                    .y = static_cast<f32>(render_area.offset.y),
+                    .width = static_cast<f32>(render_area.extent.width),
+                    .height = static_cast<f32>(render_area.extent.height),
                     .minDepth = 0.0f,
                     .maxDepth = 1.0f,
                 };
                 vkCmdSetViewport(cmd, 0, 1, &vp);
 
-                VkRect2D scissor = {
-                    .extent = {render_width, render_height}
-                };
-                vkCmdSetScissor(cmd, 0, 1, &scissor);
+                vkCmdSetScissor(cmd, 0, 1, &render_area);
 
                 if (pass.execute_callback) { pass.execute_callback(cmd, reg); }
 
@@ -369,6 +419,8 @@ namespace smol::renderer
     }
 
     VkImageLayout rendergraph_t::get_layout(rg_resource_id id) const { return resources[id].cur_layout; }
+
+    VkFormat rendergraph_t::get_format(rg_resource_id id) const { return resources[id].desc.format; }
 
     u32_t rendergraph_t::get_bindless_id(rg_resource_id id) const { return resources[id].bindless_id; }
 

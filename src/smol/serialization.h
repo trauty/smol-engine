@@ -21,6 +21,10 @@ namespace smol::serialization
 
     SMOL_ENGINE_API std::unordered_set<u32_t> reflected_component_pool_ids(smol::world_t& world);
 
+    // creates the pool of every registered component through code instantiated where each was registered
+    // called with only engine types registered, it keeps engine pools out of the game DLL, see ensure_storage
+    SMOL_ENGINE_API void create_registered_pools(smol::world_t& world);
+
     struct reload_snapshot_t
     {
         nlohmann::json entities = nlohmann::json::array();

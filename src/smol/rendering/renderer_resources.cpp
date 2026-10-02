@@ -257,13 +257,22 @@ namespace smol::renderer
         vkDestroySemaphore(ctx.device, res_system.timeline_semaphore, nullptr);
     }
 
-    void resource_system_t::process_deletions(u64_t cur_timeline_value)
+    void resource_system_t::process_deletions(u64_t render_completed, u64_t transfer_completed)
     {
         std::scoped_lock lock(deletion_mutex);
 
-        while (!deletion_queue.empty() && cur_timeline_value >= deletion_queue.front().gpu_timeline_value)
+        // two clocks, so the queue is not in order of readiness
+        // an upload waiting at the front must not hold back render entries behind it, nor the other way round
+        for (auto it = deletion_queue.begin(); it != deletion_queue.end();)
         {
-            deferred_delete_t& del = deletion_queue.front();
+            const u64_t completed = it->clock == deletion_clock_e::TRANSFER ? transfer_completed : render_completed;
+            if (completed < it->gpu_timeline_value)
+            {
+                it++;
+                continue;
+            }
+
+            deferred_delete_t& del = *it;
 
             switch (del.type)
             {
@@ -342,7 +351,7 @@ namespace smol::renderer
             }
             }
 
-            deletion_queue.pop_front();
+            it = deletion_queue.erase(it);
         }
     }
 } // namespace smol::renderer

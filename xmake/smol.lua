@@ -1,4 +1,4 @@
-local SMOL_ENGINE = path.absolute(path.join(os.scriptdir(), ".."))
+local SMOL_ENGINE = path.normalize(path.absolute(path.join(os.scriptdir(), "..")))
 
 set_config("smol_engine_dir", SMOL_ENGINE)
 

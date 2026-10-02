@@ -110,5 +110,9 @@ namespace smol::jobs
 
     SMOL_ENGINE_API void wait(counter_t* counter);
 
+    // waits until no job is queued or running, helping meanwhile, for at most `timeout_ms`, false if work remained
+    // unloading a game library waits on this, as its jobs run its code
+    SMOL_ENGINE_API bool wait_idle(u32_t timeout_ms);
+
     SMOL_ENGINE_API u32_t get_worker_count();
 } // namespace smol::jobs
