@@ -9,6 +9,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 
@@ -52,6 +53,8 @@ namespace tau
 
     struct TAU_ENGINE_API shader_t
     {
+        static constexpr std::string_view type_key = "shader";
+
         flat_map_t<VkPipeline> pipelines;
         VkPipelineLayout pipeline_layout = VK_NULL_HANDLE;
 

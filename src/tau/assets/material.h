@@ -11,6 +11,7 @@
 
 #include <climits>
 #include <cstring>
+#include <string_view>
 #include <vector>
 
 namespace tau
@@ -19,6 +20,8 @@ namespace tau
 
     struct TAU_ENGINE_API material_t
     {
+        static constexpr std::string_view type_key = "material";
+
         asset_handle_t shader_handle;
         std::vector<u8> data;
 

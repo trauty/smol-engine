@@ -11,7 +11,8 @@ namespace tau
     // one description per kind of asset, read by the cooker, loader registration and the editor's picker
     struct asset_type_t
     {
-        // stable name for tools that cannot see the engine's C++ asset types
+        // the type's type_key: names it in scene files and for tools that cannot see the engine's C++ asset types
+        // type_id is its hash
         std::string_view key;
 
         u64_t type_id = 0;

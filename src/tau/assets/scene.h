@@ -6,6 +6,7 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 #include <vector>
 
 namespace tau
@@ -44,6 +45,8 @@ namespace tau
 
     struct scene_t
     {
+        static constexpr std::string_view type_key = "scene";
+
         std::vector<scene_entity_t> entities;
     };
 

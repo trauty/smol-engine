@@ -5,6 +5,7 @@
 #include "tau/asset.h"
 #include "tau/asset_meta.h"
 #include "tau/asset_serde.h"
+#include "tau/asset_table.h"
 #include "tau/assets/scene_format.h"
 #include "tau/ecs_fwd.h"
 #include "tau/engine.h"
@@ -43,6 +44,25 @@ namespace tau::serialization
 
         std::string describe_key(const std::string& name, u32_t hash)
         { return name.empty() ? std::to_string(hash) : name; }
+
+        // a scene names an asset type by its key, as it names components and fields, the type id is only its hash
+        std::string asset_type_key(u64_t type_id)
+        {
+            const asset_type_t* type = tau::asset_table::by_type_id(type_id);
+            return type != nullptr ? std::string(type->key) : std::string{};
+        }
+
+        u64_t asset_type_id(const nlohmann::json& value, const std::string& prop_key)
+        {
+            const nlohmann::json key = value.value("t", nlohmann::json{});
+            const asset_type_t* type = key.is_string() ? tau::asset_table::by_key(key.get<std::string>()) : nullptr;
+            if (type == nullptr)
+            {
+                TAU_LOG_WARN("SCENE", "Property '{}' names no known asset type ({})", prop_key, key.dump());
+                return 0;
+            }
+            return type->type_id;
+        }
 
         template <typename T>
         void write_pod(std::ofstream& out, const T& v)
@@ -93,10 +113,11 @@ namespace tau::serialization
                         });
                     }
 
-                    comp_json[prop_key] = tagged(scene_value_type_e::ASSET_REF_LIST,
-                                                 {
-                                                     {"t", prop->asset_type_hash},
-                                                     {"e", std::move(entries)   }
+                    const std::string asset_type = asset_type_key(prop->asset_type_hash);
+                    comp_json[prop_key] =
+                        tagged(scene_value_type_e::ASSET_REF_LIST, {
+                                                                       {"t", asset_type        },
+                                                                       {"e", std::move(entries)}
                     });
                     continue;
                 }
@@ -106,12 +127,13 @@ namespace tau::serialization
                     asset_handle_t handle = field_value.cast<asset_handle_t>();
                     std::string path = tau::engine::get_asset_registry().get_path(handle);
                     std::string_view guid = tau::asset_meta::get_guid(path);
-                    comp_json[prop_key] = tagged(
-                        scene_value_type_e::ASSET_REF,
-                        {
-                            {"t", prop->asset_type_hash                },
-                            {"g", guid.empty() ? "" : std::string(guid)},
-                            {"p", path                                 }
+                    const std::string asset_type = asset_type_key(prop->asset_type_hash);
+                    comp_json[prop_key] =
+                        tagged(scene_value_type_e::ASSET_REF,
+                               {
+                                   {"t", asset_type                           },
+                                   {"g", guid.empty() ? "" : std::string(guid)},
+                                   {"p", path                                 }
                     });
                     continue;
                 }
@@ -237,13 +259,13 @@ namespace tau::serialization
                             prop.vec = vec3_t(v[0].get<f32>(), v[1].get<f32>(), v[2].get<f32>());
                             break;
                         case scene_value_type_e::ASSET_REF:
-                            prop.asset_type = v.value("t", u64_t{0});
+                            prop.asset_type = asset_type_id(v, prop_key);
                             prop.str = v.value("p", std::string{});
                             prop.guid = v.value("g", std::string{});
                             break;
                         case scene_value_type_e::ASSET_REF_LIST:
                         {
-                            prop.asset_type = v.value("t", u64_t{0});
+                            prop.asset_type = asset_type_id(v, prop_key);
                             const nlohmann::json entries = v.value("e", nlohmann::json::array());
                             for (const nlohmann::json& entry : entries)
                             {

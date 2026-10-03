@@ -19,11 +19,11 @@ namespace tau::asset_table
     {
         // the one place the engine's asset types are described. everything else asks.
         static const std::vector<asset_type_t> table = {
-            {"mesh", get_type_id<mesh_t>(), "Mesh", ".taumesh", {".gltf", ".glb"}},
-            {"material", get_type_id<material_t>(), "Material", ".taumat", {".mat"}, true},
-            {"texture", get_type_id<texture_t>(), "Texture", ".ktx2", {".png", ".jpg", ".jpeg"}},
-            {"shader", get_type_id<shader_t>(), "Shader", ".taushader", {".slang"}},
-            {"scene", get_type_id<scene_t>(), "Scene", ".tauscene", {".scene"}, true},
+            {mesh_t::type_key, get_type_id<mesh_t>(), "Mesh", ".taumesh", {".gltf", ".glb"}},
+            {material_t::type_key, get_type_id<material_t>(), "Material", ".taumat", {".mat"}, true},
+            {texture_t::type_key, get_type_id<texture_t>(), "Texture", ".ktx2", {".png", ".jpg", ".jpeg"}},
+            {shader_t::type_key, get_type_id<shader_t>(), "Shader", ".taushader", {".slang"}},
+            {scene_t::type_key, get_type_id<scene_t>(), "Scene", ".tauscene", {".scene"}, true},
         };
         return table;
     }

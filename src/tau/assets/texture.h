@@ -7,6 +7,7 @@
 #include <memory>
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace tau
 {
@@ -18,6 +19,8 @@ namespace tau
 
     struct TAU_ENGINE_API texture_t
     {
+        static constexpr std::string_view type_key = "texture";
+
         i32 width = 0;
         i32 height = 0;
         texture_format_e type = texture_format_e::SRGB;

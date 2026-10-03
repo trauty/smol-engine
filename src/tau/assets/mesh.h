@@ -7,6 +7,7 @@
 
 #include <optional>
 #include <string>
+#include <string_view>
 
 namespace tau
 {
@@ -19,6 +20,8 @@ namespace tau
 
     struct TAU_ENGINE_API mesh_t
     {
+        static constexpr std::string_view type_key = "mesh";
+
         u32_t vertex_count = 0;
         u32_t index_count = 0;
 
