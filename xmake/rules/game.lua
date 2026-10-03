@@ -24,8 +24,15 @@ on_load(function(target)
 
         target:set("kind", "binary")
 
+        -- smol-engine-static is built with lto, so its archive holds bitcode, not machine code
+        -- the final link must run lto too, else a non-lto linker (GNU ld) cannot read it
+        target:set("policy", "build.optimization.lto", true)
+
         if proj and proj.startup_scene and proj.startup_scene ~= "" then
             target:add("defines", "SMOL_STARTUP_SCENE=\"" .. proj.startup_scene .. "\"")
+        end
+        if proj and proj.project_name and proj.project_name ~= "" then
+            target:add("defines", "SMOL_GAME_NAME=\"" .. proj.project_name .. "\"")
         end
 
         local bindir = path.join(os.projectdir(), "bin")

@@ -217,7 +217,8 @@ int main(i32 argc, char** argv)
     std::filesystem::create_directories(output_dir + "/shaders");
 
     std::string vfs_prefix = name_space + "://assets/";
-    nlohmann::json guid_map_data;
+    // an object even when empty: a run naming only include files places no source, and "null" is no guid map
+    nlohmann::json guid_map_data = nlohmann::json::object();
     bool any_failed = false;
     std::unordered_set<std::string> expected_outputs;
 

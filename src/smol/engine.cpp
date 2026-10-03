@@ -64,9 +64,10 @@ namespace smol::engine
 
     bool init(const std::string& name, i32 init_window_width, i32 init_window_height)
     {
+        // before vfs::init, which names the per game user:// folder after it
+        game_name = name;
         smol::vfs::init();
 
-        game_name = name;
         smol::log::init();
         smol::log::set_level(smol::log::level_e::LOG_DEBUG);
 

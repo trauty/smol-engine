@@ -251,6 +251,7 @@ namespace smol::os
     #include <csignal>
     #include <cstdint>
     #include <dlfcn.h>
+    #include <fcntl.h>
     #include <link.h>
     #include <sys/wait.h>
     #include <unistd.h>
@@ -293,8 +294,11 @@ namespace smol::os
         process_result_t result;
         line_feed_t lines{on_line};
 
+        // close-on-exec, else a child forked meanwhile by another thread inherits the write end
+        // and read() below sees no EOF until that unrelated child and everything it started exit
+        // dup2 clears the flag on the child's stdout/stderr, so its own output still arrives
         int pipe_fds[2] = {-1, -1};
-        if (pipe(pipe_fds) != 0) { return result; }
+        if (pipe2(pipe_fds, O_CLOEXEC) != 0) { return result; }
 
         const pid_t pid = fork();
         if (pid < 0)

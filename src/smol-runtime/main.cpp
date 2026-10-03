@@ -14,6 +14,7 @@
 #include <filesystem>
 
 #ifdef SMOL_STATIC_LINK
+extern "C" void smol_game_register_types(smol::world_t* world);
 extern "C" void smol_game_init(smol::world_t* world);
 extern "C" void smol_game_update(smol::world_t* world);
 extern "C" void smol_game_shutdown(smol::world_t* world);
@@ -25,6 +26,7 @@ extern "C" void smol_game_shutdown(smol::world_t* world);
         #include <dlfcn.h>
     #endif
 
+game_register_types_func game_register_types = nullptr;
 game_init_func game_init = nullptr;
 game_update_func game_update = nullptr;
 game_shutdown_func game_shutdown = nullptr;
@@ -44,7 +46,13 @@ int main(int argc, char* argv[])
     }
 #endif
 
-    const char* window_name = have_project ? project.project_name.c_str() : "smol";
+    // a standalone game has no project file, its name is baked in instead: it names the window and user:// folder
+#ifdef SMOL_GAME_NAME
+    const char* fallback_name = SMOL_GAME_NAME;
+#else
+    const char* fallback_name = "smol";
+#endif
+    const char* window_name = have_project ? project.project_name.c_str() : fallback_name;
     if (!smol::engine::init(window_name, 1280, 720)) { return -1; }
 
     // engine::init() already mounted the cooked tree beside the binary and loaded its guid map
@@ -61,7 +69,9 @@ int main(int argc, char* argv[])
     smol::engine::create_scene();
     smol::world_t& cur_world = smol::engine::get_active_world();
 
+    // game types before the scene loads, else its components are unknown and dropped
 #ifdef SMOL_STATIC_LINK
+    smol_game_register_types(&cur_world);
     smol_game_init(&cur_world);
     smol::game::run_on_load(cur_world);
 #else
@@ -81,16 +91,19 @@ int main(int argc, char* argv[])
             return -1;
         }
 
+        game_register_types =
+            (game_register_types_func)smol::os::get_proc_address(game_lib, "smol_game_register_types_internal");
         game_init = (game_init_func)smol::os::get_proc_address(game_lib, "smol_game_init_internal");
         game_update = (game_update_func)smol::os::get_proc_address(game_lib, "smol_game_update_internal");
         game_shutdown = (game_shutdown_func)smol::os::get_proc_address(game_lib, "smol_game_shutdown_internal");
 
-        if (!game_init || !game_update || !game_shutdown)
+        if (!game_register_types || !game_init || !game_update || !game_shutdown)
         {
             SMOL_LOG_FATAL("ENGINE", "Could not find one or more game logic functions inside game lib");
             return -1;
         }
 
+        game_register_types(&cur_world);
         game_init(&cur_world);
         smol::game::run_on_load(cur_world);
     }

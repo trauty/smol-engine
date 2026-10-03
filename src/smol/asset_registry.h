@@ -14,6 +14,7 @@
 #include <concepts>
 #include <cstddef>
 #include <cstring>
+#include <memory>
 #include <optional>
 #include <utility>
 #ifdef SMOL_ENABLE_PROFILING
