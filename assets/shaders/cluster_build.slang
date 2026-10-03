@@ -1,4 +1,4 @@
-import smol_globals;
+import tau_globals;
 
 [[vk::binding(0, 2)]]
 RWStructuredBuffer<uint> cluster_light_counts;

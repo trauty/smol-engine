@@ -4,7 +4,7 @@ build/
 .vscode/
 .xmake/
 compile_commands.json
-.smol/
+.tau/
 bin/
 imgui.ini
 debug.keystore

@@ -1,0 +1,84 @@
+---- session started 2026-10-02 22:06:58 ----
+[2026-10-02 22:06:58] [INFO] [SHADER_COOKER] Slang 2026.19
+[2026-10-02 22:06:58] [INFO] [ASSET_COOKER] Cooking assets...
+[2026-10-02 22:06:58] [INFO] [ASSET_COOKER] Scanning for assets: /home/trauty/Desktop/smol-engine/samples/sandbox/assets
+[2026-10-02 22:06:58] [INFO] [SCENE_COOKER] Cooking scene: /home/trauty/Desktop/smol-engine/samples/sandbox/assets/scenes/sandbox.scene -> /home/trauty/Desktop/smol-engine/samples/sandbox/.smol/game/scenes/sandbox.smolscene
+[2026-10-02 22:06:58] [INFO] [MESH_COOKER] Cooking Mesh: /home/trauty/Desktop/smol-engine/samples/sandbox/assets/models/ground.glb -> /home/trauty/Desktop/smol-engine/samples/sandbox/.smol/game/models/ground.smolmesh
+[2026-10-02 22:06:58] [INFO] [MESH_COOKER] Cooking Mesh: /home/trauty/Desktop/smol-engine/samples/sandbox/assets/models/sphere.glb -> /home/trauty/Desktop/smol-engine/samples/sandbox/.smol/game/models/sphere.smolmesh
+[2026-10-02 22:06:58] [INFO] [MATERIAL_COOKER] Cooking material: /home/trauty/Desktop/smol-engine/samples/sandbox/assets/materials/ground.mat -> /home/trauty/Desktop/smol-engine/samples/sandbox/.smol/game/materials/ground.smolmat
+[2026-10-02 22:06:58] [INFO] [MATERIAL_COOKER] Cooking material: /home/trauty/Desktop/smol-engine/samples/sandbox/assets/materials/sphere.mat -> /home/trauty/Desktop/smol-engine/samples/sandbox/.smol/game/materials/sphere.smolmat
+[2026-10-02 22:06:58] [INFO] [ASSET_META] Wrote guid map: /home/trauty/Desktop/smol-engine/samples/sandbox/.smol/guid_map.json (26 entries, 2264 bytes)
+[2026-10-02 22:06:58] [INFO] [ASSET_COOKER] Cooking finished
+---- session started 2026-10-02 22:07:18 ----
+[2026-10-02 22:07:18] [INFO] [SHADER_COOKER] Slang 2026.19
+[2026-10-02 22:07:18] [INFO] [ASSET_COOKER] Cooking assets...
+[2026-10-02 22:07:18] [INFO] [ASSET_COOKER] Scanning for assets: /home/trauty/Desktop/smol-engine/samples/sandbox/assets
+[2026-10-02 22:07:18] [INFO] [ASSET_META] Wrote guid map: /home/trauty/Desktop/smol-engine/samples/sandbox/.smol/guid_map.json (26 entries, 2264 bytes)
+[2026-10-02 22:07:18] [INFO] [ASSET_COOKER] Cooking finished
+---- session started 2026-10-02 22:08:31 ----
+[2026-10-02 22:08:31] [INFO] [SHADER_COOKER] Slang 2026.19
+[2026-10-02 22:08:31] [INFO] [ASSET_COOKER] Cooking assets...
+[2026-10-02 22:08:31] [INFO] [ASSET_COOKER] Scanning for assets: /home/trauty/Desktop/smol-engine/samples/sandbox/assets
+[2026-10-02 22:08:31] [INFO] [ASSET_META] Wrote guid map: /home/trauty/Desktop/smol-engine/samples/sandbox/.smol/guid_map.json (26 entries, 2264 bytes)
+[2026-10-02 22:08:31] [INFO] [ASSET_COOKER] Cooking finished
+---- session started 2026-10-02 22:08:36 ----
+[2026-10-02 22:08:36] [INFO] [SHADER_COOKER] Slang 2026.19
+[2026-10-02 22:08:36] [INFO] [ASSET_COOKER] Cooking 1 named asset(s), first: materials/sphere.mat
+[2026-10-02 22:08:36] [INFO] [ASSET_COOKER] Cooking finished
+---- session started 2026-10-02 22:08:39 ----
+[2026-10-02 22:08:40] [INFO] [SHADER_COOKER] Slang 2026.19
+[2026-10-02 22:08:40] [ERROR] [ASSET_META] Failed to parse guid map data
+[2026-10-02 22:08:40] [INFO] [ASSET_COOKER] Cooking finished
+---- session started 2026-10-02 22:13:52 ----
+[2026-10-02 22:13:52] [INFO] [SHADER_COOKER] Slang 2026.19
+[2026-10-02 22:13:52] [INFO] [ASSET_COOKER] Cooking finished
+---- session started 2026-10-02 22:15:42 ----
+[2026-10-02 22:15:43] [INFO] [SHADER_COOKER] Slang 2026.19
+[2026-10-02 22:15:43] [INFO] [ASSET_COOKER] Cooking assets...
+[2026-10-02 22:15:43] [INFO] [ASSET_COOKER] Scanning for assets: /home/trauty/Desktop/smol-engine/samples/sandbox/assets
+[2026-10-02 22:15:43] [INFO] [SCENE_COOKER] Cooking scene: /home/trauty/Desktop/smol-engine/samples/sandbox/assets/scenes/sandbox.scene -> /home/trauty/Desktop/smol-engine/samples/sandbox/.smol/game/scenes/sandbox.smolscene
+[2026-10-02 22:15:43] [INFO] [MESH_COOKER] Cooking Mesh: /home/trauty/Desktop/smol-engine/samples/sandbox/assets/models/ground.glb -> /home/trauty/Desktop/smol-engine/samples/sandbox/.smol/game/models/ground.smolmesh
+[2026-10-02 22:15:43] [INFO] [MESH_COOKER] Cooking Mesh: /home/trauty/Desktop/smol-engine/samples/sandbox/assets/models/sphere.glb -> /home/trauty/Desktop/smol-engine/samples/sandbox/.smol/game/models/sphere.smolmesh
+[2026-10-02 22:15:43] [INFO] [MATERIAL_COOKER] Cooking material: /home/trauty/Desktop/smol-engine/samples/sandbox/assets/materials/ground.mat -> /home/trauty/Desktop/smol-engine/samples/sandbox/.smol/game/materials/ground.smolmat
+[2026-10-02 22:15:43] [INFO] [MATERIAL_COOKER] Cooking material: /home/trauty/Desktop/smol-engine/samples/sandbox/assets/materials/sphere.mat -> /home/trauty/Desktop/smol-engine/samples/sandbox/.smol/game/materials/sphere.smolmat
+[2026-10-02 22:15:43] [INFO] [ASSET_META] Wrote guid map: /home/trauty/Desktop/smol-engine/samples/sandbox/.smol/guid_map.json (26 entries, 2264 bytes)
+[2026-10-02 22:15:43] [INFO] [ASSET_COOKER] Cooking finished
+---- session started 2026-10-02 22:17:19 ----
+[2026-10-02 22:17:20] [INFO] [SHADER_COOKER] Slang 2026.19
+[2026-10-02 22:17:20] [INFO] [ASSET_COOKER] Cooking assets...
+[2026-10-02 22:17:20] [INFO] [ASSET_COOKER] Scanning for assets: /home/trauty/Desktop/smol-engine/samples/sandbox/assets
+[2026-10-02 22:17:20] [INFO] [SCENE_COOKER] Cooking scene: /home/trauty/Desktop/smol-engine/samples/sandbox/assets/scenes/sandbox.scene -> /home/trauty/Desktop/smol-engine/samples/sandbox/.smol/game/scenes/sandbox.smolscene
+[2026-10-02 22:17:20] [INFO] [MESH_COOKER] Cooking Mesh: /home/trauty/Desktop/smol-engine/samples/sandbox/assets/models/ground.glb -> /home/trauty/Desktop/smol-engine/samples/sandbox/.smol/game/models/ground.smolmesh
+[2026-10-02 22:17:20] [INFO] [MESH_COOKER] Cooking Mesh: /home/trauty/Desktop/smol-engine/samples/sandbox/assets/models/sphere.glb -> /home/trauty/Desktop/smol-engine/samples/sandbox/.smol/game/models/sphere.smolmesh
+[2026-10-02 22:17:20] [INFO] [MATERIAL_COOKER] Cooking material: /home/trauty/Desktop/smol-engine/samples/sandbox/assets/materials/ground.mat -> /home/trauty/Desktop/smol-engine/samples/sandbox/.smol/game/materials/ground.smolmat
+[2026-10-02 22:17:20] [INFO] [MATERIAL_COOKER] Cooking material: /home/trauty/Desktop/smol-engine/samples/sandbox/assets/materials/sphere.mat -> /home/trauty/Desktop/smol-engine/samples/sandbox/.smol/game/materials/sphere.smolmat
+[2026-10-02 22:17:20] [INFO] [ASSET_META] Wrote guid map: /home/trauty/Desktop/smol-engine/samples/sandbox/.smol/guid_map.json (26 entries, 2264 bytes)
+[2026-10-02 22:17:20] [INFO] [ASSET_COOKER] Cooking finished
+---- session started 2026-10-02 22:17:20 ----
+[2026-10-02 22:17:20] [INFO] [SHADER_COOKER] Slang 2026.19
+[2026-10-02 22:17:20] [INFO] [ASSET_COOKER] Cooking assets...
+[2026-10-02 22:17:20] [INFO] [ASSET_COOKER] Scanning for assets: /home/trauty/Desktop/smol-engine/samples/sandbox/assets
+[2026-10-02 22:17:20] [INFO] [ASSET_META] Wrote guid map: /home/trauty/Desktop/smol-engine/samples/sandbox/.smol/guid_map.json (26 entries, 2264 bytes)
+[2026-10-02 22:17:20] [INFO] [ASSET_COOKER] Cooking finished
+---- session started 2026-10-02 22:55:00 ----
+[2026-10-02 22:55:00] [INFO] [SHADER_COOKER] Slang 2026.19
+[2026-10-02 22:55:00] [INFO] [ASSET_COOKER] Cooking assets...
+[2026-10-02 22:55:00] [INFO] [ASSET_COOKER] Scanning for assets: /home/trauty/Desktop/smol-engine/samples/sandbox/assets
+[2026-10-02 22:55:00] [INFO] [SCENE_COOKER] Cooking scene: /home/trauty/Desktop/smol-engine/samples/sandbox/assets/scenes/sandbox.scene -> /home/trauty/Desktop/smol-engine/samples/sandbox/.smol/game/scenes/sandbox.smolscene
+[2026-10-02 22:55:00] [INFO] [MESH_COOKER] Cooking Mesh: /home/trauty/Desktop/smol-engine/samples/sandbox/assets/models/ground.glb -> /home/trauty/Desktop/smol-engine/samples/sandbox/.smol/game/models/ground.smolmesh
+[2026-10-02 22:55:00] [INFO] [MESH_COOKER] Cooking Mesh: /home/trauty/Desktop/smol-engine/samples/sandbox/assets/models/sphere.glb -> /home/trauty/Desktop/smol-engine/samples/sandbox/.smol/game/models/sphere.smolmesh
+[2026-10-02 22:55:00] [INFO] [MATERIAL_COOKER] Cooking material: /home/trauty/Desktop/smol-engine/samples/sandbox/assets/materials/ground.mat -> /home/trauty/Desktop/smol-engine/samples/sandbox/.smol/game/materials/ground.smolmat
+[2026-10-02 22:55:00] [INFO] [MATERIAL_COOKER] Cooking material: /home/trauty/Desktop/smol-engine/samples/sandbox/assets/materials/sphere.mat -> /home/trauty/Desktop/smol-engine/samples/sandbox/.smol/game/materials/sphere.smolmat
+[2026-10-02 22:55:00] [INFO] [ASSET_META] Wrote guid map: /home/trauty/Desktop/smol-engine/samples/sandbox/.smol/guid_map.json (26 entries, 2264 bytes)
+[2026-10-02 22:55:00] [INFO] [ASSET_COOKER] Cooking finished
+---- session started 2026-10-02 22:55:09 ----
+[2026-10-02 22:55:09] [INFO] [SHADER_COOKER] Slang 2026.19
+[2026-10-02 22:55:09] [INFO] [ASSET_COOKER] Cooking assets...
+[2026-10-02 22:55:09] [INFO] [ASSET_COOKER] Scanning for assets: /home/trauty/Desktop/smol-engine/samples/sandbox/assets
+[2026-10-02 22:55:09] [INFO] [SCENE_COOKER] Cooking scene: /home/trauty/Desktop/smol-engine/samples/sandbox/assets/scenes/sandbox.scene -> /home/trauty/Desktop/smol-engine/samples/sandbox/.smol/game/scenes/sandbox.smolscene
+[2026-10-02 22:55:09] [INFO] [MESH_COOKER] Cooking Mesh: /home/trauty/Desktop/smol-engine/samples/sandbox/assets/models/ground.glb -> /home/trauty/Desktop/smol-engine/samples/sandbox/.smol/game/models/ground.smolmesh
+[2026-10-02 22:55:09] [INFO] [MESH_COOKER] Cooking Mesh: /home/trauty/Desktop/smol-engine/samples/sandbox/assets/models/sphere.glb -> /home/trauty/Desktop/smol-engine/samples/sandbox/.smol/game/models/sphere.smolmesh
+[2026-10-02 22:55:09] [INFO] [MATERIAL_COOKER] Cooking material: /home/trauty/Desktop/smol-engine/samples/sandbox/assets/materials/ground.mat -> /home/trauty/Desktop/smol-engine/samples/sandbox/.smol/game/materials/ground.smolmat
+[2026-10-02 22:55:09] [INFO] [MATERIAL_COOKER] Cooking material: /home/trauty/Desktop/smol-engine/samples/sandbox/assets/materials/sphere.mat -> /home/trauty/Desktop/smol-engine/samples/sandbox/.smol/game/materials/sphere.smolmat
+[2026-10-02 22:55:09] [INFO] [ASSET_META] Wrote guid map: /home/trauty/Desktop/smol-engine/samples/sandbox/.smol/guid_map.json (26 entries, 2264 bytes)
+[2026-10-02 22:55:09] [INFO] [ASSET_COOKER] Cooking finished

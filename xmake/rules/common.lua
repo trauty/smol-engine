@@ -2,11 +2,11 @@ local engine_dir = path.absolute(path.join(os.scriptdir(), "..", ".."))
 
 local engine_version_checked = false
 
-rule("smol.common")
+rule("tau.common")
 add_deps("mode.debug", "mode.release", "mode.releasedbg")
 
 on_load(function(target)
-    local extra = target:extraconf("rules", "smol.common") or {}
+    local extra = target:extraconf("rules", "tau.common") or {}
 
     import("core.project.config")
 
@@ -15,12 +15,12 @@ on_load(function(target)
 
         import("core.base.semver")
         import("core.project.config")
-        import("smol_project")
+        import("tau_project")
 
-        local provider = config.get("smol_engine_dir")
+        local provider = config.get("tau_engine_dir")
         local version_file
         for _, cand in ipairs({
-            provider and path.join(provider, "share", "smol", "VERSION"),
+            provider and path.join(provider, "share", "tau", "VERSION"),
             provider and path.join(provider, "VERSION"),
             path.join(engine_dir, "VERSION")
         }) do
@@ -29,14 +29,14 @@ on_load(function(target)
             end
         end
 
-        local proj = smol_project.load(os.projectdir())
+        local proj = tau_project.load(os.projectdir())
         if proj and proj.engine_version and version_file then
             local engine_version = io.readfile(version_file):trim()
             if semver.compare(engine_version, proj.engine_version) < 0 then
-                raise("This project needs smol-engine >= " .. proj.engine_version ..
+                raise("This project needs tau-engine >= " .. proj.engine_version ..
                     ", but the resolved engine is " .. engine_version .. ".\n" ..
-                    "Point it at a newer engine: update the smol-engine submodule,\n" ..
-                    "vendor it beside the project, or install smol-engine " .. proj.engine_version .. "+.")
+                    "Point it at a newer engine: update the tau-engine submodule,\n" ..
+                    "vendor it beside the project, or install tau-engine " .. proj.engine_version .. "+.")
             end
         end
     end

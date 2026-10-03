@@ -1,4 +1,4 @@
-# smol-engine
+# tau-engine
 
 ## Libs
 
@@ -30,21 +30,21 @@ Build modes (`-m`): `debug` (default), `release`, `releasedbg`.
 **Toolchain** (`--toolchain`): Linux defaults to `clang` (also `gcc`). Windows
 defaults to `clang-cl` (also `msvc`). Pick one with `xmake f --toolchain=gcc`
 / `xmake f --toolchain=msvc`. To get MSVC without installing Visual Studio, run
-`xmake smol-msvc-setup` first (still working on this, so won't work now)
+`xmake tau-msvc-setup` first (still working on this, so won't work now)
 
 ### Engine
 
 ```bash
 xmake f -m debug          # configure
 xmake                     # engine + cooker + editor + runtime; engine assets cook automatically
-xmake run smol-editor     # launch the editor
+xmake run tau-editor      # launch the editor
 ```
 
 The static engine is only needed for standalone game builds, so it is skipped by
 a normal build:
 
 ```bash
-xmake build smol-engine-static
+xmake build tau-engine-static
 ```
 
 Tracy profiling is off by default:
@@ -58,21 +58,21 @@ xmake
 
 A game locates the engine while xmake reads the project, in this order:
 
-1. `SMOL_ENGINE_DIR`
-2. `./smol-engine` (vendored or submodule)
-3. `../smol-engine` (sibling checkout)
-4. newest install under `~/.smol/engines/`
+1. `TAU_ENGINE_DIR`
+2. `./tau-engine` (vendored or submodule)
+3. `../tau-engine` (sibling checkout)
+4. newest install under `~/.tau/engines/`
 
 **Bash:**
 ```bash
-export SMOL_ENGINE_DIR=/path/to/smol-engine
+export TAU_ENGINE_DIR=/path/to/tau-engine
 xmake f -m debug
-xmake                     # -> bin/<game>.so; game assets cook to .smol/game
+xmake                     # -> bin/<game>.so; game assets cook to .tau/game
 ```
 
 **Powershell:**
 ```powershell
-$env:SMOL_ENGINE_DIR = "C:\path\to\smol-engine"
+$env:TAU_ENGINE_DIR = "C:\path\to\tau-engine"
 xmake f -m debug
 xmake                     # -> bin\<game>.dll
 ```
@@ -83,19 +83,19 @@ is the whole edit loop.
 
 A hot reload unloads the old library, so two things matter in game code:
 
-* **Components need `SMOL_REFLECT`** to keep their data across a reload. A
+* **Components need `TAU_REFLECT`** to keep their data across a reload. A
   component without it cannot be carried over; the editor then keeps the old
   library loaded and says which component held it.
-* **Register callbacks in `SMOL_ON_LOAD()`, not in `smol_game_init`.** Input
+* **Register callbacks in `TAU_ON_LOAD()`, not in `tau_game_init`.** Input
   actions and render features point at your code, so the engine drops them when
-  the old library goes. `SMOL_ON_LOAD()` runs after every load, the first and
-  every reload, and registers the new code's; `smol_game_init` runs once.
+  the old library goes. `TAU_ON_LOAD()` runs after every load, the first and
+  every reload, and registers the new code's; `tau_game_init` runs once.
 
 ```cpp
-SMOL_ON_LOAD()
+TAU_ON_LOAD()
 {
-    smol::input::bind_button("jump", smol::input::key_e::Space);
-    smol::input::on_action("jump", smol::input::input_state_t::PRESSED, [](const auto&) { /* ... */ });
+    tau::input::bind_button("jump", tau::input::key_e::Space);
+    tau::input::on_action("jump", tau::input::input_state_t::PRESSED, [](const auto&) { /* ... */ });
 }
 ```
 
@@ -106,7 +106,7 @@ binary. Build the static engine once, then build the game with `--standalone=y`:
 
 ```bash
 # in the engine repo
-xmake f -m release && xmake build smol-engine-static
+xmake f -m release && xmake build tau-engine-static
 
 # in the game project
 xmake f --standalone=y -m release
@@ -121,7 +121,7 @@ not accepted in the engine repo.
 Assets cook as part of a normal build.
 
 The engine cooks its own assets into `build/<plat>/<arch>/<mode>/assets/engine`.
-A game project then keeps one cooked root of its own, `<project>/.smol/`, holding
+A game project then keeps one cooked root of its own, `<project>/.tau/`, holding
 `engine/` (copied in from the engine build), `game/` (cooked from the project's
 `assets/`), and a single `guid_map.json` covering both. The editor, the runtime
 and a packaged build all read that one root.
@@ -134,7 +134,7 @@ from inside a library shared by every game, and generic names like
 To force just the engine cook step:
 
 ```bash
-xmake build smol-assets   # engine repo
+xmake build tau-assets    # engine repo
 ```
 
 ### Sample project
@@ -143,7 +143,7 @@ xmake build smol-assets   # engine repo
 ground plane, and one game component (`bob_t`) that moves it in Play mode. Open it with:
 
 ```bash
-smol-editor samples/sandbox/sandbox.smolproject
+tau-editor samples/sandbox/sandbox.tauproject
 ```
 
 The editor builds it on first open. To build it by hand, run from `samples/sandbox/` and pass
@@ -164,7 +164,7 @@ Bundle the self-contained standalone binary with its cooked assets into
 ```bash
 xmake f --standalone=y -m release   # static build
 xmake                               # builds + cooks
-xmake smol-package                  # -> dist/<project>/{<game>, assets/}
+xmake tau-package                   # -> dist/<project>/{<game>, assets/}
 ```
 
 ### Install the SDK (engine + editor + cooker)
@@ -175,11 +175,11 @@ it consumes a checkout.
 **Bash:**
 ```bash
 xmake f -m release
-xmake install -o ~/.smol/engines/$(cat VERSION)
+xmake install -o ~/.tau/engines/$(cat VERSION)
 ```
 
 **Powershell:**
 ```powershell
 xmake f -m release
-xmake install -o "$env:USERPROFILE\.smol\engines\$(Get-Content VERSION)"
+xmake install -o "$env:USERPROFILE\.tau\engines\$(Get-Content VERSION)"
 ```

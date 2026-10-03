@@ -1,6 +1,6 @@
-import smol_surface;
+import tau_surface;
 
-#include "smol/rendering/shader_shared.h"
+#include "tau/rendering/shader_shared.h"
 
 [ShaderConfig("PostProcess", "Opaque", false, false, false)]
 struct DeferredLightingShader
@@ -28,9 +28,9 @@ struct FullscreenVertexOut
     float2 uv : TEXCOORD0;
 };
 
-#define SMOL_DEBUG_VIEW_CONST(name, value, label) static const uint DEBUG_##name = value;
-SMOL_DEBUG_VIEW_LIST(SMOL_DEBUG_VIEW_CONST)
-#undef SMOL_DEBUG_VIEW_CONST
+#define TAU_DEBUG_VIEW_CONST(name, value, label) static const uint DEBUG_##name = value;
+TAU_DEBUG_VIEW_LIST(TAU_DEBUG_VIEW_CONST)
+#undef TAU_DEBUG_VIEW_CONST
 
 float3 worldFromDepth(float2 uv, float depth)
 {

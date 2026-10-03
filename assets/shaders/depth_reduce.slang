@@ -1,4 +1,4 @@
-import smol_globals;
+import tau_globals;
 
 // sdsm depth reduction: the min and max depth over every pixel the camera actually drew this frame
 // [0] = min encoded depth, [1] = max encoded depth. both hold the raw bit pattern of the depth

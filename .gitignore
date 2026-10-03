@@ -12,11 +12,11 @@ _deps
 CMakeUserPresets.json
 build/
 bin/
-.smol/
+.tau/
 imgui.ini
 .pkgcache/
 **/.DS_Store
-include/smol-engine/
+include/tau-engine/
 .xmake/
 .toolchains/
 

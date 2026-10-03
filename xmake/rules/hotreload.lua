@@ -1,4 +1,4 @@
-rule("smol.hotreload")
+rule("tau.hotreload")
 after_build(function(target)
     import("core.project.depend")
 
@@ -7,6 +7,6 @@ after_build(function(target)
 
     depend.on_changed(function()
         io.writefile(trigger, os.date("%Y-%m-%d %H:%M:%S"))
-    end, { files = { targetfile }, dependfile = target:dependfile("smol.hotreload") })
+    end, { files = { targetfile }, dependfile = target:dependfile("tau.hotreload") })
 end)
 rule_end()

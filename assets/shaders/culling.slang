@@ -1,4 +1,4 @@
-import smol_globals;
+import tau_globals;
 
 struct DrawIndirectCommand
 {

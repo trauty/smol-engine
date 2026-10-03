@@ -1,5 +1,5 @@
-module smol_imgui;
-import smol_globals;
+module tau_imgui;
+import tau_globals;
 
 [ShaderConfig("Custom", "TransparentAlpha", false, false, false)]
 struct ImGuiShader

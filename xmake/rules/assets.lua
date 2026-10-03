@@ -1,12 +1,12 @@
 local engine_dir = path.absolute(path.join(os.scriptdir(), "..", ".."))
 
-rule("smol.assets")
+rule("tau.assets")
 on_buildcmd(function(target, batchcmds, opt)
-    local cooker        = target:dep("smol-cooker"):targetfile()
+    local cooker        = target:dep("tau-cooker"):targetfile()
     local engine_assets = path.join(engine_dir, "assets")
-    -- shaders #include "smol/rendering/shader_shared.h" out of the engine header root
+    -- shaders #include "tau/rendering/shader_shared.h" out of the engine header root
     local engine_include = path.join(engine_dir, "src")
-    local engine_out    = path.join(target:dep("smol-cooker"):targetdir(), "assets", "engine")
+    local engine_out    = path.join(target:dep("tau-cooker"):targetdir(), "assets", "engine")
 
     batchcmds:show("cooking engine assets")
     batchcmds:vrunv(cooker, { "-i", engine_assets, "-I", engine_include, "-o", engine_out, "-n", "engine" })
@@ -17,6 +17,6 @@ on_buildcmd(function(target, batchcmds, opt)
 
     batchcmds:add_depfiles(depfiles)
     batchcmds:add_depvalues(table.concat(depfiles, ";"))
-    batchcmds:set_depcache(target:dependfile("smol-assets"))
+    batchcmds:set_depcache(target:dependfile("tau-assets"))
 end)
 rule_end()

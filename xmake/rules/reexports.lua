@@ -1,10 +1,10 @@
 -- windows only
 
 -- the engine tree this rule ships in; the consuming project's dir is somewhere else
--- entirely once a game includes xmake/smol.lua, so never use os.projectdir() here
-local SMOL_ENGINE = path.absolute(path.join(os.scriptdir(), "..", ".."))
+-- entirely once a game includes xmake/tau.lua, so never use os.projectdir() here
+local TAU_ENGINE = path.absolute(path.join(os.scriptdir(), "..", ".."))
 
-rule("smol.reexports")
+rule("tau.reexports")
 
 on_load(function(target)
     if not target:is_plat("windows") then
@@ -22,7 +22,7 @@ before_link(function(target)
 
     local nm = find_tool("llvm-nm")
     if not nm then
-        raise("smol.reexports needs llvm-nm to enumerate bundled entry points")
+        raise("tau.reexports needs llvm-nm to enumerate bundled entry points")
     end
 
     local function defined_symbols(files, keep)
@@ -44,7 +44,7 @@ before_link(function(target)
     local exports = {}
 
     table.join2(exports, defined_symbols(
-        { path.join(SMOL_ENGINE, "lib", "SDL3", "windows", "SDL3.lib") },
+        { path.join(TAU_ENGINE, "lib", "SDL3", "windows", "SDL3.lib") },
         function(name) return name:startswith("SDL_") and not name:endswith("_REAL") end))
 
     local fmt_objs = {}
@@ -58,7 +58,7 @@ before_link(function(target)
         function(name) return name:find("fmt@", 1, true) ~= nil end))
 
     if #exports == 0 then
-        raise("smol.reexports found nothing to export, check llvm-nm output format")
+        raise("tau.reexports found nothing to export, check llvm-nm output format")
     end
 
     table.sort(exports)
@@ -66,6 +66,6 @@ before_link(function(target)
     local deffile = path.join(target:autogendir(), "reexports.def")
     os.mkdir(path.directory(deffile))
     io.writefile(deffile, "EXPORTS\n" .. table.concat(exports, "\n") .. "\n")
-    print("smol.reexports: re-exporting %d symbols", #exports)
+    print("tau.reexports: re-exporting %d symbols", #exports)
 end)
 rule_end()

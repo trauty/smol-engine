@@ -1,0 +1,212 @@
+#include "mesh.h"
+
+#include "tau/asset_table.h"
+#include "tau/asset.h"
+#include "tau/assets/mesh_format.h"
+#include "tau/log.h"
+#include "tau/rendering/renderer.h"
+#include "tau/rendering/renderer_resources.h"
+#include "tau/rendering/renderer_types.h"
+#include "tau/rendering/vulkan.h"
+#include "tau/vfs.h"
+#include "vulkan/vulkan_core.h"
+
+#include <SDL3/SDL_iostream.h>
+#include <mutex>
+#include <optional>
+#include <tinygltf/tiny_gltf.h>
+#include <vector>
+
+namespace tau
+{
+    std::optional<mesh_t> asset_loader_t<mesh_t>::load(const std::string& path)
+    {
+        std::string cooked_path = tau::asset_table::cooked_path(tau::get_type_id<mesh_t>(), path);
+
+        SDL_IOStream* stream = tau::vfs::open_read(cooked_path);
+        if (!stream)
+        {
+            TAU_LOG_ERROR("MESH", "Mesh not found: {}", cooked_path);
+            return std::nullopt;
+        }
+
+        mesh_header_t header;
+        SDL_ReadIO(stream, &header, sizeof(mesh_header_t));
+
+        if (header.magic != TAU_MESH_MAGIC)
+        {
+            TAU_LOG_ERROR("MESH", "Invalid .taumesh file: {}", cooked_path);
+            SDL_CloseIO(stream);
+            return std::nullopt;
+        }
+
+        if (header.version != TAU_MESH_VERSION)
+        {
+            TAU_LOG_ERROR("MESH", "Unsupported .taumesh version {} (engine expects {}), recook: {}", header.version,
+                          TAU_MESH_VERSION, cooked_path);
+            SDL_CloseIO(stream);
+            return std::nullopt;
+        }
+
+        mesh_t asset = {
+            .vertex_count = header.vertex_count,
+            .index_count = header.index_count,
+            .local_center = header.local_center,
+            .local_radius = header.local_radius,
+        };
+
+        VkDeviceSize vertex_size = asset.vertex_count * sizeof(vertex_t);
+        VkDeviceSize index_size = asset.index_count * sizeof(u32);
+        VkDeviceSize total_staging_size = vertex_size + index_size;
+
+        VkBuffer staging_buf;
+        VmaAllocation staging_alloc;
+
+        VkBufferCreateInfo staging_info = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            .size = total_staging_size,
+            .usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT,
+        };
+        VmaAllocationCreateInfo alloc_info = {
+            .flags = VMA_ALLOCATION_CREATE_MAPPED_BIT | VMA_ALLOCATION_CREATE_HOST_ACCESS_SEQUENTIAL_WRITE_BIT,
+            .usage = VMA_MEMORY_USAGE_AUTO,
+        };
+        VmaAllocationInfo staging_alloc_info;
+
+        VK_CHECK(vmaCreateBuffer(renderer::ctx.allocator, &staging_info, &alloc_info, &staging_buf, &staging_alloc,
+                                 &staging_alloc_info));
+
+        SDL_ReadIO(stream, staging_alloc_info.pMappedData, vertex_size);
+        SDL_ReadIO(stream, (u8*)staging_alloc_info.pMappedData + vertex_size, index_size);
+
+        SDL_CloseIO(stream);
+
+        VkBufferCreateInfo mesh_info = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO,
+            .size = vertex_size,
+            .usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_VERTEX_BUFFER_BIT |
+                     VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT,
+        };
+        VmaAllocationCreateInfo mesh_alloc_info = {
+            .usage = VMA_MEMORY_USAGE_AUTO,
+        };
+
+        VK_CHECK(vmaCreateBuffer(renderer::ctx.allocator, &mesh_info, &mesh_alloc_info, &asset.vertex_buffer,
+                                 &asset.vertex_allocation, nullptr));
+
+        if (index_size > 0)
+        {
+            mesh_info.size = index_size;
+            mesh_info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT | VK_BUFFER_USAGE_INDEX_BUFFER_BIT |
+                              VK_BUFFER_USAGE_STORAGE_BUFFER_BIT | VK_BUFFER_USAGE_SHADER_DEVICE_ADDRESS_BIT;
+            VK_CHECK(vmaCreateBuffer(renderer::ctx.allocator, &mesh_info, &mesh_alloc_info, &asset.index_buffer,
+                                     &asset.index_allocation, nullptr));
+        }
+
+        VkCommandBuffer cmd_buf = renderer::begin_transfer_commands();
+
+        VkBufferCopy copy_region = {
+            .srcOffset = 0,
+            .dstOffset = 0,
+            .size = vertex_size,
+        };
+        vkCmdCopyBuffer(cmd_buf, staging_buf, asset.vertex_buffer, 1, &copy_region);
+
+        if (index_size > 0)
+        {
+            copy_region.srcOffset = vertex_size;
+            copy_region.size = index_size;
+            vkCmdCopyBuffer(cmd_buf, staging_buf, asset.index_buffer, 1, &copy_region);
+        }
+
+        bool is_same_queue_fam = renderer::ctx.queue_fam_indices.transfer_family.value() ==
+                                 renderer::ctx.queue_fam_indices.graphics_family.value();
+
+        std::vector<VkBufferMemoryBarrier> barriers;
+        VkBufferMemoryBarrier base_barrier = {
+            .sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER,
+            .srcAccessMask = VK_ACCESS_TRANSFER_WRITE_BIT,
+            .dstAccessMask = is_same_queue_fam
+                                 ? (VkAccessFlags)(VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT)
+                                 : (VkAccessFlags)0,
+            .srcQueueFamilyIndex = renderer::ctx.queue_fam_indices.transfer_family.value(),
+            .dstQueueFamilyIndex = renderer::ctx.queue_fam_indices.graphics_family.value(),
+        };
+
+        base_barrier.buffer = asset.vertex_buffer;
+        base_barrier.size = vertex_size;
+        barriers.push_back(base_barrier);
+
+        if (index_size > 0)
+        {
+            base_barrier.buffer = asset.index_buffer;
+            base_barrier.size = index_size;
+            barriers.push_back(base_barrier);
+        }
+
+        VkPipelineStageFlags dst_stage =
+            is_same_queue_fam ? (VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT)
+                              : VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT;
+
+        vkCmdPipelineBarrier(cmd_buf, VK_PIPELINE_STAGE_TRANSFER_BIT, dst_stage, 0, 0, nullptr,
+                             static_cast<u32_t>(barriers.size()), barriers.data(), 0, nullptr);
+
+        u64_t signal_value = renderer::submit_transfer_commands(cmd_buf);
+
+        if (!is_same_queue_fam)
+        {
+            std::scoped_lock lock(renderer::res_system.pending_mutex);
+            for (VkBufferMemoryBarrier& barrier : barriers)
+            {
+                barrier.srcAccessMask = 0;
+                barrier.dstAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_VERTEX_ATTRIBUTE_READ_BIT;
+
+                renderer::res_system.pending_acquires.push_back({
+                    .type = renderer::resource_type_e::BUFFER,
+                    .handle = {.buffer = barrier.buffer},
+                    .barrier = {.buffer_barrier = barrier},
+                });
+            }
+        }
+
+        asset.vertex_buffer_address = renderer::get_buffer_address(asset.vertex_buffer);
+
+        if (index_size > 0) { asset.index_buffer_address = renderer::get_buffer_address(asset.index_buffer); }
+
+        {
+            std::scoped_lock lock(renderer::res_system.deletion_mutex);
+            renderer::res_system.deletion_queue.push_back({
+                .type = renderer::resource_type_e::BUFFER,
+                .handle = {.buffer = {staging_buf, staging_alloc}},
+                .bindless_id = renderer::BINDLESS_NULL_HANDLE,
+                .gpu_timeline_value = signal_value,
+                .clock = renderer::deletion_clock_e::TRANSFER,
+            });
+        }
+
+        return asset;
+    }
+
+    void asset_loader_t<mesh_t>::unload(mesh_t& mesh)
+    {
+        std::scoped_lock lock(renderer::res_system.deletion_mutex);
+
+        if (mesh.vertex_buffer != VK_NULL_HANDLE)
+        {
+            renderer::res_system.deletion_queue.push_back({
+                .type = renderer::resource_type_e::BUFFER,
+                .handle = {.buffer = {mesh.vertex_buffer, mesh.vertex_allocation}},
+                .gpu_timeline_value = renderer::deletion_timeline_value(),
+            });
+        }
+
+        if (mesh.index_buffer != VK_NULL_HANDLE)
+        {
+            renderer::res_system.deletion_queue.push_back({
+                .type = renderer::resource_type_e::BUFFER,
+                .handle = {.buffer = {mesh.index_buffer, mesh.index_allocation}},
+                .gpu_timeline_value = renderer::deletion_timeline_value(),
+            });
+        }
+    }
+} // namespace tau

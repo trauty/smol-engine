@@ -1,4 +1,4 @@
-import smol_globals;
+import tau_globals;
 
 [ShaderConfig("PostProcess", "Opaque", false, false, false)]
 struct ChromaticAberrationShader

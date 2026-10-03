@@ -3,15 +3,15 @@ set_version("0.0.1")
 
 add_rules("plugin.compile_commands.autoupdate", {outputdir = "."})
 
-local function find_smol_engine()
-    local env = os.getenv("SMOL_ENGINE_DIR")
+local function find_tau_engine()
+    local env = os.getenv("TAU_ENGINE_DIR")
     if env and env ~= "" and os.isdir(env) then
         return env
     end
 
     for _, cand in ipairs({
-        path.join(os.scriptdir(), "smol-engine"),
-        path.join(os.scriptdir(), "..", "smol-engine"),
+        path.join(os.scriptdir(), "tau-engine"),
+        path.join(os.scriptdir(), "..", "tau-engine"),
     }) do
         if os.isdir(cand) then
             return path.absolute(cand)
@@ -20,7 +20,7 @@ local function find_smol_engine()
 
     local home = os.getenv("HOME") or os.getenv("USERPROFILE")
     if home then
-        local installed = os.dirs(path.join(home, ".smol", "engines", "*"))
+        local installed = os.dirs(path.join(home, ".tau", "engines", "*"))
         if #installed > 0 then
             table.sort(installed)
             return installed[#installed]
@@ -28,18 +28,18 @@ local function find_smol_engine()
     end
 
     print("")
-    print("  Could not find smol-engine")
+    print("  Could not find tau-engine")
     print("")
-    print("  Point at it with SMOL_ENGINE_DIR, vendor it at ./smol-engine, place it")
-    print("  beside this project as ../smol-engine, or install it under ~/.smol/engines/ on Linux")
+    print("  Point at it with TAU_ENGINE_DIR, vendor it at ./tau-engine, place it")
+    print("  beside this project as ../tau-engine, or install it under ~/.tau/engines/ on Linux")
     print("")
-    smol_engine_was_not_found()
+    tau_engine_was_not_found()
 end
 
-includes(path.join(find_smol_engine(), "xmake", "smol.lua"))
+includes(path.join(find_tau_engine(), "xmake", "tau.lua"))
 
 target("${NAME}")
-    add_rules("smol.game", "smol.hotreload")
+    add_rules("tau.game", "tau.hotreload")
 
     add_files("src/**.cpp")
     add_includedirs("src")

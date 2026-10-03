@@ -1,4 +1,4 @@
-import smol_surface;
+import tau_surface;
 
 [ShaderConfig("Surface", "Opaque", true, true, true)]
 struct FallbackShader

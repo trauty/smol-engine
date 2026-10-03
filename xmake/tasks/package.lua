@@ -1,9 +1,9 @@
-task("smol-package")
+task("tau-package")
 set_category("plugin")
 
 on_run(function()
     import("core.project.config")
-    import("smol_project")
+    import("tau_project")
 
     config.load()
 
@@ -12,12 +12,12 @@ on_run(function()
     local mode = config.get("mode") or "release"
 
     if not config.get("standalone") then
-        raise("smol-package needs a standalone build.\n" ..
+        raise("tau-package needs a standalone build.\n" ..
             "run:  xmake f --standalone=y -m " .. mode .. "   &&   xmake")
     end
 
-    local proj = smol_project.load(os.projectdir())
-    local name = (proj and proj.project_name) or "smol-game"
+    local proj = tau_project.load(os.projectdir())
+    local name = (proj and proj.project_name) or "tau-game"
     local game_name = config.get("game_name") or name
 
     local builddir = path.join(os.projectdir(), "build", plat, arch, mode)
@@ -45,7 +45,7 @@ on_run(function()
 end)
 
 set_menu {
-    usage       = "xmake smol-package",
+    usage       = "xmake tau-package",
     description = "Bundle the standalone game (binary + cooked assets) into dist/<project>/.",
     options     = {},
 }

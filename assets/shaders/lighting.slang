@@ -1,6 +1,6 @@
 module lighting;
 
-import smol_globals;
+import tau_globals;
 
 public struct Surface
 {

@@ -1,4 +1,4 @@
-import smol_surface;
+import tau_surface;
 
 [ShaderConfig("Surface", "Opaque", true, true, true)]
 struct PbrShader : ISurfaceMaterial
@@ -44,7 +44,7 @@ VertexOut vertexMain(uint vertex_id: SV_VertexID, uint instance_id: SV_InstanceI
 { return defaultVertexTransform(vertex_id, instance_id, base_instance); }
 
 [shader("fragment")]
-SurfaceOutput fragmentMain(VertexOut input) { return smolSurfaceFragment<PbrShader>(input); }
+SurfaceOutput fragmentMain(VertexOut input) { return tauSurfaceFragment<PbrShader>(input); }
 
 [shader("fragment")]
-GBufferOutput gbufferMain(VertexOut input) { return smolGBufferFragment<PbrShader>(input); }
+GBufferOutput gbufferMain(VertexOut input) { return tauGBufferFragment<PbrShader>(input); }

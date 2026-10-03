@@ -1,0 +1,16 @@
+{
+    "project_name": "sandbox",
+    "version": "0.0.1",
+    "tauproject_version": "1",
+    "engine": {
+        "version": "0.1.0",
+        "path": "../.."
+    },
+    "game_lib_name": "sandbox",
+    "startup_scene": "scenes/sandbox.scene",
+    "paths": {
+        "bin_dir": "bin",
+        "assets_dir": "assets",
+        "cooked_assets_dir": ".tau"
+    }
+}

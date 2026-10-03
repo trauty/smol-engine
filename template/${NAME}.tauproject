@@ -1,0 +1,15 @@
+{
+    "project_name": "${NAME}",
+    "version": "0.0.1",
+    "tauproject_version": "1",
+    "engine": {
+        "version": "0.1.0"
+    },
+    "game_lib_name": "${NAME}",
+    "startup_scene": "scenes/main.scene",
+    "paths": {
+        "bin_dir": "bin",
+        "assets_dir": "assets",
+        "cooked_assets_dir": ".tau"
+    }
+}

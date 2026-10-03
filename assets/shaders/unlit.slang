@@ -1,4 +1,4 @@
-import smol_surface;
+import tau_surface;
 
 // unlit, so doesnt need shading
 [ShaderConfig("Surface", "Opaque", true, true, true)]
