@@ -18,7 +18,7 @@ function load(projectdir)
         startup_scene       = data.startup_scene or "",
         engine_version      = engine.version or data.engine_version,
         engine_path         = engine.path,
-        tauproject_version = data.tauproject_version,
+        tauproject_version  = data.tauproject_version,
         bin_dir             = path.join(projectdir, paths.bin_dir or "bin"),
         assets_dir          = path.join(projectdir, paths.assets_dir or "assets"),
         cooked_assets_dir   = path.join(projectdir, paths.cooked_assets_dir or ".tau"),

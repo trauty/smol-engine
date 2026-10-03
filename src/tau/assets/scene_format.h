@@ -4,8 +4,8 @@
 
 namespace tau
 {
-    constexpr u32_t TAU_SCENE_MAGIC = 0x4e435353; // "SSCN"
-    constexpr u32_t TAU_SCENE_VERSION = 3;
+    constexpr u32_t TAU_SCENE_MAGIC = 0x4e435354; // "TSCN"
+    constexpr u32_t TAU_SCENE_VERSION = 1;
 
     enum class scene_value_type_e : u8_t
     {

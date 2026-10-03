@@ -3,9 +3,8 @@
 #include "tau/defines.h"
 namespace tau
 {
-    // SMSH
-    constexpr u32_t TAU_SHADER_MAGIC = 0x48534d53;
-    constexpr u32_t TAU_SHADER_VERSION = 5;
+    constexpr u32_t TAU_SHADER_MAGIC = 0x44485354; // "TSHD"
+    constexpr u32_t TAU_SHADER_VERSION = 1;
 
     enum class shader_domain_e : u32_t
     {

@@ -4,8 +4,8 @@
 
 namespace tau
 {
-    constexpr u32_t TAU_MATERIAL_MAGIC = 0x54414d53;
-    constexpr u32_t TAU_MATERIAL_VERSION = 2;
+    constexpr u32_t TAU_MATERIAL_MAGIC = 0x54414d54; // "TMAT"
+    constexpr u32_t TAU_MATERIAL_VERSION = 1;
 
     struct material_header_t
     {

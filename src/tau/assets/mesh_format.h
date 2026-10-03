@@ -5,7 +5,7 @@
 
 namespace tau
 {
-    constexpr u32_t TAU_MESH_MAGIC = 0x534d4d53;
+    constexpr u32_t TAU_MESH_MAGIC = 0x48534d54; // "TMSH"
     constexpr u32_t TAU_MESH_VERSION = 1;
 
     struct mesh_header_t
